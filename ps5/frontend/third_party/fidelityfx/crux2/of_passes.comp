@@ -1,0 +1,184 @@
+// Crux2 - the seven compute passes of AMD's FSR 3 optical flow, one entry point per pass.
+// SPDX-License-Identifier: GPL-3.0+
+//
+// ps5/tools/make-compute-fx.sh compiles this file once for each pass with OF_PASS set to its
+// number. The passes themselves are AMD's (FidelityFX SDK 2.3.0, MIT: ../gpu/opticalflow), their
+// entry points follow the SDK's GLSL ones (sdk/src/backends/vk/shaders/opticalflow in SDK 1.1.4),
+// and the resources they reach are Crux2's (ffx_opticalflow_callbacks_crux2.h). The binding
+// numbers are the ones ps5_compute_fx.cpp writes; workgroup sizes are the SDK's.
+//
+//   0 prepare luma       colour -> luma (level 0)                       16x16, 2x2 pixels a thread
+//   1 luma pyramid       luma levels 1..6 (AMD's single pass downsampler) 256
+//   2 SCD histogram      luma -> 3x3 histograms of 256 bins             32x8, 9 layers
+//   3 SCD divergence     histogram against the previous one -> cut?     256
+//   4 search             block matching at one pyramid level            64
+//   5 filter             3x3 vector median at that level                16x4
+//   6 scale              the level's vectors to the next finer level    4x4x4
+//   7 luma gain          (Crux2's) the two pictures' mean luma on a     256, one workgroup
+//                        coarse level: the gain each way that brings the second picture to the
+//                        first one's brightness for the search and scale passes
+
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_samplerless_texture_functions : require
+
+#define FFX_GPU 1
+#define FFX_GLSL 1
+#define FFX_HALF 0
+
+#if OF_PASS == 0
+	#define FFX_OPTICALFLOW_BIND_SRV_INPUT_COLOR 0
+	#define CRUX2_OPTICALFLOW_BIND_LINEAR_SAMPLER 1
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT 2
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#include "opticalflow/ffx_opticalflow_prepare_luma.h"
+	layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+	void main()
+	{
+		PrepareLuma(FfxInt32x2(gl_GlobalInvocationID.xy), FfxInt32(gl_LocalInvocationIndex));
+	}
+
+#elif OF_PASS == 1
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT 0
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_1 1
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_2 2
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_3 3
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_4 4
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_5 5
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_INPUT_LEVEL_6 6
+	// (Shared memory rather than quad operations: one path for every driver; this pass is small.)
+	#define FFX_SPD_NO_WAVE_OPERATIONS 1
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#include "opticalflow/ffx_opticalflow_compute_luminance_pyramid.h"
+	layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+	void main()
+	{
+		ComputeOpticalFlowInputPyramid(FfxInt32x2(gl_WorkGroupID.xy), FfxInt32(gl_LocalInvocationIndex));
+	}
+
+#elif OF_PASS == 2
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_INPUT 0
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_HISTOGRAM 1
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#include "opticalflow/ffx_opticalflow_generate_scd_histogram.h"
+	layout(local_size_x = 32, local_size_y = 8, local_size_z = 1) in;
+	void main()
+	{
+		GenerateSceneChangeDetectionHistogram(FfxInt32x3(gl_GlobalInvocationID.xyz), FfxInt32x2(gl_LocalInvocationID.xy),
+			FfxInt32(gl_LocalInvocationIndex), FfxInt32x2(gl_WorkGroupID.xy), FfxInt32x2(32, 8));
+	}
+
+#elif OF_PASS == 3
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_HISTOGRAM 0
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_PREVIOUS_HISTOGRAM 1
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_TEMP 2
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_OUTPUT 3
+	#define CRUX2_OPTICALFLOW_BIND_UAV_SCD_NEXT_HISTOGRAM 4
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#include "opticalflow/ffx_opticalflow_compute_scd_divergence.h"
+	layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+	void main()
+	{
+		ComputeSCDHistogramsDivergence(FfxInt32x3(gl_GlobalInvocationID.xyz), FfxInt32x2(gl_LocalInvocationID.xy),
+			FfxInt32(gl_LocalInvocationIndex), FfxInt32x2(gl_WorkGroupID.xy), FfxInt32x2(256, 1));
+	}
+
+#elif OF_PASS == 4
+	#extension GL_KHR_shader_subgroup_basic : require
+	#extension GL_KHR_shader_subgroup_arithmetic : require
+	#define FFX_WAVE 1
+	#define CRUX2_WORKGROUP_REDUCTIONS 1
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_INPUT 0
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_PREVIOUS_INPUT 1
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW 2
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_OUTPUT 3
+	#define CRUX2_OPTICALFLOW_BIND_SRV_LUMA_GAIN 4
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 64
+	#define FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT 1
+	#define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 1
+	#include "opticalflow/ffx_opticalflow_compute_optical_flow_v5.h"
+	layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+	void main()
+	{
+		ComputeOpticalFlowAdvanced(FfxInt32x2(gl_GlobalInvocationID.xy), FfxInt32x2(gl_LocalInvocationID.xy), FfxInt32x2(gl_WorkGroupID.xy),
+			FfxInt32(gl_LocalInvocationIndex));
+	}
+
+#elif OF_PASS == 5
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_PREVIOUS 0
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW 1
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 16
+	#define FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT 4
+	#define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 1
+	#include "opticalflow/ffx_opticalflow_filter_optical_flow_v5.h"
+	layout(local_size_x = 16, local_size_y = 4, local_size_z = 1) in;
+	void main()
+	{
+		FilterOpticalFlow(FfxInt32x2(gl_GlobalInvocationID.xy), FfxInt32x2(gl_LocalInvocationID.xy), FfxInt32x2(gl_WorkGroupID.xy),
+			FfxInt32(gl_LocalInvocationIndex));
+	}
+
+#elif OF_PASS == 6
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_INPUT 0
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_PREVIOUS_INPUT 1
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW 2
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_NEXT_LEVEL 3
+	#define FFX_OPTICALFLOW_BIND_UAV_OPTICAL_FLOW_SCD_OUTPUT 4
+	#define CRUX2_OPTICALFLOW_BIND_SRV_LUMA_GAIN 5
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	#define FFX_OPTICALFLOW_THREAD_GROUP_WIDTH 4
+	#define FFX_OPTICALFLOW_THREAD_GROUP_HEIGHT 4
+	#define FFX_OPTICALFLOW_THREAD_GROUP_DEPTH 4
+	#include "opticalflow/ffx_opticalflow_scale_optical_flow_advanced_v5.h"
+	layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+	void main()
+	{
+		ScaleOpticalFlowAdvanced(FfxInt32x3(gl_GlobalInvocationID.xyz), FfxInt32x3(gl_LocalInvocationID.xyz));
+	}
+
+#elif OF_PASS == 7
+	// Crux2's: the mean luma of both pictures at a pyramid level (the push constants' level), and
+	// from them the gain each way: x for direction 0 (the second picture is the older one), y for
+	// direction 1. Kept to 1/4..4, and 1 for a picture with next to no light in it.
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_INPUT 0
+	#define FFX_OPTICALFLOW_BIND_SRV_OPTICAL_FLOW_PREVIOUS_INPUT 1
+	#include "ffx_opticalflow_callbacks_crux2.h"
+	layout(set = 0, binding = 2, rgba32f) uniform writeonly image2D w_luma_gain;
+	shared FfxFloat32x2 s_sum[256];
+	layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+	void main()
+	{
+		// (Binding 0 is the older picture's luma, 1 the newer's.)
+		const FfxInt32x2 size = max(DisplaySize() >> FfxInt32(OpticalFlowPyramidLevel()), FfxInt32x2(1, 1));
+		const FfxInt32 count = size.x * size.y;
+		FfxFloat32x2 sum = FfxFloat32x2(0.0, 0.0);
+		for (FfxInt32 i = FfxInt32(gl_LocalInvocationIndex); i < count; i += 256)
+		{
+			const FfxInt32x2 pos = FfxInt32x2(i % size.x, i / size.x);
+			sum += FfxFloat32x2(LoadOpticalFlowInput(pos), LoadOpticalFlowPreviousInput(pos));
+		}
+		s_sum[gl_LocalInvocationIndex] = sum;
+		barrier();
+		for (FfxUInt32 stride = 128u; stride > 0u; stride >>= 1)
+		{
+			if (gl_LocalInvocationIndex < stride)
+				s_sum[gl_LocalInvocationIndex] += s_sum[gl_LocalInvocationIndex + stride];
+			barrier();
+		}
+		if (gl_LocalInvocationIndex == 0u)
+		{
+			const FfxFloat32x2 mean = s_sum[0] / FfxFloat32(count); // older, newer
+			FfxFloat32 gain = 1.0;
+			if (mean.x > 4.0 && mean.y > 4.0)
+				gain = clamp(mean.y / mean.x, 0.25, 4.0);
+			// Direction 0 compares the newer picture's blocks with the older picture: the older
+			// one is scaled by newer/older; direction 1 the other way.
+			imageStore(w_luma_gain, FfxInt32x2(0, 0), FfxFloat32x4(gain, 1.0 / gain, mean));
+		}
+	}
+
+#else
+	#error OF_PASS must be 0..7
+#endif

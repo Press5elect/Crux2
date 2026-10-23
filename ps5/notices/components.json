@@ -1,0 +1,1115 @@
+{
+	"components": [
+		{
+			"id": "pcsx2",
+			"name": "PCSX2",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "PCSX2 Dev Team and contributors",
+			"modifications": "the PS5 port, Copyright (C) 2026 Press5elect: ps5/patches/pcsx2/ps5.patch on the pinned revision, and the port layer in ps5/common and ps5/frontend",
+			"texts": {
+				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3",
+				"PCSX2-ThirdPartyLicenses.html": "vendor/pcsx2/bin/docs/ThirdPartyLicenses.html"
+			},
+			"artifacts": [
+				"eboot.bin",
+				"resources/"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "port",
+			"name": "Crux2 (named PSPCSX2 before v0.6.0): the port layer, host, tools and tests",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Press5elect (Crux2 by Press5elect; attribution required, GPL-3.0 section 7(b): NOTICE in the source); parts made from PS5 Vulkan Template (Mihawk, MIT) and PS5_RetroArch (Mihawk-99, GPL-3.0-or-later)",
+			"modifications": "-",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin",
+				"sce_sys/param.json",
+				"symbols.txt"
+			],
+			"source": {
+				"url": "the source archive that comes with this package",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "interface",
+			"name": "The interface's screens (ps5/frontend/bigpicture), from PSFlyCast's Big Picture front end",
+			"licence": "GPL-2.0-or-later, used here under GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Press5elect (PSFlyCast and Crux2), and the other authors of the code PSFlyCast's front end came from",
+			"modifications": "made over for PCSX2: the options, the saved states, the memory cards and the controllers' pages; the title's own mark and name (Crux2), drawn by the interface itself, and its start-up pictures; over a running game, the mark of a work in progress",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "the source archive that comes with this package (PSFlyCast: https://github.com/Press5elect/PSFlycast)",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "title-art",
+			"name": "The title's mark and name (Crux2) and its pictures in the console's menu: one broad bar crossing two thin ones, drawn by ps5/tools/make-title-art.py (and, on the screen, by ps5/frontend/bigpicture/bp_draw.cpp)",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "the authors of this port; the name's letters are Saira ExtraBold's (listed by itself), the line of text is set in Roboto",
+			"modifications": "-",
+			"texts": {},
+			"artifacts": [
+				"sce_sys/icon0.png",
+				"sce_sys/pic0.dds",
+				"sce_sys/pic1.dds"
+			],
+			"source": {
+				"url": "the source archive that comes with this package",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "card-formats",
+			"name": "How a PlayStation 2 memory card and the save files (.psu, .max, .cbs, .sps, .xps, .psv) are laid out, for the memory card manager (ps5/frontend/ps5_mc.h): written anew in C++ after the source of mymc+, which documents them, and with the unpacking of .max files after Haruhiko Okumura's LZARI. mymc+ itself is not in the package: the PC tests run it as a second opinion on every operation",
+			"licence": "GPL-3.0-or-later (mymc+, and this code). LZARI is Haruhiko Okumura's, 1989, published by him to be used freely",
+			"copyright": "Florian Märkl and the contributors of mymc+, which is based on mymc by Ross Ridge; Haruhiko Okumura (LZARI); the authors of this port",
+			"modifications": "a new implementation; no file of mymc+ is copied",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://git.sr.ht/~thestr4ng3r/mymcplus",
+				"revision": "3.0.5"
+			}
+		},
+		{
+			"id": "platform",
+			"name": "PS5 platform layer and payload SDK fork (libps5platform.a, CRT, libc and libc++ link stubs)",
+			"licence": "GPL-3.0-or-later (platform layer); as released upstream for the SDK",
+			"copyright": "Mihawk; John Tornblom and ps5-payload-dev",
+			"modifications": "none",
+			"texts": {
+				"PS5_PayloadSDK-LICENSE.txt": "../PS5_PayloadSDK/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/mihawk-99/PS5_PayloadSDK",
+				"revision": "@sdk"
+			}
+		},
+		{
+			"id": "ps5-vulkan",
+			"name": "PS5_Vulkan: link recipe, CRT, packaging tool, libc.prx",
+			"licence": "GPL-3.0",
+			"copyright": "Mihawk",
+			"modifications": "none",
+			"texts": {
+				"PS5_Vulkan-LICENSE.txt": "../PS5_Vulkan/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin",
+				"sce_module/libc.prx"
+			],
+			"source": {
+				"url": "https://github.com/mihawk-99/PS5_Vulkan",
+				"revision": "@vulkan"
+			}
+		},
+		{
+			"id": "radv",
+			"name": "RADV, ACO, NIR and Mesa's runtime, with the PS5 winsys and VideoOut WSI (PS5_Mesa)",
+			"licence": "MIT and other permissive licences (Mesa's notices)",
+			"copyright": "the Mesa authors; Mihawk for the PS5 parts",
+			"modifications": "ps5/patches/mesa/0001-diagnostic-breadcrumbs.patch: log lines at device start-up, into the title's boot log; 0002-threaded-recording-queues-push-descriptors.patch: threaded recording (off unless a test run asks for it) queues vkCmdPushDescriptorSet instead of waiting for its thread, and tells the title when that thread starts; 0003-videoout-120hz-settle.patch: a television switching to 119.88 Hz is measured again for up to 1.5 s, its shortest vblank interval taken, before 59.94 Hz is restored; 0004-ps5-timed-waits-on-the-condvar-clock.patch: the VideoOut WSI's and the PS5 winsys's timed waits are given deadlines on the clock their condition variable keeps (found once), where a monotonic deadline came back at once and the wait spun",
+			"texts": {
+				"Mesa-license.rst": "../PS5_Mesa/docs/license.rst"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/mihawk-99/PS5_Mesa",
+				"revision": "@mesa"
+			}
+		},
+		{
+			"id": "parallel-gs",
+			"name": "paraLLEl-GS: the PS2's GS on the graphics card in Vulkan compute (the second GS renderer)",
+			"licence": "LGPL-3.0-or-later",
+			"copyright": "Copyright (C) 2024 Arntzen Software AS (Hans-Kristian Arntzen, Runar Heyer)",
+			"modifications": "def-jam-vendetta-recomp's changes (jcsix694) and Crux2 Recomp's (Copyright (C) 2026 Press5elect): crux2recomp/ps5/patches/ in Crux2's source (from PS5_Crux2Recomp): parallel-gs/",
+			"texts": {
+				"parallel-gs-COPYING.LGPLv3": "../PS5_Crux2Recomp/vendor/parallel-gs/COPYING.LGPLv3"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/Arntzen-Software/parallel-gs",
+				"revision": "@pgs"
+			}
+		},
+		{
+			"id": "granite",
+			"name": "Granite: the Vulkan backend paraLLEl-GS is built on (its vulkan, util and math parts)",
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2017-2025 Hans-Kristian Arntzen",
+			"modifications": "Crux2 Recomp's (Copyright (C) 2026 Press5elect): crux2recomp/ps5/patches/ in Crux2's source (from PS5_Crux2Recomp): parallel-gs/ps5.patch",
+			"texts": {
+				"Granite-LICENSE": "../PS5_Crux2Recomp/vendor/parallel-gs/Granite/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/Themaister/Granite",
+				"revision": "@granite"
+			}
+		},
+		{
+			"id": "volk-pgs",
+			"name": "volk: the Vulkan loader of paraLLEl-GS's own (Granite's)",
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2018-2025 Arseny Kapoulkine",
+			"modifications": "-",
+			"texts": {
+				"volk-LICENSE.md": "../PS5_Crux2Recomp/vendor/parallel-gs/Granite/third_party/volk/LICENSE.md"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/zeux/volk",
+				"revision": "@volk"
+			}
+		},
+		{
+			"id": "def-jam-vendetta-recomp",
+			"name": "def-jam-vendetta-recomp's renderer for paraLLEl-GS (gs_gpu_parallel.cpp, runtime/gs/gs_gpu.h): its thread, its input ring and its pictures",
+			"licence": "GPL-3.0",
+			"copyright": "jcsix694 (def-jam-vendetta-recomp), on ran-j's PS2Recomp",
+			"modifications": "Crux2 Recomp's and Crux2's (Copyright (C) 2026 Press5elect): crux2recomp/ps5/patches/ in Crux2's source (from PS5_Crux2Recomp): ps2recomp/runner.patch (the PS5 build, save states, GIF path resets, pictures read back while the next frame is drawn)",
+			"texts": {
+				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/jcsix694/def-jam-vendetta-recomp (patches/ps2recomp-local.diff), on https://github.com/ran-j/PS2Recomp",
+				"revision": "@defjam"
+			}
+		},
+		{
+			"id": "template",
+			"name": "PS5 Vulkan Template: the PS5 layer (ps5/src) and the tools this build is made from",
+			"licence": "MIT",
+			"copyright": "Mihawk; Sascha Willems",
+			"modifications": "adapted to this title",
+			"texts": {
+				"PS5_VulkanTemplate-LICENSE.md": "../PS5_VulkanTemplate/LICENSE.md"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/mihawk-99/PS5_VulkanTemplate",
+				"revision": "@template"
+			}
+		},
+		{
+			"id": "elevator",
+			"name": "USB drive access: sandbox-elevator.elf and its client (ps5-native-app-boilerplate)",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "BlackBearReloaded",
+			"modifications": "this title's ID",
+			"texts": {
+				"ps5-native-app-boilerplate-LICENSE.txt": "../ps5-native-app-boilerplate/LICENSE",
+				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "../ps5-native-app-boilerplate/THIRD_PARTY_NOTICES.md"
+			},
+			"artifacts": [
+				"sandbox-elevator.elf",
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/BlackBearReloaded/ps5-native-app-boilerplate",
+				"revision": "@boilerplate"
+			}
+		},
+		{
+			"id": "imgui",
+			"name": "Dear ImGui",
+			"licence": "MIT",
+			"copyright": "Omar Cornut and contributors",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"imgui-LICENSE.txt": "vendor/pcsx2/3rdparty/imgui/LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "fmt",
+			"name": "{fmt}",
+			"licence": "MIT",
+			"copyright": "Victor Zverovich and contributors",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"fmt-LICENSE.txt": "vendor/pcsx2/3rdparty/fmt/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "libchdr",
+			"name": "libchdr",
+			"licence": "BSD-3-Clause",
+			"copyright": "Romain Tisserand and the MAME team",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"libchdr-LICENSE.txt": "vendor/pcsx2/3rdparty/libchdr/LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "lzma",
+			"name": "LZMA SDK",
+			"licence": "public domain",
+			"copyright": "Igor Pavlov",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"lzma-LICENSE.txt": "vendor/pcsx2/3rdparty/lzma/LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "libzip",
+			"name": "libzip",
+			"licence": "BSD-3-Clause",
+			"copyright": "Dieter Baron and Thomas Klausner",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"libzip-LICENSE.txt": "vendor/pcsx2/3rdparty/libzip/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "rcheevos",
+			"name": "rcheevos",
+			"licence": "MIT",
+			"copyright": "RetroAchievements",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"rcheevos-LICENSE.txt": "vendor/pcsx2/3rdparty/rcheevos/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "rapidjson",
+			"name": "RapidJSON",
+			"licence": "MIT",
+			"copyright": "THL A29 Limited, a Tencent company, and Milo Yip",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"rapidjson-license.txt": "vendor/pcsx2/3rdparty/rapidjson/license.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "simpleini",
+			"name": "SimpleIni",
+			"licence": "MIT",
+			"copyright": "Brodie Thiesfield",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"simpleini-LICENCE.txt": "vendor/pcsx2/3rdparty/simpleini/LICENCE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "soundtouch",
+			"name": "SoundTouch",
+			"licence": "LGPL-2.1",
+			"copyright": "Olli Parviainen",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"soundtouch-COPYING.txt": "vendor/pcsx2/3rdparty/soundtouch/COPYING.TXT"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "discord-rpc",
+			"name": "Discord RPC (compiled in, switched off)",
+			"licence": "MIT",
+			"copyright": "Discord, Inc.",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"discord-rpc-LICENSE.txt": "vendor/pcsx2/3rdparty/discord-rpc/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "freesurround",
+			"name": "FreeSurround",
+			"licence": "GPL-2.0-or-later",
+			"copyright": "Christian Kothe",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"freesurround-GPL.txt": "vendor/pcsx2/3rdparty/freesurround/GPL.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "demangler",
+			"name": "GNU demangler (libiberty)",
+			"licence": "LGPL-2.1-or-later / GPL-2.0-or-later",
+			"copyright": "Free Software Foundation",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"demangler-LGPL.txt": "vendor/pcsx2/3rdparty/demangler/DemanglerLicenseLGPL.txt",
+				"demangler-GPL.txt": "vendor/pcsx2/3rdparty/demangler/DemanglerLicenseGPL.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "ccc",
+			"name": "Chaos Compiler Collection (symbol tables)",
+			"licence": "MIT",
+			"copyright": "chaoticgd",
+			"modifications": "as bundled by PCSX2",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "zydis",
+			"name": "Zydis",
+			"licence": "MIT",
+			"copyright": "Florian Bernd, Joel Hoener",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"zydis-LICENSE.txt": "vendor/pcsx2/3rdparty/zydis/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "fast_float",
+			"name": "fast_float",
+			"licence": "Apache-2.0 / MIT / BSL-1.0",
+			"copyright": "The fast_float authors",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"fast_float-LICENSE-MIT.txt": "vendor/pcsx2/3rdparty/fast_float/LICENSE-MIT",
+				"fast_float-LICENSE-APACHE.txt": "vendor/pcsx2/3rdparty/fast_float/LICENSE-APACHE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "cpuinfo",
+			"name": "cpuinfo (its header; the console's processor is described by ps5/frontend/cpuinfo_ps5.c)",
+			"licence": "BSD-2-Clause",
+			"copyright": "Facebook, Inc., Marat Dukhan and contributors",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"cpuinfo-LICENSE.txt": "vendor/pcsx2/3rdparty/cpuinfo/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "vulkan-headers",
+			"name": "Vulkan headers and Vulkan Memory Allocator",
+			"licence": "Apache-2.0 / MIT",
+			"copyright": "The Khronos Group; Advanced Micro Devices",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"vulkan-LICENSE.md": "vendor/pcsx2/3rdparty/vulkan/LICENSE.md"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (3rdparty/)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "shaderc",
+			"name": "shaderc, glslang, SPIRV-Tools",
+			"licence": "Apache-2.0 / BSD-3-Clause / MIT",
+			"copyright": "Google, The Khronos Group, LunarG",
+			"modifications": "none",
+			"texts": {
+				"shaderc-LICENSE.txt": ".deps/src/shaderc/LICENSE",
+				"glslang-LICENSE.txt": ".deps/src/shaderc/third_party/glslang/LICENSE.txt",
+				"spirv-tools-LICENSE.txt": ".deps/src/shaderc/third_party/spirv-tools/LICENSE",
+				"spirv-headers-LICENSE.txt": ".deps/src/shaderc/third_party/spirv-headers/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/stenzek/shaderc",
+				"revision": "da25addad407d2ec377ab3c113d202f10adcf062"
+			}
+		},
+		{
+			"id": "libpng",
+			"name": "libpng (with the APNG patch, ps5/patches/deps)",
+			"licence": "PNG Reference Library License v2",
+			"copyright": "The PNG Reference Library Authors",
+			"modifications": "APNG support (ps5/patches/deps/libpng-1.6.56-apng.patch)",
+			"texts": {
+				"libpng-LICENSE.txt": ".deps/src/libpng/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/pnggroup/libpng",
+				"revision": "v1.6.58"
+			}
+		},
+		{
+			"id": "brotli",
+			"name": "Brotli",
+			"licence": "MIT",
+			"copyright": "The Brotli Authors",
+			"modifications": "none",
+			"texts": {
+				"brotli-LICENSE.txt": ".deps/src/brotli/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/google/brotli",
+				"revision": "v1.2.0"
+			}
+		},
+		{
+			"id": "freetype",
+			"name": "FreeType",
+			"licence": "FTL (the FreeType licence)",
+			"copyright": "David Turner, Robert Wilhelm, Werner Lemberg and contributors",
+			"modifications": "none",
+			"texts": {
+				"freetype-LICENSE.txt": ".deps/src/freetype/LICENSE.TXT",
+				"freetype-FTL.txt": ".deps/src/freetype/docs/FTL.TXT"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/freetype/freetype",
+				"revision": "VER-2-14-3"
+			}
+		},
+		{
+			"id": "lz4",
+			"name": "LZ4",
+			"licence": "BSD-2-Clause",
+			"copyright": "Yann Collet",
+			"modifications": "none",
+			"texts": {
+				"lz4-LICENSE.txt": ".deps/src/lz4/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/lz4/lz4",
+				"revision": "v1.10.0"
+			}
+		},
+		{
+			"id": "plutovg",
+			"name": "PlutoVG",
+			"licence": "MIT",
+			"copyright": "Samuel Ugochukwu",
+			"modifications": "none",
+			"texts": {
+				"plutovg-LICENSE.txt": ".deps/src/plutovg/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/sammycage/plutovg",
+				"revision": "v1.3.3"
+			}
+		},
+		{
+			"id": "plutosvg",
+			"name": "PlutoSVG",
+			"licence": "MIT",
+			"copyright": "Samuel Ugochukwu",
+			"modifications": "none",
+			"texts": {
+				"plutosvg-LICENSE.txt": ".deps/src/plutosvg/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/sammycage/plutosvg",
+				"revision": "v0.0.8"
+			}
+		},
+		{
+			"id": "rapidyaml",
+			"name": "rapidyaml",
+			"licence": "MIT",
+			"copyright": "Joao Paulo Magalhaes",
+			"modifications": "none",
+			"texts": {
+				"rapidyaml-LICENSE.txt": ".deps/src/rapidyaml/LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/biojppm/rapidyaml",
+				"revision": "v0.12.1"
+			}
+		},
+		{
+			"id": "curl",
+			"name": "curl",
+			"licence": "curl",
+			"copyright": "Daniel Stenberg and contributors",
+			"modifications": "none",
+			"texts": {
+				"curl-copyright.txt": "/usr/share/doc/libcurl4t64/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "openssl",
+			"name": "OpenSSL",
+			"licence": "Apache-2.0",
+			"copyright": "The OpenSSL Project Authors",
+			"modifications": "none",
+			"texts": {
+				"openssl-copyright.txt": "/usr/share/doc/libssl3t64/copyright",
+				"Apache-2.0.txt": "ps5/licenses/Apache-2.0.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "libpsl",
+			"name": "libpsl",
+			"licence": "MIT",
+			"copyright": "Tim Ruehsen and contributors",
+			"modifications": "none",
+			"texts": {
+				"libpsl-copyright.txt": "/usr/share/doc/libpsl5t64/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "libarchive",
+			"name": "libarchive (reading RAR, RAR5, ZIP and 7z: the HD texture packs, unpacked as they download)",
+			"licence": "BSD-2-Clause (and the other permissive licences its COPYING lists)",
+			"copyright": "Copyright (c) 2003-2018 Tim Kientzle and the libarchive authors",
+			"modifications": "none (built for reading only by ps5/tools/build-deps.sh)",
+			"texts": {
+				"libarchive-COPYING.txt": ".deps/src/libarchive/COPYING"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/libarchive/libarchive",
+				"revision": "v3.8.10"
+			}
+		},
+		{
+			"id": "libsmb2",
+			"name": "libsmb2",
+			"licence": "LGPL-2.1-or-later",
+			"copyright": "Ronnie Sahlberg",
+			"modifications": "none",
+			"texts": {
+				"LGPL-2.1.txt": "/usr/share/common-licenses/LGPL-2.1"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "libnfs",
+			"name": "libnfs",
+			"licence": "LGPL-2.1-or-later (the library); BSD-2-Clause (the protocol code generated from its .x files)",
+			"copyright": "Ronnie Sahlberg",
+			"modifications": "none to its source; built with getservbyport, getuid and getgid bound to the title's own (ps5/tools/build-deps.sh)",
+			"texts": {
+				"libnfs-COPYING.txt": ".deps/src/libnfs/COPYING",
+				"libnfs-LGPL-2.1.txt": ".deps/src/libnfs/LICENCE-LGPL-2.1.txt",
+				"libnfs-BSD.txt": ".deps/src/libnfs/LICENCE-BSD.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/sahlberg/libnfs",
+				"revision": "7613236464317bee2d9636f087f995148de4db27 (libnfs-8.0.0 and 4 commits after it)"
+			}
+		},
+		{
+			"id": "zstd",
+			"name": "Zstandard",
+			"licence": "BSD-3-Clause",
+			"copyright": "Meta Platforms, Inc.",
+			"modifications": "none",
+			"texts": {
+				"zstd-copyright.txt": "/usr/share/doc/libzstd1/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "libjpeg-turbo",
+			"name": "libjpeg-turbo",
+			"licence": "IJG / BSD-3-Clause / zlib",
+			"copyright": "The libjpeg-turbo Project, the Independent JPEG Group",
+			"modifications": "none",
+			"texts": {
+				"libjpeg-turbo-copyright.txt": "/usr/share/doc/libjpeg-turbo8/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "libwebp",
+			"name": "libwebp",
+			"licence": "BSD-3-Clause",
+			"copyright": "Google Inc.",
+			"modifications": "none",
+			"texts": {
+				"libwebp-copyright.txt": "/usr/share/doc/libwebp7/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "bzip2",
+			"name": "bzip2",
+			"licence": "bzip2 licence (BSD-style)",
+			"copyright": "Julian Seward",
+			"modifications": "none",
+			"texts": {
+				"bzip2-copyright.txt": "/usr/share/doc/bzip2/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
+			"id": "zlib",
+			"name": "zlib (inside the RADV archive)",
+			"licence": "zlib",
+			"copyright": "Jean-loup Gailly and Mark Adler",
+			"modifications": "none",
+			"texts": {
+				"zlib-copyright.txt": "/usr/share/doc/zlib1g/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/madler/zlib (1.3.1)",
+				"revision": "v1.3.1"
+			}
+		},
+		{
+			"id": "openps2bios",
+			"name": "OpenPS2BIOS 0.2: an open-source replacement PlayStation 2 BIOS made for emulators (resources/free-bios), used only when no BIOS of your own is found. It contains no Sony code",
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2026 Tamariba Devs",
+			"modifications": "none (the release's ROM image, as published)",
+			"texts": {
+				"OpenPS2BIOS-LICENSE.txt": "ps5/licenses/OpenPS2BIOS-LICENSE.txt"
+			},
+			"artifacts": [
+				"resources/free-bios/OpenPS2BIOS-0.2.bin"
+			],
+			"source": {
+				"url": "https://github.com/TamaribaEmu/OpenPS2BIOS (the file: its v0.2 release, OpenPS2BIOS-0.2.bin, sha256 1451bade21b8b162d1092faee567dc4620037cede367792c2e258ec43273c72a)",
+				"revision": "v0.2 (8bec360)"
+			}
+		},
+		{
+			"id": "fsr1",
+			"name": "AMD FidelityFX Super Resolution 1.0, the upscaling filter (resources/shaders/common/fsr1/ffx_a.h and ffx_fsr1.h; resources/shaders/vulkan/fsr1.glsl, which is this port's, gives them their inputs)",
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2021 Advanced Micro Devices, Inc.",
+			"modifications": "none (line endings only)",
+			"texts": {
+				"FidelityFX-FSR-license.txt": "ps5/licenses/FidelityFX-FSR-license.txt"
+			},
+			"artifacts": [
+				"resources/shaders/common/fsr1/ffx_a.h",
+				"resources/shaders/common/fsr1/ffx_fsr1.h"
+			],
+			"source": {
+				"url": "https://github.com/GPUOpen-Effects/FidelityFX-FSR",
+				"revision": "a21ffb8f6c13233ba336352bdff293894c706575"
+			}
+		},
+		{
+			"id": "fonts",
+			"name": "Fonts: Roboto, Roboto Mono, Twemoji (Mozilla), Font Awesome Free, PromptFont",
+			"licence": "Apache-2.0; Apache-2.0; CC-BY-4.0; SIL OFL 1.1; SIL OFL 1.1",
+			"copyright": "Google; Google; Twitter, Mozilla; Fonticons, Inc.; Yukari \"Shinmera\" Hafner",
+			"modifications": "as bundled by PCSX2",
+			"texts": {
+				"Roboto-Regular-copyright.txt": "vendor/pcsx2/bin/resources/fonts/Roboto-Regular-copyright",
+				"Twemoji.Mozilla-license.txt": "vendor/pcsx2/bin/resources/fonts/Twemoji.Mozilla-license",
+				"promptfont-license.txt": "vendor/pcsx2/bin/resources/fonts/promptfont-license"
+			},
+			"artifacts": [
+				"resources/fonts/"
+			],
+			"source": {
+				"url": "https://github.com/PCSX2/pcsx2 (bin/resources/fonts)",
+				"revision": "@pcsx2"
+			}
+		},
+		{
+			"id": "roboto-bold",
+			"name": "Roboto Bold (the interface's headings)",
+			"licence": "SIL OFL 1.1",
+			"copyright": "Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic)",
+			"modifications": "none",
+			"texts": {
+				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
+			},
+			"artifacts": [
+				"resources/fonts/Roboto-Bold.ttf"
+			],
+			"source": {
+				"url": "https://github.com/googlefonts/roboto-classic",
+				"revision": "Version 3.015"
+			}
+		},
+		{
+			"id": "saira-extrabold",
+			"name": "Saira ExtraBold (the letters of the title's name)",
+			"licence": "SIL OFL 1.1",
+			"copyright": "Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)",
+			"modifications": "the Latin part of the weight 800 as the Fontsource package carries it (@fontsource/saira), converted from WOFF2 to TrueType; no outline changed",
+			"texts": {
+				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
+			},
+			"artifacts": [
+				"resources/fonts/Saira-ExtraBold.ttf"
+			],
+			"source": {
+				"url": "https://github.com/Omnibus-Type/Saira (as packaged: https://www.npmjs.com/package/@fontsource/saira)",
+				"revision": "@fontsource/saira 5.3.0, font version 1.101"
+			}
+		},
+		{
+			"id": "startup-sound",
+			"name": "The start-up sound (the music under the start-up pictures)",
+			"licence": "the title's own: passed on with this title by its author",
+			"copyright": "the author of this port, who supplied the recording for this title and states that it is his to pass on",
+			"modifications": "none (played as it is, faded out after eight seconds)",
+			"texts": {},
+			"artifacts": [
+				"resources/sounds/silicon-boot.wav"
+			],
+			"source": {
+				"url": "the source archive that comes with this package (ps5/package/resources/sounds)",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "cacert",
+			"name": "Certificate bundle (resources/cacert.pem): Mozilla's list, as the certifi package carries it",
+			"licence": "MPL-2.0",
+			"copyright": "Mozilla Foundation",
+			"modifications": "none",
+			"texts": {
+				"MPL-2.0.txt": "/usr/share/common-licenses/MPL-2.0"
+			},
+			"artifacts": [
+				"resources/cacert.pem"
+			],
+			"source": {
+				"url": "https://github.com/certifi/python-certifi",
+				"revision": "@certifi"
+			}
+		},
+		{
+			"id": "dr-libs",
+			"name": "dr_mp3 and dr_flac (the interface's background sound: MP3 and FLAC files)",
+			"licence": "Unlicense or MIT-0",
+			"copyright": "David Reid",
+			"modifications": "none",
+			"texts": {
+				"dr_libs-LICENSE.txt": "ps5/licenses/dr_libs-LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/mackron/dr_libs",
+				"revision": "dfe8377631000664666519fdb83da193fd8037f4"
+			}
+		},
+		{
+			"id": "stb-vorbis",
+			"name": "stb_vorbis (the interface's background sound: Ogg Vorbis files)",
+			"licence": "MIT or public domain",
+			"copyright": "Copyright (c) 2017 Sean Barrett",
+			"modifications": "none",
+			"texts": {
+				"stb-LICENSE.txt": "ps5/licenses/stb-LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/nothings/stb",
+				"revision": "2c980bb59875b0d32144a71867fbdebb2f77cd20"
+			}
+		},
+		{
+			"id": "online-lists",
+			"name": "Lists of names the title looks a game up in before it asks GitHub for a file: libretro's PlayStation 2 box-art names and the paths of the .pnach files of four cheat and patch collections (made by ps5/tools/make-online-lists.sh). Names only: no picture and no cheat is in the package",
+			"licence": "GPL-3.0-or-later (the lists as made here; the names are those of the repositories' files)",
+			"copyright": "the authors of this port (the lists); the files they name belong to libretro-thumbnails/Sony_-_PlayStation_2, xs1l3n7x/pcsx2_cheats_collection, complicatiion/pcsx2_europe_cheats_collection, heavyjam-code/pcsx2-cheats-n-patches and TheAdmiester/PCSX2-Cheats and their contributors",
+			"modifications": "-",
+			"texts": {},
+			"artifacts": [
+				"resources/ps5/boxarts.txt",
+				"resources/ps5/cheat-index.txt"
+			],
+			"source": {
+				"url": "the source archive that comes with this package (ps5/tools/make-online-lists.sh)",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "fidelityfx-fsr3-optical-flow",
+			"name": "AMD FidelityFX SDK: FSR 3's optical flow (frame generation's second method), compiled into the title",
+			"licence": "MIT",
+			"copyright": "Copyright (c) Advanced Micro Devices, Inc.",
+			"modifications": "the GLSL callbacks are Crux2's own (ps5/frontend/third_party/fidelityfx/crux2); the algorithm headers unchanged; see its README",
+			"texts": {
+				"FidelityFX-SDK-LICENSE.txt": "ps5/frontend/third_party/fidelityfx/LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK",
+				"revision": "60f4ea81909200d8542eca14dccb2628b763a9a3 (v2.3.0), and c6efa6b (v1.1.4) for the GLSL core header"
+			}
+		},
+		{
+			"id": "nis",
+			"name": "NVIDIA Image Scaling (NIS) v1.0.3, compiled into the title",
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2022 NVIDIA CORPORATION",
+			"modifications": "an overridable store macro in NIS_Scaler.h, so that nothing is written outside the picture (see its README)",
+			"texts": {
+				"NIS-licence.txt": "ps5/frontend/third_party/nis/licence.txt"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/NVIDIAGameWorks/NVIDIAImageScaling",
+				"revision": "35e13ba (v1.0.3)"
+			}
+		},
+		{
+			"id": "qrcodegen",
+			"name": "QR Code generator library (C), for the phone's address",
+			"licence": "MIT",
+			"copyright": "Copyright (c) Project Nayuki",
+			"modifications": "none",
+			"texts": {
+				"qrcodegen-LICENSE.txt": "ps5/frontend/third_party/qrcodegen/LICENSE"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/nayuki/QR-Code-generator",
+				"revision": "3c6d0b3cefb4e049dc337e82237c9644399716a8"
+			}
+		},
+		{
+			"id": "guest-crt-shaders",
+			"name": "crt-guest-advanced, guest(r)'s CRT shaders from libretro's slang-shaders (resources/shaders/slang/crt/shaders/guest/)",
+			"licence": "GPL-2.0-or-later, used here under GPL-3.0-or-later",
+			"copyright": "guest(r), and Dr. Venom (pre-shaders)",
+			"modifications": "none: copied unchanged; the presets that run them, the pass-through stock.slang and the colour lookup pictures are Crux2's own (resources/shaders/slang/README.md)",
+			"texts": {},
+			"artifacts": [
+				"resources/shaders/slang/crt/shaders/guest/"
+			],
+			"source": {
+				"url": "https://github.com/libretro/slang-shaders",
+				"revision": "e1d75632a205c70f14a4cc947c46d5abb7b3f7f1"
+			}
+		},
+		{
+			"id": "ps5-homebrew-ui",
+			"name": "ps5-homebrew-ui (the PS5 homebrew UI kit): its thirty themes' colours as skins, its interface sounds (Glass, Paper) and its three music tracks",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 BlackBearReloaded",
+			"modifications": "the themes mapped onto Crux2's skins by ps5/tools/make-kit-skins.py (some colours moved for contrast, as each skin's comment says); the sounds and music copied unchanged",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin",
+				"resources/sounds/",
+				"resources/music/"
+			],
+			"source": {
+				"url": "https://github.com/BlackBearReloaded/ps5-homebrew-ui",
+				"revision": "aed286b81cdf"
+			}
+		}
+	]
+}

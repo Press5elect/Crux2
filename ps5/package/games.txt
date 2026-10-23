@@ -1,0 +1,7 @@
+Put your PlayStation 2 games in this folder (subfolders are fine).
+
+Disc images: .iso, .chd, .cso, .zso, .gz, .bin (with or without a .cue), .mdf, .nrg, .img. Crux2
+scans the folder when it starts; "Scan For New Games" in Settings > Game List scans again.
+
+Games can also be on a USB drive (in a folder named Crux2 or PS2 at the top of the drive) or
+on a network share (network.cfg, one folder up, written on the first start).

@@ -1,0 +1,5 @@
+Put a PlayStation 2 BIOS image in this folder (for example SCPH-70012.bin, or the files a BIOS
+dump of your console is made of). Crux2 cannot start a game without one, and none can be
+included: it has to be dumped from your own console.
+
+Crux2 uses the first valid image it finds here; Settings > BIOS chooses among several.

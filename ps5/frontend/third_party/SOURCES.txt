@@ -1,0 +1,8 @@
+Third-party code compiled into the title by ps5_ui_audio_decoders.cpp (and nowhere else):
+
+dr_mp3.h, dr_flac.h   https://github.com/mackron/dr_libs at dfe8377631000664666519fdb83da193fd8037f4
+                      (2026-09-01; dr_mp3 0.7.4, dr_flac 0.13.4). Public domain (Unlicense) or
+                      MIT No Attribution, at the user's choice: LICENSE.dr_libs. Unchanged.
+stb_vorbis.c          https://github.com/nothings/stb at 2c980bb59875b0d32144a71867fbdebb2f77cd20
+                      (stb_vorbis 1.22). MIT or public domain, at the user's choice: LICENSE.stb.
+                      Unchanged.

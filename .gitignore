@@ -1,0 +1,14 @@
+build/
+dist/
+klog/
+.deps/
+imgui.ini
+vendor/
+ps5/pgo/runs/
+ps5/pgo/cs-runs/
+ps5/pgo/menu-only/
+zip_err_str.c
+ps5/pgo/runs-*/
+ps5/pgo/crux2-*.profdata
+ps5/pgo/crux2-round*.profdata
+__pycache__/

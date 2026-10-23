@@ -1,0 +1,303 @@
+Crux2 mode for PS2Recomp (ran-j/PS2Recomp eb8688b2fd191129f103a39543002c005b33409c). Copyright (C) 2026 Press5elect.
+GPL-3.0-or-later, with the attribution term of Crux2's NOTICE: keep "Crux2 by Press5elect".
+Also, in both modes: MOVZ and MOVN move the low 64 bits only, as the R5900 does (PS2Recomp moved all
+128, so the upper half of the destination took the source's; found by Crux2's interpreter check).
+In Crux2 mode (kit v1.3.3): every MMI instruction, the FPU's arithmetic and the SA instructions are
+emitted as CRUX2_EE(<instruction word>), which Crux2's runtime runs with PCSX2's own interpreter code
+(crux2_ee_interp.h): Crux2's instruction-by-instruction comparison found about 60 of PS2Recomp's
+MMI and FPU translations giving other results than the processor (word orders, HI/LO, saturation,
+multiply-add, SQRT.S's operand, the FPU's clamping), and PDIVBW dividing INT_MIN by -1 on the host.
+
+diff --git a/ps2xRecomp/include/ps2recomp/code_generator.h b/ps2xRecomp/include/ps2recomp/code_generator.h
+index 1bdf0f6..c686893 100644
+--- a/ps2xRecomp/include/ps2recomp/code_generator.h
++++ b/ps2xRecomp/include/ps2recomp/code_generator.h
+@@ -69,6 +69,14 @@ namespace ps2recomp
+         const std::vector<Section>& m_sections;
+         BootstrapInfo m_bootstrapInfo;
+         bool m_emitInstructionComments = true;
++        // Crux2 mode (PS2RECOMP_CRUX2=1): code that runs inside the Crux2 PS5 emulator, on the
++        // emulator's own state. It counts the instructions it runs, gives control back to the
++        // emulator before every instruction the emulator must run itself (system calls, COP0,
++        // COP2/VU0, CACHE, anything not translated), binds no library calls to host handlers and
++        // keeps no per-instruction program counter. Copyright (C) 2026 Press5elect.
++        bool m_crux2Mode = false;
++        bool isCrux2HostOnly(const Instruction &inst) const;
++        bool isCrux2Interpreted(const Instruction &inst) const;
+         RecompilerReporter *m_reporter = nullptr;
+         std::string m_currentFunctionName;
+ 
+diff --git a/ps2xRecomp/src/lib/code_generator.cpp b/ps2xRecomp/src/lib/code_generator.cpp
+index 68b0984..e3e5273 100644
+--- a/ps2xRecomp/src/lib/code_generator.cpp
++++ b/ps2xRecomp/src/lib/code_generator.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "ps2recomp/code_generator.h"
+ #include "ps2recomp/control_flow_analyzer.h"
+ #include "ps2recomp/Emitters/function_emitter.h"
+@@ -103,6 +104,29 @@ namespace ps2recomp
+         {
+             m_symbols.emplace(symbol.address, symbol);
+         }
++        if (const char *mode = std::getenv("PS2RECOMP_CRUX2"); mode && mode[0] == '1')
++        {
++            m_crux2Mode = true;
++        }
++    }
++
++    bool CodeGenerator::isCrux2HostOnly(const Instruction &inst) const
++    {
++        switch (inst.opcode)
++        {
++        case OPCODE_COP0:
++        case OPCODE_COP2:
++        case OPCODE_CACHE:
++        case OPCODE_LWC2:
++        case OPCODE_SWC2:
++        case OPCODE_LQC2:
++        case OPCODE_SQC2:
++            return true;
++        case OPCODE_SPECIAL:
++            return inst.function == SPECIAL_SYSCALL || inst.function == SPECIAL_BREAK;
++        default:
++            return false;
++        }
+     }
+ 
+     void CodeGenerator::setRenamedFunctions(const std::unordered_map<uint32_t, std::string> &renames)
+@@ -225,11 +249,31 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translateInstruction(const Instruction &inst)
+     {
+-        return InstructionTranslator(*this).translate(inst, {});
++        return translateInstruction(inst, MemoryAccessHint{});
++    }
++
++    bool CodeGenerator::isCrux2Interpreted(const Instruction &inst) const
++    {
++        const uint32_t op = inst.raw >> 26, fmt = (inst.raw >> 21) & 0x1F, fn = inst.raw & 0x3F;
++        if (op == OPCODE_MMI)
++            return true;
++        // the SA register (MFSA, MTSA, MTSAB, MTSAH): PCSX2 keeps it as a byte count, and the
++        // native code works on PCSX2's own register
++        if (op == OPCODE_SPECIAL && (fn == 0x28 || fn == 0x29))
++            return true;
++        if (op == OPCODE_REGIMM && (((inst.raw >> 16) & 0x1F) == 0x18 || ((inst.raw >> 16) & 0x1F) == 0x19))
++            return true;
++        // COP1's arithmetic (S format) and CVT.S (W format); moves, branches and loads stay translated
++        return op == OPCODE_COP1 && (fmt == 0x10 || (fmt == 0x14 && fn == 0x20));
+     }
+ 
+     std::string CodeGenerator::translateInstruction(const Instruction &inst, const MemoryAccessHint &memoryHint)
+     {
++        // Crux2 mode: the MMI and FPU instructions run PCSX2's own interpreter code (Crux2's
++        // crux2_ee_interp.h), which is what Crux2's check mode compares against; the translations
++        // here differ from the processor in many of them (word orders, HI/LO, saturation, FPU clamping).
++        if (m_crux2Mode && isCrux2Interpreted(inst))
++            return fmt::format("CRUX2_EE(0x{:08X}u);", inst.raw);
+         return InstructionTranslator(*this).translate(inst, memoryHint);
+     }
+ 
+diff --git a/ps2xRecomp/src/lib/control_flow_emitter.cpp b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+index 4bf8dc5..fd7600d 100644
+--- a/ps2xRecomp/src/lib/control_flow_emitter.cpp
++++ b/ps2xRecomp/src/lib/control_flow_emitter.cpp
+@@ -131,9 +131,12 @@ namespace ps2recomp
+             return;
+         }
+ 
+-        m_ss << fmt::format("{}ctx->pc = 0x{:X}u;\n", indent, delayPc());
+-        m_ss << fmt::format("{}ctx->in_delay_slot = true;\n", indent);
+-        m_ss << fmt::format("{}ctx->branch_pc = 0x{:X}u;\n", indent, branchPc());
++        if (!m_gen.m_crux2Mode)
++        {
++            m_ss << fmt::format("{}ctx->pc = 0x{:X}u;\n", indent, delayPc());
++            m_ss << fmt::format("{}ctx->in_delay_slot = true;\n", indent);
++            m_ss << fmt::format("{}ctx->branch_pc = 0x{:X}u;\n", indent, branchPc());
++        }
+ 
+         const std::string code = delaySlotCode();
+         std::istringstream lines(code);
+@@ -146,7 +149,10 @@ namespace ps2recomp
+             }
+         }
+ 
+-        m_ss << fmt::format("{}ctx->in_delay_slot = false;\n", indent);
++        if (!m_gen.m_crux2Mode)
++        {
++            m_ss << fmt::format("{}ctx->in_delay_slot = false;\n", indent);
++        }
+     }
+ 
+     void ControlFlowEmitter::emitResumeFromDelaySlotEntry()
+@@ -279,6 +285,10 @@ namespace ps2recomp
+ 
+     bool ControlFlowEmitter::emitRelocationCallIfAvailable(StaticBranchKind kind, std::string_view indent)
+     {
++        if (m_gen.m_crux2Mode)
++        {
++            return false; // the library's own code runs, on the emulator
++        }
+         const auto relocIt = m_gen.m_relocationCallNames.find(m_branchInst.address);
+         if (relocIt == m_gen.m_relocationCallNames.end() || relocIt->second.empty())
+         {
+@@ -554,7 +564,10 @@ namespace ps2recomp
+     {
+         (void)m_function;
+         emitResumeFromDelaySlotEntry();
+-        m_ss << fmt::format("    ctx->pc = 0x{:X}u;\n", branchPc());
++        if (!m_gen.m_crux2Mode)
++        {
++            m_ss << fmt::format("    ctx->pc = 0x{:X}u;\n", branchPc());
++        }
+ 
+         if (m_branchInst.opcode == OPCODE_J || m_branchInst.opcode == OPCODE_JAL)
+         {
+diff --git a/ps2xRecomp/src/lib/function_emitter.cpp b/ps2xRecomp/src/lib/function_emitter.cpp
+index 3192e90..edd6891 100644
+--- a/ps2xRecomp/src/lib/function_emitter.cpp
++++ b/ps2xRecomp/src/lib/function_emitter.cpp
+@@ -104,6 +104,19 @@ namespace ps2recomp
+         ss << "\n";
+ 
+         bool lastInstructionWasControlFlow = false;
++        // Crux2 mode: instructions run since the last count, counted before every way out of a
++        // stretch of code (a label, a branch, an exit, the end).
++        uint32_t crux2Pending = 0;
++        const auto crux2Flush = [&](uint32_t extra) {
++            if (cg.m_crux2Mode && crux2Pending + extra != 0)
++            {
++                ss << "    CRUX2_COUNT(" << (crux2Pending + extra) << ");\n";
++            }
++            crux2Pending = 0;
++        };
++        const auto crux2Exit = [&](uint32_t address) {
++            ss << "    ctx->pc = 0x" << std::hex << address << std::dec << "u; CRUX2_EXIT(); return;\n";
++        };
+ 
+         for (size_t i = 0; i < instructions.size(); ++i)
+         {
+@@ -112,10 +125,40 @@ namespace ps2recomp
+ 
+             if (internalTargets.contains(inst.address))
+             {
++                crux2Flush(0);
+                 constantRegisters.clear();
+                 ss << "label_" << std::hex << inst.address << std::dec << ":\n";
+             }
+ 
++            if (cg.m_crux2Mode)
++            {
++                // An instruction the emulator runs itself: hand it back, before it.
++                const bool delaySlotHostOnly = inst.hasDelaySlot && i + 1 < instructions.size() &&
++                                               instructions[i + 1].address == inst.address + 4u &&
++                                               cg.isCrux2HostOnly(instructions[i + 1]);
++                if (cg.isCrux2HostOnly(inst) || delaySlotHostOnly)
++                {
++                    crux2Flush(0);
++                    crux2Exit(inst.address);
++                    if (inst.hasDelaySlot && i + 1 < instructions.size() && instructions[i + 1].address == inst.address + 4u)
++                    {
++                        if (internalTargets.contains(instructions[i + 1].address))
++                        {
++                            ss << "label_" << std::hex << instructions[i + 1].address << std::dec << ":\n";
++                            crux2Exit(instructions[i + 1].address);
++                        }
++                        ++i;
++                    }
++                    constantRegisters.clear();
++                    continue;
++                }
++                crux2Pending += inst.hasDelaySlot ? 2 : 1;
++                if (inst.hasDelaySlot)
++                {
++                    crux2Flush(0);
++                }
++            }
++
+             if (cg.m_emitInstructionComments)
+             {
+                 ss << "    // 0x" << std::hex << inst.address << ": 0x" << inst.raw << std::dec;
+@@ -178,7 +221,7 @@ namespace ps2recomp
+                 }
+                 else
+                 {
+-                    if (!gifDmaKickPlan.valid)
++                    if (!gifDmaKickPlan.valid && !cg.m_crux2Mode)
+                     {
+                         gifDmaKickPlan = tryBuildGifDmaKickPlan(instructions, i, constantRegisters, internalTargets);
+                     }
+@@ -200,10 +243,23 @@ namespace ps2recomp
+                         continue;
+                     }
+ 
+-                    ss << "    ctx->pc = 0x" << std::hex << inst.address << "u;\n"
+-                       << std::dec;
++                    if (!cg.m_crux2Mode)
++                    {
++                        ss << "    ctx->pc = 0x" << std::hex << inst.address << "u;\n"
++                           << std::dec;
++                    }
+                     const MemoryAccessHint memoryHint = resolveMemoryAccessHint(inst, constantRegisters);
+-                    ss << "    " << cg.translateInstruction(inst, memoryHint);
++                    std::string translated = cg.translateInstruction(inst, memoryHint);
++                    if (cg.m_crux2Mode && translated.rfind("throw ", 0) == 0)
++                    {
++                        // Not translated: the emulator runs it (what came before is counted).
++                        crux2Pending -= 1;
++                        crux2Flush(0);
++                        crux2Exit(inst.address);
++                        constantRegisters.clear();
++                        continue;
++                    }
++                    ss << "    " << translated;
+                     if (inst.isMmio)
+                     {
+                         ss << " // MMIO: 0x" << std::hex << inst.mmioAddress << std::dec;
+@@ -226,6 +282,7 @@ namespace ps2recomp
+             }
+         }
+ 
++        crux2Flush(0);
+         // Fallthrough with no terminating branch: publish the next PC so the EE dispatcher does not re-enter this function.
+         if (!instructions.empty() && !lastInstructionWasControlFlow)
+         {
+diff --git a/ps2xRecomp/src/lib/ps2_recompiler.cpp b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+index 8c1c7c5..0812727 100644
+--- a/ps2xRecomp/src/lib/ps2_recompiler.cpp
++++ b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "ps2recomp/ps2_recompiler.h"
+ #include "ps2recomp/instructions.h"
+ #include "ps2recomp/types.h"
+@@ -2221,6 +2222,11 @@ namespace ps2recomp
+ 
+     bool PS2Recompiler::isStubFunction(const Function &function) const
+     {
++        // Crux2 mode: no function is replaced by a host handler; the game's own code runs.
++        if (const char *mode = std::getenv("PS2RECOMP_CRUX2"); mode && mode[0] == '1')
++        {
++            return false;
++        }
+         if (m_stubFunctionStarts.contains(function.start))
+         {
+             return true;
+diff --git a/ps2xRecomp/src/lib/special_translator.cpp b/ps2xRecomp/src/lib/special_translator.cpp
+index b01a937..3e9d62b 100644
+--- a/ps2xRecomp/src/lib/special_translator.cpp
++++ b/ps2xRecomp/src/lib/special_translator.cpp
+@@ -121,9 +121,10 @@ namespace ps2recomp
+         case SPECIAL_SLTU:
+             return fmt::format("SET_GPR_U64(ctx, {}, ((uint64_t)GPR_U64(ctx, {}) < (uint64_t)GPR_U64(ctx, {})) ? 1 : 0);", inst.rd, inst.rs, inst.rt);
+         case SPECIAL_MOVZ:
+-            return fmt::format("if (GPR_U64(ctx, {}) == 0) SET_GPR_VEC(ctx, {}, GPR_VEC(ctx, {}));", inst.rt, inst.rd, inst.rs);
++            // (The R5900's MOVZ and MOVN move the low 64 bits; the upper half of rd stays.)
++            return fmt::format("if (GPR_U64(ctx, {}) == 0) SET_GPR_U64(ctx, {}, GPR_U64(ctx, {}));", inst.rt, inst.rd, inst.rs);
+         case SPECIAL_MOVN:
+-            return fmt::format("if (GPR_U64(ctx, {}) != 0) SET_GPR_VEC(ctx, {}, GPR_VEC(ctx, {}));", inst.rt, inst.rd, inst.rs);
++            return fmt::format("if (GPR_U64(ctx, {}) != 0) SET_GPR_U64(ctx, {}, GPR_U64(ctx, {}));", inst.rt, inst.rd, inst.rs);
+         case SPECIAL_MFSA:
+             return fmt::format("SET_GPR_U32(ctx, {}, ctx->sa);", inst.rd);
+         case SPECIAL_MTSA:

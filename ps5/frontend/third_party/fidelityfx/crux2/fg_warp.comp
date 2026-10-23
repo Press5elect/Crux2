@@ -1,0 +1,720 @@
+// Crux2 - the picture between two pictures, from the motion AMD's FSR 3 optical flow finds.
+// SPDX-License-Identifier: GPL-3.0+
+//
+// The flow (of_passes.comp) gives one whole-pixel vector for each 8x8 block of its luma picture,
+// twice: for the newer picture's blocks, where they were in the older picture, and for the older
+// picture's blocks, where they went in the newer. These four passes are Crux2's own, run in this
+// order after the flow:
+//
+//   FG_PASS 2 camera     the camera's move, each way: a model most of the picture agrees with (to
+//                        a pixel), out of a guess from each of 16x16 blocks spread over it: the
+//                        block's vector as a move of the whole picture, or (from it and a block
+//                        far away) a move with a zoom and a turn about the middle. One workgroup a
+//                        direction. Out: two texels a direction (the move t, zoom s and turn r in
+//                        luma pixels, the share agreeing, the middle). A block matcher can lock
+//                        onto the wrong repeat of a repeating pattern (tiles, a fence) once its
+//                        coarse levels have blurred it; where the camera's move fits as well, it is
+//                        the better answer.
+//
+//   FG_PASS 0 refine     each block's vector, made sure of and refined to a fraction of an output
+//                        pixel. The block (8x8 points) is compared with the other picture by the
+//                        squared difference with its mean taken out (a fade or a flash changes the
+//                        mean, not the pattern) and a little of the mean, at its own vector, at
+//                        the camera's move there (taken when it fits nearly as well), at the
+//                        vectors of blocks 1, 2, 4 and 8 blocks away each way (taken when they fit
+//                        clearly better: a block the coarse levels gave the background's motion
+//                        gets its object's), at the whole output pixels around the best of those,
+//                        and a parabola goes through the least of them and its neighbours. A
+//                        workgroup of 8x8 a block, a point a thread. Out: RGBA16F, xy the vector
+//                        in output pixels (anchor(p) ~ other(p + xy)), z what is left of the
+//                        block after the match, w the block's own variance.
+//
+//   FG_PASS 3 verdict    a cut or not. FSR 3's scene change detection compares the two pictures'
+//                        histograms, so it also fires when a picture fades or flashes; it is a
+//                        cut here when the detector says so and fewer than half of the blocks
+//                        that have anything in them found their match. One workgroup.
+//
+//   FG_PASS 1 composite  every output pixel at time t. A few motions are tried: the two fields
+//                        read smoothly at the pixel and followed to where its content was and will
+//                        be, the camera's move, the blocks' own vectors there and around, no
+//                        motion. Each is asked: is the older picture's content there moving this
+//                        way (the older picture's block there says so), is the newer picture's,
+//                        and how alike are the two (5 points, RGB, the mean difference mostly
+//                        taken out). Seen in both: the two mixed by t, at the cost of their
+//                        difference. Seen in one only: that one alone, at a fixed cost, if the
+//                        other has something in front of it (what is there moves of its own, the
+//                        same way in both fields) or is outside the picture, or the seen block
+//                        found its match. The cheapest is used; if nothing fits, the two pictures
+//                        are mixed where the pixel is. After a cut the newer picture, or the
+//                        older, is shown as it is. 8x8 threads, a pixel a thread. OUT_FORMAT:
+//                        0 rgba8, 1 rgba16f, 2 none (shaderStorageImageWriteWithoutFormat).
+
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+
+const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+
+#if FG_PASS == 0
+
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+// A workgroup a block, a point of the block a thread: every candidate's fit is a sum over the
+// workgroup (one subgroup sum on RADV, whose compute waves are 64 wide).
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform itexture2D r_flow;
+layout(set = 0, binding = 1) uniform texture2D r_anchor;
+layout(set = 0, binding = 2) uniform texture2D r_other;
+layout(set = 0, binding = 3) uniform sampler s_linear;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D w_field;
+layout(set = 0, binding = 5) uniform texture2D r_camera;
+
+layout(push_constant, std430) uniform Constants
+{
+	vec2 pictureSize; // output pixels
+	vec2 lumaScale;   // output pixels per luma pixel
+	vec2 blockPx;     // output pixels per block (8 luma pixels)
+	ivec2 fieldSize;  // blocks
+	int radius;       // whole output pixels searched around the vector
+	int direction;    // 0 the newer picture's blocks, 1 the older's (the camera texels to read)
+} pc;
+
+float lumaAt(texture2D picture, vec2 pos)
+{
+	return dot(textureLod(sampler2D(picture, s_linear), pos / pc.pictureSize, 0.0).rgb, kLuma);
+}
+
+shared vec3 s_sums[64];
+
+// (s, s², count) summed over the workgroup; every invocation calls it together and gets the sum.
+vec3 workgroupSum(vec3 value)
+{
+	vec3 part = subgroupAdd(value);
+	if (gl_NumSubgroups == 1u)
+		return part;
+	barrier();
+	if (subgroupElect())
+		s_sums[gl_SubgroupID] = part;
+	barrier();
+	vec3 total = vec3(0.0);
+	for (uint i = 0u; i < gl_NumSubgroups; i++)
+		total += s_sums[i];
+	return total;
+}
+
+float g_anchor;
+vec2 g_point;
+bool g_used;
+// How well the other picture there fits the block: the variance of (block - other), the squared
+// difference with its mean taken out (a fade or a flash changes the mean, not the pattern), and a
+// little of the mean (of two equal fits, the one with the closer brightness: in a flat sky with a
+// gradient that is all there is to go by). g_residual is the variance alone (what the verdict
+// looks at). (Measured against two other ways on the tests: a fit with a gain of its own, and
+// the other picture scaled by the flow's luma gain first; both lost more than they won.)
+float g_residual;
+
+float score(vec2 v)
+{
+	const vec2 there = g_point + v;
+	const bool ok = g_used && all(greaterThanEqual(there, vec2(0.0))) && all(lessThanEqual(there, pc.pictureSize));
+	const float d = ok ? g_anchor - lumaAt(r_other, there) : 0.0;
+	const vec3 sums = workgroupSum(vec3(d, d * d, ok ? 1.0 : 0.0));
+	if (sums.z < 16.0)
+	{
+		g_residual = 1.0;
+		return 1e9;
+	}
+	const float mean = sums.x / sums.z;
+	g_residual = max(sums.y / sums.z - mean * mean, 0.0);
+	return g_residual + 0.05 * mean * mean;
+}
+
+void main()
+{
+	const ivec2 block = ivec2(gl_WorkGroupID.xy);
+	const uint k = gl_LocalInvocationIndex;
+	g_point = vec2(block) * pc.blockPx + (vec2(k & 7u, k >> 3) + 0.5) * (pc.blockPx * 0.125);
+	g_used = all(lessThan(g_point, pc.pictureSize));
+	g_anchor = g_used ? lumaAt(r_anchor, g_point) : 0.0;
+	const vec3 own = workgroupSum(vec3(g_anchor, g_anchor * g_anchor, g_used ? 1.0 : 0.0));
+	const float variance = max(own.y / max(own.z, 1.0) - (own.x / max(own.z, 1.0)) * (own.x / max(own.z, 1.0)), 0.0);
+
+	// Its own vector, the camera's, and other blocks' vectors near and far (1, 2, 4 and 8 blocks
+	// away each way): a block the pyramid's coarse levels gave the background's motion cannot reach
+	// its object's motion by the 8-pixel search of the finer levels, but a block of the object
+	// further in has it. A vector already tried is not tried again. (All of this is the same for
+	// every invocation of the workgroup.)
+	vec2 best = vec2(texelFetch(r_flow, block, 0).xy) * pc.lumaScale;
+	float bestScore = score(best);
+	vec2 tried[18];
+	int triedCount = 0;
+	tried[triedCount++] = best;
+	const vec4 camera = texelFetch(r_camera, ivec2(pc.direction, 0), 0);
+	const vec4 cameraMore = texelFetch(r_camera, ivec2(pc.direction, 1), 0);
+	if (cameraMore.x >= 0.2)
+	{
+		// (The camera's move at this block: a translation, or a zoom and turn about a centre.)
+		const vec2 q = (vec2(block) + 0.5) * 8.0 - cameraMore.yz;
+		vec2 v = (camera.xy + vec2(camera.z * q.x - camera.w * q.y, camera.w * q.x + camera.z * q.y)) * pc.lumaScale;
+		if (distance(v, best) >= 0.5)
+		{
+			tried[triedCount++] = v;
+			// (The model is as close as the flow's luma pixels, which are more than an output pixel
+			// when the flow ran on a smaller picture: its best whole output pixel around it too.)
+			float s = score(v);
+			if (max(pc.lumaScale.x, pc.lumaScale.y) > 1.01)
+			{
+				const vec2 centre = round(v);
+				for (int y = -1; y <= 1; y++)
+				{
+					for (int x = -1; x <= 1; x++)
+					{
+						const float sv = score(centre + vec2(x, y));
+						if (sv < s)
+						{
+							s = sv;
+							v = centre + vec2(x, y);
+						}
+					}
+				}
+			}
+			if (s <= bestScore * 1.25 + 2e-5)
+			{
+				best = v;
+				bestScore = s;
+			}
+		}
+	}
+	const ivec2 directions[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+	for (int reach = 1; reach <= 8; reach *= 2)
+	{
+		for (int n = 0; n < 4; n++)
+		{
+			const vec2 v = vec2(texelFetch(r_flow, clamp(block + directions[n] * reach, ivec2(0), pc.fieldSize - 1), 0).xy) * pc.lumaScale;
+			bool seen = false;
+			for (int t = 0; t < triedCount; t++)
+				seen = seen || distance(v, tried[t]) < 0.5;
+			if (seen)
+				continue;
+			if (triedCount < 18)
+				tried[triedCount++] = v;
+			const float s = score(v);
+			if (s < bestScore * 0.7)
+			{
+				best = v;
+				bestScore = s;
+			}
+		}
+	}
+
+	// The whole output pixels around it (the vector itself kept when they fit no better). When the
+	// flow ran on a smaller picture its vectors fall between output pixels; the steps are taken
+	// from the nearest whole pixel, where the other picture is read as it is, not blurred by
+	// reading between its pixels (which would favour one side of the parabola below).
+	const vec2 start = round(best);
+	for (int y = -pc.radius; y <= pc.radius; y++)
+	{
+		for (int x = -pc.radius; x <= pc.radius; x++)
+		{
+			const vec2 v = start + vec2(x, y);
+			if (distance(v, best) < 1e-3)
+				continue;
+			const float s = score(v);
+			if (s < bestScore - 1e-7)
+			{
+				bestScore = s;
+				best = v;
+			}
+		}
+	}
+
+	// A parabola through the best step and its neighbours, along x and along y.
+	vec2 fraction = vec2(0.0);
+	if (bestScore < 1e8)
+	{
+		const float l = score(best - vec2(1.0, 0.0)), r = score(best + vec2(1.0, 0.0));
+		const float u = score(best - vec2(0.0, 1.0)), d = score(best + vec2(0.0, 1.0));
+		const float cx = l - 2.0 * bestScore + r, cy = u - 2.0 * bestScore + d;
+		if (cx > 1e-7 && l < 1e8 && r < 1e8)
+			fraction.x = clamp(0.5 * (l - r) / cx, -0.5, 0.5);
+		if (cy > 1e-7 && u < 1e8 && d < 1e8)
+			fraction.y = clamp(0.5 * (u - d) / cy, -0.5, 0.5);
+		// (Not for a step that fits all but perfectly: a parabola through it would move it by the
+		// difference between the block's two sides alone.)
+		if (bestScore <= 0.002 * min(min(l, r), min(u, d)))
+			fraction = vec2(0.0);
+	}
+	score(best + fraction);
+	if (k == 0u)
+		imageStore(w_field, block, vec4(best + fraction, min(g_residual, 1.0), variance));
+}
+
+#elif FG_PASS == 1
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D r_older;
+layout(set = 0, binding = 1) uniform texture2D r_newer;
+layout(set = 0, binding = 2) uniform sampler s_linear;
+layout(set = 0, binding = 3) uniform texture2D r_field_newer; // newer(p) ~ older(p + v)
+layout(set = 0, binding = 4) uniform texture2D r_field_older; // older(p) ~ newer(p + v)
+layout(set = 0, binding = 5, r32ui) uniform readonly uimage2D r_verdict;
+#if OUT_FORMAT == 0
+layout(set = 0, binding = 6, rgba8) uniform writeonly image2D w_output;
+#elif OUT_FORMAT == 1
+layout(set = 0, binding = 6, rgba16f) uniform writeonly image2D w_output;
+#else
+#extension GL_EXT_shader_image_load_formatted : require
+layout(set = 0, binding = 6) uniform writeonly image2D w_output;
+#endif
+layout(set = 0, binding = 7) uniform texture2D r_camera;
+
+layout(push_constant, std430) uniform Constants
+{
+	vec2 pictureSize;   // output pixels
+	vec2 blockPx;       // output pixels per block
+	ivec2 fieldSize;    // blocks
+	float t;            // 0 the older picture, 1 the newer
+	float oneSidedCost; // the cost of a motion seen in one picture only
+	uint flags;         // 1: after a cut show the newer picture (else the older); 2: show what was
+	                    // decided instead of the picture (red both, green the newer alone, blue the
+	                    // older alone, grey the two mixed in place; brighter: a later candidate)
+	uint neighbours;    // 0: the block's own vector; 1: and its 4 neighbours; 2: and all 8
+	float tolerance;    // pixels a field may differ from a motion and still agree with it
+	float giveUp;       // a cost over which nothing fits: the two pictures are mixed
+	float otherCost;    // what any motion but the fields' own at this pixel costs on top
+	float pad0, pad1, pad2;
+} pc;
+
+vec3 older(vec2 pos)
+{
+	return textureLod(sampler2D(r_older, s_linear), pos / pc.pictureSize, 0.0).rgb;
+}
+
+vec3 newer(vec2 pos)
+{
+	return textureLod(sampler2D(r_newer, s_linear), pos / pc.pictureSize, 0.0).rgb;
+}
+
+// The fields read smoothly (between block middles).
+vec2 fieldNewer(vec2 pos)
+{
+	return textureLod(sampler2D(r_field_newer, s_linear), pos / (pc.blockPx * vec2(pc.fieldSize)), 0.0).xy;
+}
+
+vec2 fieldOlder(vec2 pos)
+{
+	return textureLod(sampler2D(r_field_older, s_linear), pos / (pc.blockPx * vec2(pc.fieldSize)), 0.0).xy;
+}
+
+ivec2 blockAt(vec2 pos)
+{
+	return clamp(ivec2(floor(pos / pc.blockPx)), ivec2(0), pc.fieldSize - 1);
+}
+
+// The block's own vector (no reading between blocks: across the edge of something moving, the
+// smooth reading holds motions that are neither the thing's nor its background's, and that would
+// agree with themselves).
+vec2 blockNewerAt(vec2 pos)
+{
+	return texelFetch(r_field_newer, blockAt(pos), 0).xy;
+}
+
+vec2 blockOlderAt(vec2 pos)
+{
+	return texelFetch(r_field_older, blockAt(pos), 0).xy;
+}
+
+bool inside(vec2 pos)
+{
+	return all(greaterThanEqual(pos, vec2(-0.5))) && all(lessThanEqual(pos, pc.pictureSize + 0.5));
+}
+
+// Whether what the older picture (inOlderPicture) or the newer one shows at `pos` is something
+// that moves of its own, the same way in both pictures' fields: then it may well be in front of
+// what is being looked for. (Or `pos` is outside that picture.) Without this or a good match of
+// the block seen, a field that is noise (a ball that rolls: nothing of its pattern is where it
+// was) would pass for an edge, and the picture would be made of pieces of the two.
+bool covered(vec2 pos, bool inside, bool inOlderPicture)
+{
+	if (!inside)
+		return true;
+	if (inOlderPicture)
+	{
+		const vec2 m2 = blockOlderAt(pos);
+		return distance(blockNewerAt(pos + m2), -m2) < pc.tolerance + 0.08 * length(m2);
+	}
+	const vec2 m2 = -blockNewerAt(pos);
+	return distance(blockOlderAt(pos - m2), m2) < pc.tolerance + 0.08 * length(m2);
+}
+
+// Whether the block at `pos` found its match in the other picture: it has something in it (a
+// luma spread of 1/64 or more) and what is left of it after the match is under a quarter of its
+// own variance (the verdict pass's test). A flat block matches anything; it counts when its
+// 4 neighbours have its vector (inside a flat tile of a moving floor, not in the noise of
+// something whose pattern changes).
+bool matchedIn(texture2D field, vec2 pos)
+{
+	const ivec2 block = blockAt(pos);
+	const vec4 f = texelFetch(field, block, 0);
+	if (f.w > 2.5e-4)
+		return f.z < 0.25 * f.w;
+	const float tolerance = pc.tolerance + 0.08 * length(f.xy);
+	const ivec2 around[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+	for (int n = 0; n < 4; n++)
+	{
+		if (distance(texelFetch(field, clamp(block + around[n], ivec2(0), pc.fieldSize - 1), 0).xy, f.xy) >= tolerance)
+			return false;
+	}
+	return true;
+}
+
+bool matchedNewer(vec2 pos)
+{
+	return matchedIn(r_field_newer, pos);
+}
+
+bool matchedOlder(vec2 pos)
+{
+	return matchedIn(r_field_older, pos);
+}
+
+float g_bestCost;
+vec3 g_bestColour;
+vec3 g_bestKind; // (for the debug view)
+float g_candidate;
+
+// What motion `m` (older -> newer, output pixels) gives at `x`: its cost, and the colour.
+void tryMotion(vec2 x, vec2 m)
+{
+	const vec2 atOlder = x - pc.t * m;
+	const vec2 atNewer = x + (1.0 - pc.t) * m;
+	const float tolerance = pc.tolerance + 0.08 * length(m);
+	const bool inOlder = inside(atOlder), inNewer = inside(atNewer);
+	// Is the older picture's content there moving by m, and the newer picture's coming by m?
+	const bool olderAgrees = inOlder && distance(blockOlderAt(atOlder), m) < tolerance;
+	const bool newerAgrees = inNewer && distance(blockNewerAt(atNewer), -m) < tolerance;
+	const vec3 a = older(atOlder), b = newer(atNewer);
+	float cost;
+	vec3 colour;
+	if (olderAgrees && newerAgrees)
+	{
+		// How alike: the 5 points' differences around their mean, and a little of the mean (a
+		// fade changes the mean, not the pattern).
+		vec3 d[5];
+		d[0] = a - b;
+		d[1] = older(atOlder + vec2(-1.0, -1.0)) - newer(atNewer + vec2(-1.0, -1.0));
+		d[2] = older(atOlder + vec2(1.0, -1.0)) - newer(atNewer + vec2(1.0, -1.0));
+		d[3] = older(atOlder + vec2(-1.0, 1.0)) - newer(atNewer + vec2(-1.0, 1.0));
+		d[4] = older(atOlder + vec2(1.0, 1.0)) - newer(atNewer + vec2(1.0, 1.0));
+		const vec3 mean = (d[0] + d[1] + d[2] + d[3] + d[4]) * 0.2;
+		vec3 spread = vec3(0.0);
+		for (int i = 0; i < 5; i++)
+			spread += abs(d[i] - mean);
+		cost = dot(spread, vec3(1.0 / 15.0)) + 0.3 * dot(abs(mean), vec3(1.0 / 3.0));
+		colour = mix(a, b, pc.t);
+	}
+	else if ((newerAgrees && (covered(atOlder, inOlder, true) || matchedNewer(atNewer))) ||
+			 (olderAgrees && (covered(atNewer, inNewer, false) || matchedOlder(atOlder))))
+	{
+		// Seen in one picture only, because something else is in front of it in the other (or it
+		// is outside the other): what the one shows there, as it is.
+		cost = pc.oneSidedCost;
+		colour = newerAgrees ? b : a;
+	}
+	else
+	{
+		cost = 1e9;
+		colour = vec3(0.0);
+	}
+	cost += (g_candidate > 0.0) ? pc.otherCost : 0.0;
+	if (cost < g_bestCost)
+	{
+		g_bestCost = cost;
+		g_bestColour = colour;
+		const float shade = 0.35 + 0.65 * min(g_candidate / 8.0, 1.0);
+		g_bestKind = (olderAgrees && newerAgrees) ? vec3(shade, 0.0, 0.0) : newerAgrees ? vec3(0.0, shade, 0.0) : vec3(0.0, 0.0, shade);
+	}
+	g_candidate += 1.0;
+}
+
+void main()
+{
+	const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(vec2(pixel), pc.pictureSize)))
+		return;
+	const vec2 x = vec2(pixel) + 0.5;
+
+	vec3 colour;
+	if (imageLoad(r_verdict, ivec2(0, 0)).x != 0u)
+	{
+		// A cut: nothing is made up between two different scenes.
+		colour = ((pc.flags & 1u) != 0u) ? newer(x) : older(x);
+	}
+	else
+	{
+		g_bestCost = 1e30;
+		g_bestColour = vec3(0.0);
+		g_bestKind = vec3(0.0);
+		g_candidate = 0.0;
+
+		// The fields at this pixel, followed once to where its content is in each picture.
+		vec2 m = -fieldNewer(x);
+		const vec2 smoothNewer = -fieldNewer(x + (1.0 - pc.t) * m);
+		m = fieldOlder(x);
+		const vec2 smoothOlder = fieldOlder(x - pc.t * m);
+		tryMotion(x, smoothNewer);
+		if (distance(smoothOlder, smoothNewer) > 0.25)
+			tryMotion(x, smoothOlder);
+		const vec4 camera = texelFetch(r_camera, ivec2(0, 0), 0);
+		const vec4 cameraMore = texelFetch(r_camera, ivec2(0, 1), 0);
+		if (cameraMore.x >= 0.2)
+		{
+			// The newer picture's camera model where this pixel's content is in the newer picture.
+			const vec2 lumaScale = pc.blockPx * 0.125;
+			vec2 cameraMove = vec2(0.0);
+			for (int i = 0; i < 2; i++)
+			{
+				const vec2 q = (x + (1.0 - pc.t) * cameraMove) / lumaScale - cameraMore.yz;
+				cameraMove = -(camera.xy + vec2(camera.z * q.x - camera.w * q.y, camera.w * q.x + camera.z * q.y)) * lumaScale;
+			}
+			if (distance(cameraMove, smoothNewer) > 0.25 && distance(cameraMove, smoothOlder) > 0.25)
+				tryMotion(x, cameraMove);
+		}
+		tryMotion(x, vec2(0.0));
+
+		// The blocks' own vectors there and around (an edge between two motions is where the
+		// smooth reading mixes them).
+		const ivec2 blockNewer = blockAt(x + (1.0 - pc.t) * smoothNewer);
+		const ivec2 blockOlder = blockAt(x - pc.t * smoothOlder);
+		const int reach = (pc.neighbours == 0u) ? 0 : 1;
+		for (int dy = -reach; dy <= reach; dy++)
+		{
+			for (int dx = -reach; dx <= reach; dx++)
+			{
+				if (pc.neighbours == 1u && dx != 0 && dy != 0)
+					continue;
+				const ivec2 offset = ivec2(dx, dy);
+				const vec2 vn = -texelFetch(r_field_newer, clamp(blockNewer + offset, ivec2(0), pc.fieldSize - 1), 0).xy;
+				const vec2 vo = texelFetch(r_field_older, clamp(blockOlder + offset, ivec2(0), pc.fieldSize - 1), 0).xy;
+				// (A vector already tried is not tried again: in a picture that moves as one, all
+				// of these are the same.)
+				if (distance(vn, smoothNewer) > 0.25 && distance(vn, smoothOlder) > 0.25)
+					tryMotion(x, vn);
+				if (distance(vo, smoothNewer) > 0.25 && distance(vo, smoothOlder) > 0.25 && distance(vo, vn) > 0.25)
+					tryMotion(x, vo);
+			}
+		}
+		colour = (g_bestCost <= pc.giveUp) ? g_bestColour : mix(older(x), newer(x), pc.t);
+		if ((pc.flags & 2u) != 0u)
+			colour = (g_bestCost <= pc.giveUp) ? g_bestKind : vec3(0.5);
+	}
+	imageStore(w_output, pixel, vec4(colour, 1.0));
+}
+
+#elif FG_PASS == 2
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform itexture2D r_flow_newer;
+layout(set = 0, binding = 1) uniform itexture2D r_flow_older;
+layout(set = 0, binding = 2, rgba32f) uniform writeonly image2D w_camera;
+
+layout(push_constant, std430) uniform Constants
+{
+	ivec2 fieldSize;
+	ivec2 lumaSize;
+} pc;
+
+shared vec2 s_point[256];
+shared vec2 s_vector[256];
+shared uint s_votes[256];
+shared vec4 s_model[256];
+
+// How many of the 256 blocks a model (t, s, r about the centre) agrees with, to a pixel.
+uint votesFor(vec4 model, vec2 centre)
+{
+	uint votes = 0u;
+	for (uint j = 0u; j < 256u; j++)
+	{
+		const vec2 q = s_point[j] - centre;
+		const vec2 predicted = model.xy + vec2(model.z * q.x - model.w * q.y, model.w * q.x + model.z * q.y);
+		const vec2 d = abs(predicted - s_vector[j]);
+		votes += (max(d.x, d.y) <= 1.0 + 0.02 * length(s_vector[j])) ? 1u : 0u;
+	}
+	return votes;
+}
+
+void main()
+{
+	// The camera's move: a model most of the picture agrees with, out of one guess a block of 16x16
+	// spread over it: the block's own vector as a move of the whole picture, and, from it and a
+	// block far from it, a move with a zoom and a turn about the picture's middle (a camera that
+	// moves in or rolls). The simpler is kept unless the other is clearly better.
+	const uint i = gl_LocalInvocationIndex;
+	const ivec2 block = clamp(ivec2((vec2(i & 15u, i >> 4) + 0.5) * vec2(pc.fieldSize) / 16.0), ivec2(0), pc.fieldSize - 1);
+	const vec2 v = vec2((gl_WorkGroupID.x == 0u) ? texelFetch(r_flow_newer, block, 0).xy : texelFetch(r_flow_older, block, 0).xy);
+	const vec2 centre = vec2(pc.lumaSize) * 0.5;
+	s_point[i] = (vec2(block) + 0.5) * 8.0;
+	s_vector[i] = v;
+	barrier();
+	vec4 model = vec4(v, 0.0, 0.0);
+	uint votes = votesFor(model, centre);
+	const uint j = (i + 137u) & 255u;
+	const vec2 dp = s_point[i] - s_point[j];
+	const float det = dot(dp, dp);
+	if (det > 64.0 * 64.0)
+	{
+		const vec2 dv = s_vector[i] - s_vector[j];
+		const float scale = (dp.x * dv.x + dp.y * dv.y) / det, turn = (dp.x * dv.y - dp.y * dv.x) / det;
+		const vec2 q = s_point[i] - centre;
+		const vec4 other = vec4(v - vec2(scale * q.x - turn * q.y, turn * q.x + scale * q.y), scale, turn);
+		if (abs(scale) < 0.25 && abs(turn) < 0.25)
+		{
+			const uint otherVotes = votesFor(other, centre);
+			if (otherVotes > votes + votes / 10u + 8u)
+			{
+				model = other;
+				votes = otherVotes;
+			}
+		}
+	}
+	s_model[i] = model;
+	// The most votes; of equal votes the first block.
+	barrier();
+	s_votes[i] = (votes << 8) | (255u - i);
+	barrier();
+	for (uint stride = 128u; stride > 0u; stride >>= 1)
+	{
+		if (i < stride)
+			s_votes[i] = max(s_votes[i], s_votes[i + stride]);
+		barrier();
+	}
+	const uint support = s_votes[0] >> 8;
+	const vec4 guess = s_model[255u - (s_votes[0] & 255u)];
+	const bool zooms = guess.z != 0.0 || guess.w != 0.0;
+	// The guess agrees to a pixel, and the vectors are whole luma pixels: it can be a pixel off.
+	// A move of the whole picture is made the vector the most blocks that agree with it have
+	// exactly; a zoom is fitted again by least squares to the blocks that agree with it.
+	const vec2 qi = s_point[i] - centre;
+	const vec2 di = abs(guess.xy + vec2(guess.z * qi.x - guess.w * qi.y, guess.w * qi.x + guess.z * qi.y) - v);
+	const bool agrees = max(di.x, di.y) <= 1.0 + 0.02 * length(v);
+	barrier();
+	s_votes[i] = 0u;
+	if (agrees && !zooms)
+	{
+		uint same = 0u;
+		for (uint k = 0u; k < 256u; k++)
+			same += (s_vector[k] == v) ? 1u : 0u;
+		s_votes[i] = (same << 8) | (255u - i);
+	}
+	barrier();
+	for (uint stride = 128u; stride > 0u; stride >>= 1)
+	{
+		if (i < stride)
+			s_votes[i] = max(s_votes[i], s_votes[i + stride]);
+		barrier();
+	}
+	if (i == 0u)
+	{
+		vec4 result = guess;
+		if (!zooms)
+			result = vec4(s_vector[255u - (s_votes[0] & 255u)], 0.0, 0.0);
+		else
+		{
+			vec2 sumQ = vec2(0.0), sumV = vec2(0.0);
+			float count = 0.0;
+			for (uint k = 0u; k < 256u; k++)
+			{
+				const vec2 q = s_point[k] - centre;
+				const vec2 d = abs(guess.xy + vec2(guess.z * q.x - guess.w * q.y, guess.w * q.x + guess.z * q.y) - s_vector[k]);
+				if (max(d.x, d.y) <= 1.0 + 0.02 * length(s_vector[k]))
+				{
+					sumQ += q;
+					sumV += s_vector[k];
+					count += 1.0;
+				}
+			}
+			const vec2 meanQ = sumQ / max(count, 1.0), meanV = sumV / max(count, 1.0);
+			float qq = 0.0, qv = 0.0, qxv = 0.0;
+			for (uint k = 0u; k < 256u; k++)
+			{
+				const vec2 q = s_point[k] - centre;
+				const vec2 d = abs(guess.xy + vec2(guess.z * q.x - guess.w * q.y, guess.w * q.x + guess.z * q.y) - s_vector[k]);
+				if (max(d.x, d.y) <= 1.0 + 0.02 * length(s_vector[k]))
+				{
+					const vec2 dq = q - meanQ, dv = s_vector[k] - meanV;
+					qq += dot(dq, dq);
+					qv += dot(dq, dv);
+					qxv += dq.x * dv.y - dq.y * dv.x;
+				}
+			}
+			const float scale = (qq > 0.0) ? qv / qq : guess.z, turn = (qq > 0.0) ? qxv / qq : guess.w;
+			result = vec4(meanV - vec2(scale * meanQ.x - turn * meanQ.y, turn * meanQ.x + scale * meanQ.y), scale, turn);
+		}
+		imageStore(w_camera, ivec2(gl_WorkGroupID.x, 0), result);
+		imageStore(w_camera, ivec2(gl_WorkGroupID.x, 1), vec4(float(support) / 256.0, centre, 0.0));
+	}
+}
+
+#elif FG_PASS == 3
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D r_field_newer;
+layout(set = 0, binding = 1, r32ui) uniform readonly uimage2D r_scene_change;
+layout(set = 0, binding = 2, r32ui) uniform writeonly uimage2D w_verdict;
+
+layout(push_constant, std430) uniform Constants
+{
+	ivec2 fieldSize;
+} pc;
+
+shared uint s_textured[256];
+shared uint s_matched[256];
+
+void main()
+{
+	const uint i = gl_LocalInvocationIndex;
+	uint textured = 0u, matched = 0u;
+	const int blocks = pc.fieldSize.x * pc.fieldSize.y;
+	for (int b = int(i); b < blocks; b += 256)
+	{
+		const vec4 f = texelFetch(r_field_newer, ivec2(b % pc.fieldSize.x, b / pc.fieldSize.x), 0);
+		// A block with something in it (a luma spread of 1/64 or more), matched when what is left of
+		// it after the match is under a quarter of it.
+		if (f.w > 2.5e-4)
+		{
+			textured++;
+			matched += (f.z < 0.25 * f.w) ? 1u : 0u;
+		}
+	}
+	s_textured[i] = textured;
+	s_matched[i] = matched;
+	barrier();
+	for (uint stride = 128u; stride > 0u; stride >>= 1)
+	{
+		if (i < stride)
+		{
+			s_textured[i] += s_textured[i + stride];
+			s_matched[i] += s_matched[i + stride];
+		}
+		barrier();
+	}
+	if (i == 0u)
+	{
+		// FSR 3's detector: the newest bit of its history.
+		const bool detector = (imageLoad(r_scene_change, ivec2(1, 0)).x & 1u) != 0u;
+		const uint share = (s_textured[0] > 0u) ? (s_matched[0] * 1000u) / s_textured[0] : 1000u;
+		const bool cut = detector && share < 500u;
+		imageStore(w_verdict, ivec2(0, 0), uvec4(cut ? 1u : 0u));
+		imageStore(w_verdict, ivec2(1, 0), uvec4(detector ? 1u : 0u));
+		imageStore(w_verdict, ivec2(2, 0), uvec4(share));
+		imageStore(w_verdict, ivec2(3, 0), uvec4(s_textured[0]));
+	}
+}
+
+#else
+#error FG_PASS must be 0..3
+#endif

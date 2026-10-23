@@ -1,0 +1,10 @@
+# Crux2 - colour temperature, vibrance, saturation, brightness, contrast and gamma, at the screen's size (one pass).
+# SPDX-FileCopyrightText: 2026 Press5elect
+# SPDX-License-Identifier: GPL-3.0+
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
+shaders = 1
+
+shader0 = shaders/colour.slang
+filter_linear0 = true
+scale_type0 = viewport
+scale0 = 1.0

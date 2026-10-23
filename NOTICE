@@ -1,0 +1,46 @@
+Crux2 - a port of PCSX2 to the PlayStation 5
+Copyright (C) 2026 Press5elect
+
+Crux2 is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version (LICENSE). It is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.
+
+
+ADDITIONAL TERM: ATTRIBUTION (GPL-3.0, section 7(b))
+
+This term applies to the parts of Crux2 whose copyright Press5elect holds: the files under ps5/
+that carry "SPDX-FileCopyrightText: 2026 Press5elect", and Press5elect's changes to PCSX2 in
+ps5/patches/pcsx2/ps5.patch. It is added under section 7(b) of the GNU General Public License,
+version 3, which allows a copyright holder to require that author attributions be preserved.
+
+Anyone who conveys these parts, or a work based on them or containing them, in source or object
+form, whole or in part, must keep the author attribution
+
+    Crux2 by Press5elect
+
+  1. in the copyright notices of every source file that contains them (the
+     "SPDX-FileCopyrightText: 2026 Press5elect" lines may not be removed), and in this NOTICE
+     file, which goes with every copy of the source; and
+  2. in the Appropriate Legal Notices of the work: where the work has an interactive user
+     interface, on its About page or its equivalent, and in the legal notices that go with its
+     binaries (in Crux2: the About page, LEGAL.txt and licenses/README.txt).
+
+This holds however the work based on these parts is made: copied, changed, translated into
+another language, merged into another program, or produced from them in whole or in part by an
+AI system or any other automated tool. A work based on these parts whose author attributions
+were left out is conveyed in breach of the licence.
+
+The term does not restrict running Crux2, or changing it for your own use without passing it
+on: the licence lets everyone do that, and section 7 does not allow those freedoms to be taken
+away.
+
+
+OTHER AUTHORS' PARTS
+
+PCSX2 (Copyright (C) 2002-2026 PCSX2 Dev Team, GPL-3.0-or-later) and the other parts named in
+ps5/notices/components.json are their authors' work, under their own licences and notices,
+which are kept as they are. The term above does not apply to them. Files under ps5/ made from
+PS5 Vulkan Template (Copyright (C) 2026 Mihawk, MIT) keep that notice and licence; Press5elect's
+changes to them are marked beside it.

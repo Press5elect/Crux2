@@ -1,0 +1,19 @@
+# Crux2 - the game's picture as a television's s-video input shows it: the signal at the game's own size
+# (float, so the overshoots survive), then brought to the screen with sharp bilinear (two passes).
+# SPDX-FileCopyrightText: 2026 Press5elect
+# SPDX-License-Identifier: GPL-3.0+
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
+shaders = 2
+
+shader0 = shaders/s-video.slang
+filter_linear0 = true
+scale_type0 = source
+scale0 = 1.0
+float_framebuffer0 = true
+wrap_mode0 = clamp_to_edge
+alias0 = SignalPass
+
+shader1 = shaders/scale.slang
+filter_linear1 = true
+scale_type1 = viewport
+scale1 = 1.0
