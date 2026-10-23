@@ -57,6 +57,7 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_keyboard.cpp
 	ps5_usbpad.cpp
 	ps5_usbpad_console.cpp
+	ps5_osd.cpp
 	third_party/qrcodegen/qrcodegen.c
 	ps5_platform.cpp
 	ps5_profiler.cpp

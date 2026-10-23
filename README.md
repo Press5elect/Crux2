@@ -470,6 +470,14 @@ TCP or UDP.
 
 ## What v1.0.2 changed
 
+Changed:
+- **The on-screen display is one panel**, in sections as PC overlays show them: the graphics chip
+  (its load and time a frame), the processor (the emulator's threads, and with Hardware info its
+  temperature and clock where the console tells them, and the memory in use), and the frames (FPS,
+  frame time, max, average, min, 1% and 0.1% lows) with a graph of the frame times, in the title's
+  lettering. Settings > On-Screen Display > Style has PCSX2's own lines back. The graphics chip's
+  clock, temperature and power are not told to a title, so they are not shown.
+
 Fixed:
 - **Switching on an on-screen figure (FPS, speed and the rest) showed nothing:** the first
   release's defaults left the figures' place at "Not shown". It is the top right again (no figure

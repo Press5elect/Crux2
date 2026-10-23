@@ -6537,20 +6537,21 @@ index 53abe0f..f42b94f 100644
  	if (negative_key != GenericInputBinding::Unknown)
  	{
 diff --git a/pcsx2/ImGui/ImGuiOverlays.cpp b/pcsx2/ImGui/ImGuiOverlays.cpp
-index ea07c5f..d94a5a8 100644
+index ea07c5f..31936e7 100644
 --- a/pcsx2/ImGui/ImGuiOverlays.cpp
 +++ b/pcsx2/ImGui/ImGuiOverlays.cpp
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,10 @@
  // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
  // SPDX-License-Identifier: GPL-3.0+
  
 +#ifdef __PROSPERO__
 +#include "ps5_pacing.h"
++#include "ps5_osd.h"
 +#endif
  #include "BuildVersion.h"
  #include "Config.h"
  #include "Counters.h"
-@@ -21,6 +24,10 @@
+@@ -21,6 +25,10 @@
  #include "ImGui/ImGuiFullscreen.h"
  #include "ImGui/ImGuiManager.h"
  #include "ImGui/ImGuiOverlays.h"
@@ -6561,7 +6562,19 @@ index ea07c5f..d94a5a8 100644
  #include "Input/InputManager.h"
  #include "MTGS.h"
  #include "Patch.h"
-@@ -334,6 +341,12 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
+@@ -167,6 +175,11 @@ __ri void ImGuiManager::FormatProcessorStat(SmallStringBase& text, double usage,
+ 
+ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, float margin, float spacing)
+ {
++#ifdef __PROSPERO__
++	// Crux2: the figures as one panel, in sections ([PS5] OsdStyle 0, the default; ps5_osd.h).
++	if (PS5Osd::DrawPanel(position_y, scale, margin))
++		return;
++#endif
+ 	const float shadow_offset = std::ceil(scale);
+ 
+ 	ImFont* const osd_font = ImGuiManager::GetOSDFont();
+@@ -334,6 +347,12 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
  						s_speed_line.append("FPS: N/A");
  						break;
  				}
@@ -6574,7 +6587,7 @@ index ea07c5f..d94a5a8 100644
  			}
  
  			if (GSConfig.OsdShowVPS)
-@@ -351,7 +364,20 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
+@@ -351,7 +370,20 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
  			}
  
  			if (GSConfig.OsdShowVersion)

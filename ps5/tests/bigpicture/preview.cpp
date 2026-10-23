@@ -22,6 +22,7 @@
 #include "bp.h"
 #include "bp_internal.h" // the screen that is on, for the checks
 #include "ps5_mc.h"      // the memory cards the card manager is shown: true ones, held in memory
+#include "ps5_osd_draw.h" // the on-screen display's panel, pictured with made-up figures
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -39,6 +40,9 @@
 #include <set>
 #include <string>
 #include <vector>
+
+// Drawn over a frame when set (the on-screen display's panel, which the emulator draws over a game).
+std::function<void()> g_overlay;
 
 // -------------------------------------------------------------------- pictures
 
@@ -1895,6 +1899,8 @@ struct Harness
 		backend.tick(io.DeltaTime);
 		ImGui::NewFrame();
 		bp::render();
+		if (g_overlay)
+			g_overlay();
 		ImGui::Render();
 		rasterise(ImGui::GetDrawData(), target, validate);
 		frames++;
@@ -3026,6 +3032,44 @@ void shots(Harness& h)
 	g_check.expect(b.run.valid && bp::screen == bp::Screen::None, "a game runs with no screen over it");
 	g_check.expect(b.corner >= 0, "the figures are sent to a corner");
 	h.shot("49c-game-with-grey-bars");
+	// The on-screen display's panel (v1.0.2), with made-up figures, over the game.
+	{
+		static float history[150];
+		for (int i = 0; i < 150; i++)
+			history[i] = 16.7f + 2.0f * std::sin(i * 0.7f) + ((i % 37) == 0 ? 14.0f : 0.0f);
+		g_overlay = [] {
+			using namespace PS5OsdDraw;
+			Panel p;
+			const auto add = [&p](const char* n, const char* v, const char* u, ImU32 nc, ImU32 vc) { p.rows.push_back({n, v, u, nc, vc}); };
+			add("GPU", "71", "%", GPU_NAME, HOT_VALUE);
+			add("time", "11.8", "ms", GPU_NAME, HOT_VALUE);
+			p.sections.push_back(p.rows.size());
+			add("EE", "48", "%", CPU_NAME, HOT_VALUE);
+			add("GS", "86", "%", CPU_NAME, HOT_VALUE);
+			add("VU", "62", "%", CPU_NAME, HOT_VALUE);
+			add("temp", "61", "\xc2\xb0" "C", CPU_NAME, HOT_VALUE);
+			add("clock", "3500", "MHz", CPU_NAME, HOT_VALUE);
+			add("RAM", "7387", "MB", CPU_NAME, HOT_VALUE);
+			p.sections.push_back(p.rows.size());
+			add("Vulkan", "60", "FPS", FRAME_NAME, COOL_VALUE);
+			add("Frametime", "16.7", "ms", FRAME_NAME, COOL_VALUE);
+			add("Max", "62", "FPS", FRAME_NAME, COOL_VALUE);
+			add("Average", "59", "FPS", FRAME_NAME, COOL_VALUE);
+			add("Min", "32", "FPS", FRAME_NAME, COOL_VALUE);
+			add("1% Low", "43", "FPS", FRAME_NAME, COOL_VALUE);
+			add("0.1% Low", "32", "FPS", FRAME_NAME, COOL_VALUE);
+			p.graph = true;
+			p.history = history;
+			p.history_size = 150;
+			const ImGuiIO& io = ImGui::GetIO();
+			const float scale = io.DisplaySize.y / 1080.0f;
+			PS5OsdDraw::Draw(ImGui::GetForegroundDrawList(), bp::brand(), std::round(15.0f * 1.3f * scale * 1.6f), p, 3, scale,
+				std::round(10.0f * scale), std::round(10.0f * scale), io.DisplaySize.x, io.DisplaySize.y);
+		};
+		h.wait(2);
+		h.shot("49c2-osd-panel");
+		g_overlay = nullptr;
+	}
 	bp::careSetIdle(301);
 	h.wait(240);
 	h.shot("49d-game-darkened");

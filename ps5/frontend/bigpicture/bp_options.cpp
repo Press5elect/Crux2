@@ -932,6 +932,8 @@ Page osdPage()
 	rows.push_back(toggle("Bold figures", "Heavier letters, easier to read from a sofa", GS, "OsdBoldText", true, A));
 	rows.push_back(toggle("Move the figures from corner to corner", "The figures over a game go to another corner every five minutes", FRONT, "OsdMove",
 		false, F));
+	rows.push_back(list("Style", "Crux2's panel: the figures in sections (graphics chip, processor, frames) with a graph of the frame times. "
+		"PCSX2's: its own lines of text", "PS5", "OsdStyle", 0, {"Crux2's panel", "PCSX2's lines"}, 0, A));
 	rows.push_back(heading("SHOW"));
 	rows.push_back(toggle("Speed percentages", "The speed of the emulation, in percent", GS, "OsdShowSpeed", false, A));
 	rows.push_back(toggle("FPS", "The frames the game itself shows (and the pictures shown, where frame generation makes more)", GS,

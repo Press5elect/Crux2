@@ -2,6 +2,8 @@
 
 ## v1.0.2 (2026-10-23)
 
+- Changed: the on-screen display is one panel in sections (graphics chip, processor, frames with
+  1% / 0.1% lows and a frame-time graph); Style under On-Screen Display has PCSX2's lines back.
 - Fixed: switching on an on-screen figure showed nothing (their place was "Not shown" by default).
 - Fixed: games played one after another slowed down: the game before's textures stayed in the
   graphics device's pool; they go when a game closes, and the boot log reports memory at each
