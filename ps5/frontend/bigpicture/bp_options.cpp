@@ -549,10 +549,16 @@ Page emulationPage(int layer, bool forGame)
 // The renderer's fixes, the same rows for all games (advanced, as PCSX2 marks them) and for one game.
 void hardwareFixRows(std::vector<Option>& rows, unsigned f)
 {
-	const auto fix = [](Option o) { return when(std::move(o), GS, "UserHacks", false); };
-	rows.push_back(toggle("Manual hardware renderer fixes",
+	// (None of these with paraLLEl-GS, which has no texture cache and no upscaling: greyed out while it is on.)
+	const auto fix = [](Option o) {
+		o.enabled = [](int l) { return effective(l, GS, "UserHacks", false) && !effective(l, GS, "PS5ParallelGS", false); };
+		return o;
+	};
+	Option manual = toggle("Manual hardware renderer fixes",
 		"Crux2 applies the known fixes for each game by itself. Turn this on only if a game still draws wrong: the fixes below then take their "
-		"place", GS, "UserHacks", false, f));
+		"place", GS, "UserHacks", false, f);
+	manual.enabled = [](int l) { return !effective(l, GS, "PS5ParallelGS", false); };
+	rows.push_back(std::move(manual));
 	rows.push_back(fix(list("CPU sprite render size", "The widest target the processor draws sprites for", GS, "UserHacks_CPUSpriteRenderBW", 0,
 		{"Off", "1 (64 wide)", "2 (128)", "3 (192)", "4 (256)", "5 (320)", "6 (384)", "7 (448)", "8 (512)", "9 (576)", "10 (640)"}, 0, f)));
 	rows.push_back(fix(list("CPU sprite render level", "What the processor draws", GS, "UserHacks_CPUSpriteRenderLevel", 0,
@@ -593,7 +599,10 @@ void hardwareFixRows(std::vector<Option>& rows, unsigned f)
 
 void upscalingFixRows(std::vector<Option>& rows, unsigned f)
 {
-	const auto fix = [](Option o) { return when(std::move(o), GS, "UserHacks", false); };
+	const auto fix = [](Option o) {
+		o.enabled = [](int l) { return effective(l, GS, "UserHacks", false) && !effective(l, GS, "PS5ParallelGS", false); };
+		return o;
+	};
 	rows.push_back(fix(list("Half pixel offset", "Can fix misplaced fog, bloom or blur", GS, "UserHacks_HalfPixelOffset", 0,
 		{"Off", "Normal (vertex)", "Special (texture)", "Special (texture, aggressive)", "Align to native", "Align to native, with texture offset"}, 0, f)));
 	rows.push_back(fix(list("Native scaling", "Hides seams in games that draw their own 2D effects", GS, "UserHacks_native_scaling", 0,
@@ -663,10 +672,24 @@ Page graphicsPage(int layer, bool forGame)
 {
 	Page page{ICON_FA_IMAGE, "Graphics", {}};
 	auto& rows = page.rows;
-	const auto hardware = [](int l) { return effectiveInt(l, GS, "Renderer", 14) != 13; };
+	const auto pgs = [](int l) { return effective(l, GS, "PS5ParallelGS", false); };
+	// PCSX2's hardware renderer, as against the software renderer and against paraLLEl-GS: the rows marked hw() are
+	// its own (its texture cache, its resolution, its filtering, its fixes), which paraLLEl-GS has no equivalent of;
+	// hwAny() is for rows paraLLEl-GS takes too (ps5_pgs.cpp's SendScanout). Software draws like the PS2 and has
+	// none of either.
+	const auto hardware = [pgs](int l) { return effectiveInt(l, GS, "Renderer", 14) != 13 && !pgs(l); };
+	const auto hardwareAny = [](int l) { return effectiveInt(l, GS, "Renderer", 14) != 13; };
 	const auto software = [](int l) { return effectiveInt(l, GS, "Renderer", 14) == 13; };
 	const auto hw = [hardware](Option o) {
 		o.enabled = hardware;
+		return o;
+	};
+	const auto hwAny = [hardwareAny](Option o) {
+		o.enabled = hardwareAny;
+		return o;
+	};
+	const auto notPgs = [pgs](Option o) {
+		o.enabled = [pgs](int l) { return !pgs(l); };
 		return o;
 	};
 	const auto sw = [software](Option o) {
@@ -706,7 +729,9 @@ Page graphicsPage(int layer, bool forGame)
 		GS, "Renderer", 14, {"Hardware (Vulkan)", "Software"}, {14, 13}));
 	rows.push_back(toggle("paraLLEl-GS",
 		"The whole GS drawn on the graphics chip in compute shaders (paraLLEl-GS): far less work for the processor, no texture "
-		"cache. The picture is the PS2's own resolution made sharp by super-sampling; the resolution setting does not apply. Its "
+		"cache. The picture is the PS2's own resolution made sharp by super-sampling; the resolution setting does not apply. It takes "
+		"Deinterlacing, Anti-blur, Screen offsets, Show overscan, Mipmapping and everything after the picture is made (FSR, looks, FXAA, "
+		"shade boost); what it has no equivalent of (texture filtering, dithering, the hardware fixes, texture packs) is greyed out. Its "
 		"save states are its own. Turn it on in a heavy game's own options",
 		GS, "PS5ParallelGS", false, Option::NextStart));
 	rows.push_back(adv(listOf("paraLLEl-GS samples",
@@ -741,7 +766,10 @@ Page graphicsPage(int layer, bool forGame)
 		o.combos = {{0, 0}, {1, 0}, {0, 1}};
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(list("Deinterlacing", "Automatic suits most games. Try another if the picture shakes or shows thin lines", GS, "deinterlace_mode", 0,
+	rows.push_back(list("Deinterlacing",
+		"Automatic suits most games. Try another if the picture shakes or shows thin lines. With paraLLEl-GS: Automatic shows a progressive "
+		"picture where the game allows it; any other choice shows the fields as the PS2's own scan-out blended them",
+		GS, "deinterlace_mode", 0,
 		{"Automatic", "Off", "Weave (top field first)", "Weave (bottom field first)", "Bob (top field first)", "Bob (bottom field first)",
 			"Blend (top field first)", "Blend (bottom field first)", "Adaptive (top field first)", "Adaptive (bottom field first)"}));
 	rows.push_back(adv(list("Bilinear filtering", "How the picture is stretched to the screen. Sharp bilinear keeps pixels crisp without shimmering", GS,
@@ -760,7 +788,7 @@ Page graphicsPage(int layer, bool forGame)
 	rows.push_back(toggle("Integer scaling", "Enlarges by whole numbers only: sharper pixels in 2D games, with borders", GS, "IntegerScaling", false));
 	rows.push_back(adv(toggle("Screen offsets", "Places the picture where the game asks for it", GS, "pcrtc_offsets", false)));
 	rows.push_back(adv(toggle("Show overscan", "Shows the edges an old television hid", GS, "pcrtc_overscan", false)));
-	rows.push_back(adv(toggle("Disable interlace offset", "Can make an interlaced picture less blurry", GS, "disable_interlace_offset", true)));
+	rows.push_back(adv(notPgs(toggle("Disable interlace offset", "Can make an interlaced picture less blurry", GS, "disable_interlace_offset", true))));
 	rows.push_back(adv(range("Vertical stretch", "Makes the picture taller or flatter", GS, "StretchY", 100, 10, 300, 1, "%")));
 	rows.push_back(adv(range("Crop left", "Cuts off the picture's edges, keeping its shape", GS, "CropLeft", 0, 0, 720, 1, " px")));
 	rows.push_back(adv(range("Crop top", "", GS, "CropTop", 0, 0, 720, 1, " px")));
@@ -780,7 +808,7 @@ Page graphicsPage(int layer, bool forGame)
 		o.enabled = no_fsr;
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(hw(listOf("Upscaling and sharpening",
+	rows.push_back(hwAny(listOf("Upscaling and sharpening",
 		"Off: the internal resolution above is what you get. FSR 1 draws the game smaller and enlarges it to the screen with AMD's filter: nearly as sharp, much faster; it sets the internal resolution itself. NIS enlarges and "
 		"sharpens (NVIDIA's filter). CAS only sharpens",
 		GS, "CASMode", 5,
@@ -788,7 +816,7 @@ Page graphicsPage(int layer, bool forGame)
 		{0, 5, 3, 4, 6, 1, 2})));
 	{
 		Option o = range("Sharpness", "How strong the sharpening is", GS, "CASSharpness", 50, 0, 100, 5, "%");
-		o.enabled = [hardware](int l) { return hardware(l) && effectiveInt(l, GS, "CASMode", 5) != 0; };
+		o.enabled = [hardwareAny](int l) { return hardwareAny(l) && effectiveInt(l, GS, "CASMode", 5) != 0; };
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(hw(list("Texture filtering", "How textures are smoothed. \"As the PS2\" is right for nearly every game", GS, "filter", 2,
@@ -803,7 +831,7 @@ Page graphicsPage(int layer, bool forGame)
 		"How exactly transparent effects (smoke, glass, lights) are drawn. Basic suits most games; higher is more exact and slower. "
 		"Some games get a higher level from the game database by themselves",
 		GS, "accurate_blending_unit", 1, {"Minimum", "Basic", "Medium", "High", "Full (slow)", "Maximum (very slow)"})));
-	rows.push_back(adv(hw(toggle("Mipmapping", "Smaller copies of textures for far surfaces. Some games need it to look right", GS, "hw_mipmap", true))));
+	rows.push_back(adv(hwAny(toggle("Mipmapping", "Smaller copies of textures for far surfaces. Some games need it to look right", GS, "hw_mipmap", true))));
 	rows.push_back(adv(hw(toggle("Accurate alpha test", "Some games need it to draw right. Costs some speed", GS, "HWAccurateAlphaTest", false))));
 	rows.push_back(adv(hw(toggle("AA1", "The PS2's own edge smoothing. A few games need it to draw right; can cost a lot of speed", GS, "HWAA1", false))));
 	rows.push_back(adv(hw(toggle("Rasterizer ordered view",

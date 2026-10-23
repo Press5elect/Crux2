@@ -1,5 +1,10 @@
 # Crux2 - what changed
 
+## v1.0.5 (2026-10-23)
+
+- Changed: paraLLEl-GS takes the display settings (deinterlacing, anti-blur, screen offsets,
+  overscan, mipmapping), live; the settings it has no equivalent of are greyed out while it is on.
+
 ## v1.0.4 (2026-10-23)
 
 - Added: Console language (Settings > BIOS, and per game): the language games are told the PS2 has,

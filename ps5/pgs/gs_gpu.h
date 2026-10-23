@@ -67,6 +67,18 @@ struct GSGpuOptions
     static GSGpuOptions fromEnvironment();
 };
 
+// How the picture is scanned out (Crux2's display settings), changed at any time: taken at the next presentation.
+struct GSGpuScanout
+{
+    bool forceProgressive = true; // a progressive picture where the game's mode allows (INT=1, FFMD=0) instead of fields
+    bool antiBlur = true;         // counteract the field blending (the blur) some games scan out with
+    bool overscan = false;        // the overscan area too (black borders)
+    bool crtcOffsets = false;     // the CRTC's offsets honoured (small shifts, borders) instead of hidden
+    bool mipmaps = true;          // the game's mipmaps read (off: always the full texture, more detail, can break games)
+    bool sharp2D = false;         // sprites and flat UI super-sampled like the 3-D
+    bool backbufferPromotion = false; // a final blit's source shown instead of its blurred/dithered copy (a hack)
+};
+
 // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).
 struct GSGpuFrame
 {
@@ -192,6 +204,7 @@ public:
     virtual void setHighResolution(bool on) = 0;
     virtual void setFsr(bool on) = 0;
     virtual void setSharpness(float stops) = 0;
+    virtual void setScanout(const GSGpuScanout &scanout) { (void)scanout; }
     virtual GSGpuStatus status() const = 0;
 
     // Idempotent; joins the renderer's thread, which owns (and destroys) every Vulkan object.

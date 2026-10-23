@@ -32,6 +32,8 @@ namespace PS5PGS
 	{
 		std::unique_ptr<GSGpuRenderer> s_gs;
 		std::atomic<bool> s_active{false}; // (read on the EE thread too: MTGS's readbacks)
+		GSGpuScanout s_scanout_sent;       // the display settings paraLLEl-GS has (SendScanout)
+		bool s_scanout_any = false;
 		const uint8_t* s_regs = nullptr; // the PS2's GS privileged registers (PMODE at 0, 16 bytes apart)
 		uint64_t s_tick = 0;
 		uint64_t s_last_seq = 0;
@@ -103,6 +105,7 @@ namespace PS5PGS
 			}
 			s_tick = 0;
 			s_last_seq = 0;
+			s_scanout_any = false;
 			s_active.store(true, std::memory_order_release);
 			ps5px_log("paraLLEl-GS: draws this game on %s: %u samples a pixel%s, 2-D %s, pictures drawn into textures %s",
 				s_gs->deviceName(), options.superSampling,
@@ -158,8 +161,40 @@ namespace PS5PGS
 			s_gs->gif(static_cast<uint8_t>(path), data, qwc * 16u);
 	}
 
+	namespace
+	{
+		// Crux2's display settings, as far as paraLLEl-GS scans out: the same switches PCSX2's own
+		// presentation reads, handed to the renderer when one changes (each a frame late at most).
+		// Deinterlacing "Automatic" asks for a progressive picture where the game's mode allows it, as
+		// PCSX2 shows such games; any other choice leaves the fields as the PS2's own scan-out blended
+		// them (paraLLEl-GS deinterlaces its own way: PCSX2's weave, bob, blend and adaptive shaders are
+		// not its). What has no equivalent (dithering, texture filtering, the resolution, the hardware
+		// fixes) is greyed out in Settings while paraLLEl-GS is on.
+		void SendScanout()
+		{
+			GSGpuScanout want;
+			want.forceProgressive = GSConfig.InterlaceMode == GSInterlaceMode::Automatic;
+			want.antiBlur = GSConfig.PCRTCAntiBlur;
+			want.overscan = GSConfig.PCRTCOverscan;
+			want.crtcOffsets = GSConfig.PCRTCOffsets;
+			want.mipmaps = GSConfig.HWMipmap;
+			want.sharp2D = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSSharp2D", false);
+			want.backbufferPromotion = false;
+			if (s_scanout_any && std::memcmp(&want, &s_scanout_sent, sizeof(want)) == 0)
+				return;
+			s_gs->setScanout(want);
+			s_scanout_sent = want;
+			if (s_scanout_any)
+				ps5px_log("paraLLEl-GS: scan-out now %s%s%s%s%s%s", want.forceProgressive ? "progressive where possible" : "the PS2's own fields",
+					want.antiBlur ? ", anti-blur" : "", want.overscan ? ", overscan shown" : "", want.crtcOffsets ? ", screen offsets" : "",
+					want.mipmaps ? "" : ", no mipmaps", want.sharp2D ? ", sharp 2-D" : "");
+			s_scanout_any = true;
+		}
+	} // namespace
+
 	void VSync(uint32_t field, bool registers_written)
 	{
+		SendScanout();
 		uint64_t regs[GSGpuRenderer::kPrivRegCount];
 		for (uint32_t i = 0; i < GSGpuRenderer::kPrivRegCount; i++)
 			std::memcpy(&regs[i], s_regs + i * 16u, sizeof(uint64_t));

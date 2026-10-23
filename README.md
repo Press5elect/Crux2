@@ -468,6 +468,16 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.5 changed
+
+Changed:
+- **paraLLEl-GS takes the display settings**: Deinterlacing (Automatic: a progressive picture where
+  the game allows it; any other choice: the fields as the PS2's own scan-out blended them), Anti-blur,
+  Screen offsets, Show overscan and Mipmapping, changed while a game runs. What it has no equivalent
+  of (the internal resolution, texture filtering, dithering, blending accuracy, the hardware and
+  upscaling fixes, texture packs, Disable interlace offset) is greyed out while it is on; the
+  paraLLEl-GS row says which is which.
+
 ## What v1.0.4 changed
 
 Added:
