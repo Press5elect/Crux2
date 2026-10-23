@@ -63,6 +63,7 @@
 #include "common/Error.h"
 #include "common/FileSystem.h"
 #include "common/HostSys.h"
+#include <ps5platform/kernel.h>
 #include "common/Path.h"
 #include "common/ProgressCallback.h"
 #include "common/SmallString.h"
@@ -121,7 +122,9 @@ namespace PS5Host
 	///    per draw (Black: 10,000-12,500 barriers a frame, the GPU at 100%).
 	/// 8 (the first release): the release's defaults (SetReleaseDefaults), each only where the file has no
 	///    value of its own for it.
-	constexpr int PS5_DEFAULTS_VERSION = 8;
+	/// 9 (v1.0.2): the figures' place back at the top right where the first release left it "not
+	///    shown" (no figure is on by default, so nothing appears; switching one on showed nothing).
+	constexpr int PS5_DEFAULTS_VERSION = 9;
 
 	/// A test run's measuring window, and how long the last frame is given to reach its screenshot.
 	constexpr double TEST_WINDOW_SECONDS = 5.0;
@@ -366,7 +369,7 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	i(GS, "VsyncQueueSize", 0);
 	// No on-screen display: neither messages nor figures nor indicators.
 	i(GS, "OsdMessagesPos", 0);
-	i(GS, "OsdPerformancePos", 0);
+	i(GS, "OsdPerformancePos", 3); // (the figures' place; none of them is switched on)
 	b(GS, "OsdShowIndicators", false);
 	b(GS, "OsdShowTextureReplacements", false);
 	// The emulator.
@@ -609,6 +612,11 @@ bool PS5Host::InitializeConfig()
 				SetOrderedViewDefault(si);
 				ps5px_log("settings: the rasterizer ordered view is on now (fast high blending accuracy); Settings > Graphics changes it");
 			}
+		}
+		if (version < 9 && si.GetIntValue("EmuCore/GS", "OsdPerformancePos", 3) == 0)
+		{
+			si.SetIntValue("EmuCore/GS", "OsdPerformancePos", 3);
+			ps5px_log("settings: the on-screen figures' place is the top right again (the first release had it hidden)");
 		}
 		if (version < 8)
 		{
@@ -1268,9 +1276,25 @@ void Host::OnVMStarting()
 	s_session_timer.Reset();
 }
 
+namespace
+{
+	/// The memory the title has left, for the boot log at a game's start and end: games played one
+	/// after another should find the same each time (a game that keeps something takes it from the next).
+	void LogMemory(const char* when)
+	{
+		size_t flexible = 0;
+		sceKernelAvailableFlexibleMemorySize(&flexible);
+		ps5px_log("memory %s: %llu MiB of direct memory in its largest free run, %zu MiB of flexible memory free; the graphics "
+				  "device's texture pool %llu MiB",
+			when, static_cast<unsigned long long>(GetAvailablePhysicalMemory() >> 20), flexible >> 20,
+			static_cast<unsigned long long>(g_gs_device ? (g_gs_device->GetPoolMemoryUsage() >> 20) : 0));
+	}
+} // namespace
+
 void Host::OnVMStarted()
 {
 	PS5BootStep::Set(PS5BootStep::Step::None);
+	MTGS::RunOnGSThread([]() { LogMemory("at the game's start"); });
 	// The pipelines this game needed last time are made ahead (GSDeviceVK_PS5.cpp).
 	MTGS::RunOnGSThread([serial = VMManager::GetDiscSerial()]() {
 		if (g_gs_device)
@@ -1297,6 +1321,18 @@ void Host::OnVMDestroyed()
 				g_gs_device->PipelinesForGame(std::string());
 			// paraLLEl-GS ends with its game; the next game decides for itself.
 			PS5PGS::Close();
+			// The game's render targets and textures went back to the device's pool when the GS was
+			// reset (VMManager::Shutdown), and the pool is aged only by a game's frames: the interface
+			// draws none. At 6x they are hundreds of MB, which the next game would start with on top of
+			// its own. They go now. (Games played one after another slowed down and hitched; the memory
+			// lines say whether this was it. needs proper testing)
+			if (g_gs_device)
+			{
+				const u64 pooled = g_gs_device->GetPoolMemoryUsage();
+				g_gs_device->PurgePool();
+				ps5px_log("graphics: %llu MiB of the game's textures let go", static_cast<unsigned long long>(pooled >> 20));
+			}
+			LogMemory("after the game");
 		});
 	}
 	// And the disc drive is the watcher's again, if the game had it.

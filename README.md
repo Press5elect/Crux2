@@ -468,6 +468,19 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.2 changed
+
+Fixed:
+- **Switching on an on-screen figure (FPS, speed and the rest) showed nothing:** the first
+  release's defaults left the figures' place at "Not shown". It is the top right again (no figure
+  is on by default, so nothing appears until you switch one on), and switching a figure on while
+  the place is "Not shown" moves it to the top right. While a game is paused under the menus, a
+  figure appears when the game goes on.
+- **Games played one after another slowed down and hitched:** the render targets and textures of
+  the game before (hundreds of MB at 6x) stayed in the graphics device's pool, which only a running
+  game ages. They are let go when a game closes. The boot log says how much, and how much memory
+  there is at each game's start and end, so a game that keeps something can be found.
+
 ## What v1.0.1 changed
 
 Added:

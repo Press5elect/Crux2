@@ -928,7 +928,7 @@ Page osdPage()
 	rows.push_back(range("OSD scale", "The size of the figures and messages", GS, "OsdScale", 100, 50, 500, 5, "%", A));
 	rows.push_back(adv(frange("OSD margin", "How far from the screen's edges they are", GS, "OsdMargin", 10.f, 0, 100, 1, 0, " px", A)));
 	rows.push_back(adv(list("OSD messages position", "Where the emulator's messages are shown", GS, "OsdMessagesPos", 0, places, 0, A)));
-	rows.push_back(adv(list("OSD performance position", "Where the figures chosen below are shown", GS, "OsdPerformancePos", 0, places, 0, A)));
+	rows.push_back(adv(list("OSD performance position", "Where the figures chosen below are shown", GS, "OsdPerformancePos", 3, places, 0, A)));
 	rows.push_back(toggle("Bold figures", "Heavier letters, easier to read from a sofa", GS, "OsdBoldText", true, A));
 	rows.push_back(toggle("Move the figures from corner to corner", "The figures over a game go to another corner every five minutes", FRONT, "OsdMove",
 		false, F));

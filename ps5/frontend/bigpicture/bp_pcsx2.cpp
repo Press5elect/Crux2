@@ -4597,6 +4597,21 @@ private:
 				si->SetStringValue("USB2", "singstar_player2_device_name", setup.player2);
 			}
 		}
+		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the
+		// first release's default): they go to the top right, or switching them on would show nothing.
+		if (where == "EmuCore/GS" && what.compare(0, 7, "OsdShow") == 0 && what != "OsdShowIndicators")
+		{
+			const auto lock = Host::GetSettingsLock();
+			if (SettingsInterface* const si = Layer(layer); si != nullptr && si->GetBoolValue(section, key, false))
+			{
+				SettingsInterface* const base = Host::Internal::GetBaseSettingsLayer();
+				if (base && base->GetIntValue("EmuCore/GS", "OsdPerformancePos", 3) == 0)
+				{
+					base->SetIntValue("EmuCore/GS", "OsdPerformancePos", 3);
+					m_pages++;
+				}
+			}
+		}
 		// What decides the rows of a page.
 		if ((where.compare(0, 3, "Pad") == 0 && (what == "Type" || what.compare(0, 8, "Multitap") == 0)))
 			m_pages++;

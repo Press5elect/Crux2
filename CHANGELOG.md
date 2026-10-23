@@ -1,5 +1,12 @@
 # Crux2 - what changed
 
+## v1.0.2 (2026-10-23)
+
+- Fixed: switching on an on-screen figure showed nothing (their place was "Not shown" by default).
+- Fixed: games played one after another slowed down: the game before's textures stayed in the
+  graphics device's pool; they go when a game closes, and the boot log reports memory at each
+  game's start and end.
+
 ## v1.0.1 (2026-10-23)
 
 - Added: USB controllers (experimental): DualShock 3 / SIXAXIS with pressure-sensitive buttons,
