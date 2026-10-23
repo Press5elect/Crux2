@@ -12,3 +12,5 @@ ps5/pgo/runs-*/
 ps5/pgo/crux2-*.profdata
 ps5/pgo/crux2-round*.profdata
 __pycache__/
+ps5/recomp/tools/accel/*.so
+ps5/recomp/tools/accel/*.dll

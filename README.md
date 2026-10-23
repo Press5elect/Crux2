@@ -559,13 +559,20 @@ graphics driver on its own thread. Everything can be changed in Settings.
 
 ## Native code modules (experimental)
 
-1. On your PC (Linux Mint or Ubuntu), unpack the newest recomp kit (`Crux2-recomp-kit-<version>.zip`), install
-   `git cmake ninja-build clang lld python3`, and copy the game's executable from your disc (the
-   file `BOOT2` names in its `SYSTEM.CNF`, `SLUS_123.45` say).
-2. `recomp/tools/recomp-game.sh SLUS_123.45` (add `--for both` for Crux2 Recomp's module too; add
-   `--ghidra <Ghidra's folder>` to have Ghidra find the functions, better on retail games). The
-   first run fetches PS2Recomp and builds its converter; compiling a large game takes long.
+1. On your PC (Linux Mint or Ubuntu), unpack the newest recomp kit (`Crux2-recomp-kit-<version>.zip`) and install
+   `git cmake ninja-build clang lld python3`.
+2. `recomp/tools/recomp-game.sh GAME.chd` (or the game's `.iso`, `.cue`, `.cso`, a folder of disc
+   images, or the executable itself: the file `BOOT2` names in its `SYSTEM.CNF`, read out of the disc
+   by itself). Add `--for both` for Crux2 Recomp's folder too, and `--ghidra <Ghidra's folder>` to have
+   Ghidra find the functions (better on retail games). The first run fetches PS2Recomp and builds its
+   converter; compiling a large game takes long.
 3. Copy `SLUS_123.45.crux2native` to `/data/crux2/native/` on the console, and start the game.
+
+The kit makes Crux2 Recomp's folders on Windows too: with Python 3 and LLVM 18 or newer installed,
+drop a game's `.chd` (or `.iso`, `.cue`, `.cso`, or a folder of them) on `Crux2 Recomp.cmd`, and
+copy the folder it makes in `output` (the executable, its module and the disc as an `.iso`) into
+`/data/crux2recomp/`. The kit brings PS2Recomp's converter built for Windows. Crux2's native modules
+are made on Linux.
 
 Or, with the games on a network share: start the game once in Crux2, and it puts its executable
 in `Crux2-native/executables` on that share. Then, with the share mounted on the PC,
@@ -1181,7 +1188,7 @@ yet.
 | `ps5/frontend/ps5_letter_jump.h` | The order of titles (and the letter groups of the earlier game list, with their test) |
 | `ps5/frontend/ps5_libc.c` | `getaddrinfo` (numeric addresses and the console's resolver) and the libc functions the console lacks |
 | `ps5/frontend/ps5_native.cpp`, `ps5_native_loader.cpp` | Native code modules: the module for the running executable, loaded into executable memory; the call PCSX2's recompiler compiles into a block (the hook is in `ps5.patch`, `iR5900.cpp`) |
-| `ps5/recomp/` | The recomp kit: `tools/recomp-game.sh` (a game's modules on the PC), `tools/build-module.py`, `runtime/` (what a native module is built with: the boundary `crux2_native_abi.h`, PS2Recomp's macros on PCSX2's memory map), `patches/ps2recomp-crux2.patch` (PS2Recomp's Crux2 mode), `tests/` (the PC test against stand-in memory) |
+| `ps5/recomp/` | The recomp kit: `tools/recomp-game.py` (a game's modules on the PC, Linux and Windows; `recomp-game.sh` calls it), `tools/ps2disc.py` (the executable and the .iso out of a .chd, .cue/.bin or .cso; `tools/accel/` its native helper for one codec), `tools/build-module.py`, `runtime/` (what a native module is built with: the boundary `crux2_native_abi.h`, PS2Recomp's macros on PCSX2's memory map), `patches/ps2recomp-crux2.patch` (PS2Recomp's Crux2 mode), `tests/` (the PC test against stand-in memory; `tests/disc/` the disc reader against chdman's images) |
 | `ps5/frontend/vfs/` | The virtual file layer: SMB (libsmb2) behind the emulator's ordinary file calls |
 | `ps5/common/` | PCSX2's platform layer for the console: memory (shared views, the code area, fastmem, page faults), threads, timing |
 | `ps5/elevation/` | The sandbox elevation client and helper (BlackBearReloaded's example, with this title's ID) |
@@ -1218,6 +1225,7 @@ Crux2, and changing it for your own use, need nothing: the licence does not let 
 | USB drive access (`sandbox-elevator.elf` and its client) | BlackBearReloaded, ps5-native-app-boilerplate | GPL-3.0-or-later |
 | PS2Recomp (the converter the recomp kit fetches and patches; its macros in `ps5/recomp/runtime/upstream/`) | ran-j and the PS2Recomp contributors | GPL-3.0 |
 | def-jam-vendetta-recomp's work on PS2Recomp (the recomp kit's `runner/def-jam-vendetta-recomp.patch`, `runner/vu1_recomp.py`) | jcsix694 | GPL-3.0 |
+| What the recomp kit's Windows converter (`recomp/bin/windows-x64`) is built with: ELFIO, toml11, fmt, rabbitizer, nlohmann/json; libdwarf; mingw-w64's runtime and GCC's libstdc++ | their authors | MIT; LGPL-2.1; the mingw-w64 licences and the GCC Runtime Library Exception |
 | libsmb2 | Ronnie Sahlberg | LGPL-2.1-or-later |
 | curl; OpenSSL | Daniel Stenberg and contributors; the OpenSSL Project | curl licence; Apache-2.0 |
 | The libraries PCSX2 bundles and depends on (Dear ImGui, fmt, libchdr, LZMA SDK, libzip, rcheevos, SoundTouch, Zydis, FreeType, libpng, libjpeg-turbo, libwebp, zstd, LZ4, shaderc, glslang, SPIRV-Tools, PlutoSVG, rapidyaml and others) | their authors | their own; all compatible with GPL-3.0 (`licenses/`) |
