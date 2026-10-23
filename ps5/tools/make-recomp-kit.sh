@@ -117,7 +117,7 @@ the disc's SYSTEM.CNF). From a disc image the executable is read out by itself.
 Windows (Crux2 Recomp)
 ----------------------
 1. Install Python 3 (https://www.python.org/downloads/, tick "Add python.exe to PATH") and LLVM 18
-   or newer (LLVM-<version>-win64.exe from https://github.com/llvm/llvm-project/releases).
+   or newer (LLVM-<version>-win64.msi from https://github.com/llvm/llvm-project/releases).
 2. Drop the game's .chd (or .iso, .cue, .cso; several, or a folder of them) on "Crux2 Recomp.cmd".
 3. When it is done, output\\<executable>\\ holds the executable, its .crux2recomp module and the disc
    as an .iso. Copy that folder into /data/crux2recomp/ on the console (FTP or a USB drive) and

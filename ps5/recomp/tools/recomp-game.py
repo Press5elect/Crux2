@@ -27,7 +27,7 @@ Options:
   --jobs N       compilers at once (default: every processor)
 
 It needs Python 3.9 or newer and LLVM 18 or newer (clang, clang++, ld.lld):
-  Windows: LLVM's installer from https://github.com/llvm/llvm-project/releases (LLVM-<version>-win64.exe);
+  Windows: LLVM's installer from https://github.com/llvm/llvm-project/releases (LLVM-<version>-win64.msi);
            it is found in C:\\Program Files\\LLVM\\bin even when not on the PATH. The kit brings
            PS2Recomp's converter built for Windows.
   Linux:   sudo apt install git cmake ninja-build clang lld python3 (the first run fetches PS2Recomp
@@ -124,7 +124,7 @@ def find_llvm() -> dict:
     if older:
         raise Failure(f"clang {older[1]} found ({older[0]}); Crux2 Recomp's modules need clang 18 or newer")
     if WINDOWS:
-        raise Failure("LLVM (clang, ld.lld) is not installed: get LLVM-<version>-win64.exe from "
+        raise Failure("LLVM (clang, ld.lld) is not installed: get LLVM-<version>-win64.msi from "
                       "https://github.com/llvm/llvm-project/releases and run it")
     raise Failure("clang 18+, clang++ and ld.lld are not installed: sudo apt install clang lld (or clang-18 lld-18)")
 
