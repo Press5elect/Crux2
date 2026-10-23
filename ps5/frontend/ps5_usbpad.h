@@ -7,15 +7,14 @@
 // decoded by ps5_usbpad_logic.h, and handed to the input source as up to four more controllers,
 // SDL-4 to SDL-7. The thread looks for pads that came or went once a second.
 //
-// THE CONSOLE'S TRANSPORT IS A STUB. A title would read a USB device through libSceUsbd
-// (sceUsbdInit, sceUsbdGetDeviceList, sceUsbdOpen, sceUsbdClaimInterface,
-// sceUsbdInterruptTransfer, ...), but the payload SDK has no stub library for that module, the
-// module's system ID for sceSysmoduleLoadModule is not known here, and whether a fake-signed
-// title may open a USB device at all has never been tried on a console. Writing that blind is not
-// worth the risk of a title that hangs in a USB call; so CreateConsoleTransport() returns a
-// transport whose Start() says no, the manager logs that once, and nothing else happens. The
-// decoding, the mapping, the hot-plug bookkeeping and the input source's side are complete and
-// tested on the PC with a made-up transport: a real transport is the one piece left.
+// The console's transport (ps5_usbpad_console.cpp) reads USB devices through the console's
+// libSceUsbd (libusb's interface under Sony's names), which is found while the title runs: the
+// payload SDK has no stub library for it, and a title that imports what the console does not give
+// it does not start. Whether a homebrew title may open a USB device at all had not been tried on
+// a console when this was written (needs proper testing): every step says in the boot log how it
+// went (usb pads: ...), and when one is refused the transport gives up for the session and only
+// the console's own controllers are read. Off by default ([PS5] USBPads; Settings > Controllers
+// > "USB controllers (experimental)").
 
 #pragma once
 
@@ -43,6 +42,7 @@ namespace PS5UsbPads
 		uint8_t interface_class = 0;
 		uint8_t interface_subclass = 0;
 		uint8_t interface_protocol = 0;
+		uint8_t interface_number = 0;
 		std::vector<uint8_t> report_descriptor; // HID interfaces only
 		std::string name; // the product string, or empty
 	};
@@ -64,10 +64,17 @@ namespace PS5UsbPads
 		virtual int Read(int handle, uint8_t* buffer, uint32_t size, uint32_t timeout_ms) = 0;
 		/// An output report (the rumble); false when it was not sent.
 		virtual bool Write(int handle, const uint8_t* data, uint32_t size) = 0;
+		/// A control transfer on the default pipe (a HID feature or output report by
+		/// GET/SET_REPORT): the bytes moved, or a negative value.
+		virtual int Control(int /*handle*/, uint8_t /*request_type*/, uint8_t /*request*/, uint16_t /*value*/, uint16_t /*index*/,
+			uint8_t* /*data*/, uint16_t /*length*/)
+		{
+			return -1;
+		}
 		virtual void Close(int handle) = 0;
 	};
 
-	/// The console's transport (a stub; see above).
+	/// The console's transport (libSceUsbd; see above). On the PC, one whose Start() says no.
 	std::unique_ptr<Transport> CreateConsoleTransport();
 
 	/// What the input source sees of one slot.
@@ -118,6 +125,8 @@ namespace PS5UsbPads
 			PS5UsbPadLogic::HidLayout layout;
 			PS5UsbPadLogic::HidState hid;
 			std::array<uint8_t, 2> rumble_sent = {};
+			uint8_t interface_number = 0;
+			bool output_sent = false; // a DualShock 3's light set once
 		};
 
 		void Rescan();

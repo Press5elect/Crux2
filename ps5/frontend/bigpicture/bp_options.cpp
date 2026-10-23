@@ -416,6 +416,14 @@ Page biosPageOf(int layer, bool forGame)
 {
 	Page page{ICON_FA_MICROCHIP, "BIOS", {}};
 	auto& rows = page.rows;
+	if (!forGame)
+	{
+		rows.push_back(heading("THE PLAYSTATION 2'S OWN MENU"));
+		rows.push_back(action("Start the PlayStation 2 menu",
+			"The BIOS with no game: the PS2's browser (its memory cards and discs) and its System Configuration (clock, language, "
+			"screen). The quick menu's Quit game goes back to the library",
+			[] { startPs2Menu(); }, Option::NoGame));
+	}
 	addPageRows(rows, be->biosPage(layer), "BIOS SELECTION");
 	if (!forGame)
 	{

@@ -777,8 +777,77 @@ public:
 		written[handle].emplace_back(data, data + size);
 		return true;
 	}
+	struct ControlCall
+	{
+		int handle;
+		uint8_t type, request;
+		uint16_t value, index, length;
+		std::vector<uint8_t> data;
+	};
+	std::vector<ControlCall> controls;
+	int Control(int handle, uint8_t type, uint8_t request, uint16_t value, uint16_t index, uint8_t* data, uint16_t length) override
+	{
+		controls.push_back({handle, type, request, value, index, length, std::vector<uint8_t>(data, data + length)});
+		return length;
+	}
 	void Close(int handle) override { closed.push_back(handle); }
 };
+
+static void DualShock3()
+{
+	using namespace PS5UsbPadLogic;
+	CHECK(IsDualShock3(0x054c, 0x0268));
+	CHECK(!IsDualShock3(0x054c, 0x0ce6)); // a DualSense: the console's own
+	CHECK(ClassifyDevice(0x054c, 0x0268, 0x03, 0x00, 0x00, nullptr) == Protocol::DualShock3);
+	CHECK(ClassifyDevice(0x054c, 0x0ce6, 0x03, 0x00, 0x00, nullptr) == Protocol::None);
+
+	// The 49-byte report: Cross pressed hard, Square lightly, up, L1, Start, the PS button;
+	// left stick right, right stick up; L2 half.
+	uint8_t r[49] = {0x01};
+	r[2] = 0x08 | 0x10; // Start, up
+	r[3] = 0x04 | 0x40 | 0x80; // L1, Cross, Square
+	r[4] = 0x01; // PS
+	r[6] = 255;
+	r[7] = 128;
+	r[8] = 128;
+	r[9] = 0;
+	r[14] = 200; // up's pressure
+	r[18] = 128; // L2
+	r[20] = 255; // L1
+	r[24] = 255; // Cross
+	r[25] = 40; // Square
+	r[22] = 90; // Triangle's pressure byte, its button not pressed
+	MappedPad p;
+	CHECK(DecodeDualShock3Report(r, sizeof(r), &p));
+	CHECK(p.has_pressure);
+	CHECK(p.buttons == ((1u << SDL_START) | (1u << SDL_DPAD_UP) | (1u << SDL_LEFT_SHOULDER) | (1u << SDL_SOUTH) | (1u << SDL_WEST) |
+						   (1u << SDL_GUIDE)));
+	CHECK(Near(p.pressure[SDL_SOUTH], 1.0f));
+	CHECK(Near(p.pressure[SDL_WEST], 40.0f / 255.0f));
+	CHECK(Near(p.pressure[SDL_DPAD_UP], 200.0f / 255.0f));
+	CHECK(p.pressure[SDL_NORTH] == 0.0f); // not pressed: no pressure, whatever the byte says
+	CHECK(Near(p.axes[SDL_AXIS_LEFT_X], 1.0f) && Near(p.axes[SDL_AXIS_LEFT_Y], 0.0f));
+	CHECK(p.axes[SDL_AXIS_RIGHT_Y] == -1.0f); // 0: all the way up
+	CHECK(Near(p.axes[SDL_AXIS_LEFT_TRIGGER], 128.0f / 255.0f));
+
+	// A pressed button whose pressure byte still reads 0 is a light press, not none.
+	uint8_t lag[49] = {0x01};
+	lag[3] = 0x20; // Circle
+	CHECK(DecodeDualShock3Report(lag, sizeof(lag), &p));
+	CHECK(p.pressure[SDL_EAST] > 0.0f && p.pressure[SDL_EAST] < 0.01f);
+
+	// Without its id byte (48 bytes), the same.
+	CHECK(DecodeDualShock3Report(r + 1, 48, &p));
+	CHECK(p.buttons & (1u << SDL_SOUTH));
+	// Not input: short, another id.
+	CHECK(!DecodeDualShock3Report(r, 20, &p));
+	uint8_t other[49] = {0x02};
+	CHECK(!DecodeDualShock3Report(other, sizeof(other), &p));
+
+	const auto out = DualShock3OutputReport(200, 1, 2);
+	CHECK(out[0] == 0x01 && out[3] == 1 && out[5] == 200 && out[10] == (1u << 2));
+	CHECK(DualShock3OutputReport(0, 0, 9)[10] == (1u << 4)); // players past four: the fourth light
+}
 
 static void Manager()
 {
@@ -920,6 +989,48 @@ static void Manager()
 	mt.Stop();
 }
 
+// A DualShock 3 through the manager: woken with GET_REPORT 0xF2, its light set, pressure passed.
+static void ManagerDualShock3()
+{
+	using namespace PS5UsbPadLogic;
+	auto owned = std::make_unique<FakeTransport>();
+	FakeTransport& t = *owned;
+	PS5UsbPads::Manager m;
+	CHECK(m.Start(std::move(owned), false));
+	PS5UsbPads::DeviceInfo ds3;
+	ds3.id = 77;
+	ds3.vendor = 0x054c;
+	ds3.product = 0x0268;
+	ds3.interface_class = 0x03;
+	ds3.interface_number = 0;
+	t.devices = {ds3};
+	m.PollOnce(0.0, 0);
+	const PS5UsbPads::Slot s = m.Get(0);
+	CHECK(s.connected && s.protocol == Protocol::DualShock3 && s.name == "DualShock 3");
+	CHECK(!t.controls.empty() && t.controls[0].type == 0xa1 && t.controls[0].request == 0x01 && t.controls[0].value == 0x03f2);
+	// The light, once, as a SET_REPORT output report.
+	bool light = false;
+	for (const auto& c : t.controls)
+		light = light || (c.type == 0x21 && c.request == 0x09 && c.value == 0x0201 && c.data.size() == 36 && c.data[10] == (1u << 1));
+	CHECK(light);
+
+	std::vector<uint8_t> r(49, 0);
+	r[0] = 0x01;
+	r[3] = 0x40; // Cross
+	r[24] = 100;
+	t.reports[t.handle_of.begin()->first].push_back(r);
+	m.PollOnce(0.5, 0);
+	const PS5UsbPads::Slot after = m.Get(0);
+	CHECK(after.state.has_pressure && Near(after.state.pressure[SDL_SOUTH], 100.0f / 255.0f));
+
+	// The rumble goes out as the same report.
+	const size_t before = t.controls.size();
+	m.SetRumble(0, 255, 255);
+	m.PollOnce(0.6, 0);
+	CHECK(t.controls.size() == before + 1 && t.controls.back().data[5] == 255 && t.controls.back().data[3] == 1);
+	m.Stop();
+}
+
 int main()
 {
 	Combo();
@@ -929,8 +1040,10 @@ int main()
 	KeyboardNames();
 	KeyboardReports();
 	XInput();
+	DualShock3();
 	Hid();
 	Manager();
+	ManagerDualShock3();
 	std::printf("input logic: %d checks, %d failed\n", s_checks, s_failures);
 	return s_failures == 0 ? 0 : 1;
 }

@@ -7457,10 +7457,10 @@ index 3356134..1324012 100644
  
  	static void pad_handle_data(USBDevice* dev, USBPacket* p)
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index 43f6d22..759ba20 100644
+index 43f6d22..015dd24 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
-@@ -42,6 +42,12 @@
+@@ -42,6 +42,13 @@
  #include "USB/USB.h"
  #include "Vif_Dynarec.h"
  #include "VMManager.h"
@@ -7469,11 +7469,12 @@ index 43f6d22..759ba20 100644
 +#include "ps5_pacing.h"
 +#include "ps5_boot_step.h"
 +#include "ps5_thread_layout.h"
++extern "C" void ps5px_log(const char* format, ...);
 +#endif
  #include "ps2/BiosTools.h"
  
  #include "common/Console.h"
-@@ -194,6 +200,9 @@ static float s_target_speed = 0.0f;
+@@ -194,6 +201,9 @@ static float s_target_speed = 0.0f;
  static bool s_target_speed_can_sync_to_host = false;
  static bool s_target_speed_synced_to_host = false;
  static bool s_use_vsync_for_timing = false;
@@ -7483,7 +7484,7 @@ index 43f6d22..759ba20 100644
  
  // Used to track play time. We use a monotonic timer here, in case of clock changes.
  static u64 s_session_resume_timestamp = 0;
-@@ -1007,6 +1016,13 @@ bool VMManager::UpdateGameSettingsLayer()
+@@ -1007,6 +1017,13 @@ bool VMManager::UpdateGameSettingsLayer()
  		}
  	}
  
@@ -7497,7 +7498,7 @@ index 43f6d22..759ba20 100644
  	std::string input_profile_name;
  	if (new_interface)
  		new_interface->GetStringValue("EmuCore", "InputProfileName", &input_profile_name);
-@@ -1366,6 +1382,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1366,6 +1383,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	// cancel any game list scanning, we need to use CDVD!
  	// TODO: we can get rid of this once, we make CDVD not use globals...
  	// (or make it thread-local, but that seems silly.)
@@ -7507,7 +7508,7 @@ index 43f6d22..759ba20 100644
  	Host::CancelGameListRefresh();
  
  	s_state.store(VMState::Initializing, std::memory_order_release);
-@@ -1450,6 +1469,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1450,6 +1470,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	// Playing GS dumps don't need a BIOS.
  	if (!GSDumpReplayer::IsReplayingDump())
  	{
@@ -7517,7 +7518,7 @@ index 43f6d22..759ba20 100644
  		Console.WriteLn("Loading BIOS...");
  		if (!LoadBIOS())
  		{
-@@ -1469,6 +1491,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1469,6 +1492,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	}
  
  	Error cdvd_error;
@@ -7527,7 +7528,7 @@ index 43f6d22..759ba20 100644
  	Console.WriteLn("Opening CDVD...");
  	if (!DoCDVDopen(&cdvd_error))
  	{
-@@ -1562,6 +1587,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1562,6 +1588,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  
  	Console.WriteLn("Opening GS...");
  	s_gs_open_on_initialize = MTGS::IsOpen();
@@ -7537,7 +7538,7 @@ index 43f6d22..759ba20 100644
  	if (!s_gs_open_on_initialize && !MTGS::WaitForOpen())
  	{
  		// we assume GS is going to report its own error
-@@ -1575,6 +1603,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1575,6 +1604,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening SPU2...");
@@ -7547,7 +7548,7 @@ index 43f6d22..759ba20 100644
  	if (!SPU2::Open())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize SPU2."));
-@@ -1584,6 +1615,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1584,6 +1616,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  
  
  	Console.WriteLn("Initializing Pad...");
@@ -7557,7 +7558,7 @@ index 43f6d22..759ba20 100644
  	if (!Pad::Initialize())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize PAD."));
-@@ -1593,6 +1627,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1593,6 +1628,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	ScopedGuard close_pad = &Pad::Shutdown;
  
  	Console.WriteLn("Initializing SIO2...");
@@ -7567,7 +7568,7 @@ index 43f6d22..759ba20 100644
  	if (!g_Sio2.Initialize())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize SIO2."));
-@@ -1613,6 +1650,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1613,6 +1651,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening DEV9...");
@@ -7577,7 +7578,7 @@ index 43f6d22..759ba20 100644
  	if (DEV9init() != 0 || DEV9open() != 0)
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize DEV9."));
-@@ -1624,6 +1664,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1624,6 +1665,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening USB...");
@@ -7587,7 +7588,7 @@ index 43f6d22..759ba20 100644
  	if (!USBopen())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize USB."));
-@@ -1770,6 +1813,10 @@ void VMManager::Shutdown(bool save_resume_state)
+@@ -1770,6 +1814,10 @@ void VMManager::Shutdown(bool save_resume_state)
  	cdvdUnlock();
  
  	s_state.store(VMState::Shutdown, std::memory_order_release);
@@ -7598,7 +7599,7 @@ index 43f6d22..759ba20 100644
  	FullscreenUI::OnVMDestroyed();
  	SaveStateSelectorUI::Clear();
  	UpdateInhibitScreensaver(false);
-@@ -1928,6 +1975,21 @@ std::string VMManager::GetCurrentSaveStateFileName(s32 slot, bool backup)
+@@ -1928,6 +1976,21 @@ std::string VMManager::GetCurrentSaveStateFileName(s32 slot, bool backup)
  	return GetSaveStateFileName(s_disc_serial.c_str(), s_disc_crc, slot, backup);
  }
  
@@ -7620,7 +7621,7 @@ index 43f6d22..759ba20 100644
  bool VMManager::DoLoadState(const char* filename, Error* error)
  {
  	if (GSDumpReplayer::IsReplayingDump())
-@@ -1935,6 +1997,25 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
+@@ -1935,6 +1998,25 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Cannot load state while replaying a GS dump."));
  		return false;
  	}
@@ -7646,7 +7647,7 @@ index 43f6d22..759ba20 100644
  	GSCapture::FlushAudioOnly();
  	Host::OnSaveStateLoading(filename);
  
-@@ -2244,6 +2325,9 @@ void VMManager::UpdateTargetSpeed()
+@@ -2244,6 +2326,9 @@ void VMManager::UpdateTargetSpeed()
  	s_target_speed_can_sync_to_host = false;
  	s_target_speed_synced_to_host = false;
  	s_use_vsync_for_timing = false;
@@ -7656,7 +7657,7 @@ index 43f6d22..759ba20 100644
  
  	if (EmuConfig.EmulationSpeed.SyncToHostRefreshRate)
  	{
-@@ -2251,13 +2335,55 @@ void VMManager::UpdateTargetSpeed()
+@@ -2251,13 +2336,55 @@ void VMManager::UpdateTargetSpeed()
  		// We can at least avoid the query in the first place if we're not using sync to host.
  		if (const std::optional<float> host_refresh_rate = GSGetHostRefreshRate(); host_refresh_rate.has_value())
  		{
@@ -7713,7 +7714,7 @@ index 43f6d22..759ba20 100644
  
  			Console.WriteLn("Refresh rate: Host=%fhz Guest=%fhz Ratio=%f - %s %s",
  				host_refresh_rate.value(), frame_rate, host_to_guest_ratio,
-@@ -2301,10 +2427,36 @@ float VMManager::GetFrameRate()
+@@ -2301,10 +2428,64 @@ float VMManager::GetFrameRate()
  void VMManager::ResetFrameLimiter()
  {
  	s_limiter_frame_start = GetCPUTicks();
@@ -7747,10 +7748,38 @@ index 43f6d22..759ba20 100644
 +		return;
 +	}
 +#endif
++#ifdef __PROSPERO__
++	// PS5: while the screen paces, the clock still keeps the game from running ahead of its own
++	// rate. A present that does not wait (the flip not yet held for the refreshes the plan asks, at
++	// 119.88 Hz the PS2's start-up in Crux2 v1.0.0: double speed until the watch above gave up after
++	// four seconds) would otherwise let a frame through at every refresh. The floor is a hundredth
++	// short of a frame, so a present that does wait for its refresh never meets it. (Needs proper
++	// testing at 119.88 Hz: a frame that waits here too comes out a refresh later.)
++	if (s_use_vsync_for_timing && !vsync_start && s_target_speed != 0.0f)
++	{
++		static u64 s_ps5_last_frame = 0;
++		static u32 s_ps5_held = 0;
++		const u64 now = GetCPUTicks();
++		const u64 floor = static_cast<u64>(static_cast<double>(s_limiter_ticks_per_frame) * 0.99);
++		if (s_ps5_last_frame != 0 && now > s_ps5_last_frame && now - s_ps5_last_frame < floor)
++		{
++			if (s_ps5_held++ == 0)
++			{
++				ps5px_log("pacing: a frame came %.1f ms after the one before while the screen paced (%.1f ms is the game's): the clock holds "
++						  "it back (said once)",
++					static_cast<double>(now - s_ps5_last_frame) * 1000.0 / static_cast<double>(GetTickFrequency()),
++					static_cast<double>(s_limiter_ticks_per_frame) * 1000.0 / static_cast<double>(GetTickFrequency()));
++			}
++			Threading::SleepUntil(s_ps5_last_frame + floor);
++		}
++		s_ps5_last_frame = GetCPUTicks();
++		return;
++	}
++#endif
  	if (s_target_speed == 0.0f || s_use_vsync_for_timing)
  		return;
  
-@@ -2322,6 +2474,13 @@ void VMManager::Internal::Throttle(bool vsync_start)
+@@ -2322,6 +2503,13 @@ void VMManager::Internal::Throttle(bool vsync_start)
  		return;
  	}
  
@@ -7764,7 +7793,7 @@ index 43f6d22..759ba20 100644
  	// Conversion of delta from CPU ticks (microseconds) to milliseconds
  	const s32 msec = static_cast<s32>((sDeltaTime * -1000) / static_cast<s64>(GetTickFrequency()));
  
-@@ -2338,6 +2497,7 @@ void VMManager::Internal::Throttle(bool vsync_start)
+@@ -2338,6 +2526,7 @@ void VMManager::Internal::Throttle(bool vsync_start)
  	while (GetCPUTicks() < uExpectedEnd)
  	{
  	}
@@ -7772,7 +7801,7 @@ index 43f6d22..759ba20 100644
  
  	if (!vsync_start)
  	{
-@@ -3036,6 +3196,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
+@@ -3036,6 +3225,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
  		UpdateTargetSpeed();
  		MTGS::UpdateVSyncMode();
  	}
@@ -7786,7 +7815,7 @@ index 43f6d22..759ba20 100644
  
  	MTGS::ApplySettings();
  }
-@@ -3700,7 +3867,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
+@@ -3700,7 +3896,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
  
  static void InitializeProcessorList()
  {
@@ -7808,7 +7837,7 @@ index 43f6d22..759ba20 100644
  }
  
  void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
-@@ -3715,8 +3896,57 @@ void VMManager::EnsureCPUInfoInitialized()
+@@ -3715,8 +3925,57 @@ void VMManager::EnsureCPUInfoInitialized()
  	std::call_once(s_processor_list_initialized, InitializeProcessorList);
  }
  

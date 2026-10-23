@@ -264,10 +264,10 @@ The bar at the bottom of each screen names what the buttons do there.
 | Move | D-pad or left stick |
 | The tab before / after (Internal, USB, Network) | **L1** / **R1** |
 | The previous / next letter (hold to keep going) | **L2** / **R2** |
-| The next view (shelves, grid, list, flow, bookcase, table) | click the **touch pad** |
+| The next view (ten of them, shelves to discs) | click the **touch pad** |
 | The next quick view; after the last, all games again | **R3** (press the right stick) |
 | The game's details: saved states, its own options, More | **Triangle** |
-| The list's menu: search, quick views, order, filters, collections, view, a game at random, scan | **Square** |
+| The list's menu: search, quick views, order, filters, collections, view, a game at random, scan, the PlayStation 2 menu | **Square** |
 | In a game's details: favourite or not / hide or list again | **L1** / **R1** |
 | In a game's details: its cover, its title screen, a picture of play | **up** / **down** |
 | Settings | **Options** |
@@ -311,6 +311,23 @@ builds give them, `SDL-0` to `SDL-3`, so settings carry over.)
 **Light bars in the players' colours** (Settings > Controllers, off by default): each controller's light bar says which player it is, in the
 colours the PlayStation 4 used: blue, red, green, pink. Switched off again, a bar keeps its
 colour until its controller is next connected.
+
+**USB controllers (experimental;** Settings > Controllers, off by default**):** controllers the
+console does not take itself, plugged into its USB ports: a **DualShock 3 or SIXAXIS**, with its
+pressure-sensitive buttons (the d-pad, L1/R1/L2/R2 and the four face buttons, as the DualShock 2
+had them), its rumble and its player light; **Xbox 360** pads; and **guitars, drums and other USB
+pads** that describe themselves as a game pad or joystick. They are players 5 to 8 (`SDL-4` to
+`SDL-7`). Each port's page under Controllers has **Map it to a USB controller** (the first one
+for port 1, the second for port 2), and any of their buttons can be bound by hand. For the rhythm
+games, set the port's controller type to **Guitar** and map it. Crux2 reads them through the
+console's USB library, found while the title runs; that had not been tried on a console when this
+was written. The boot log says how each step went, in lines beginning `usb pads:`, and when the
+console refuses, only its own controllers are read as before.
+
+**The PlayStation 2 menu:** Settings > BIOS > **Start the PlayStation 2 menu**, or the list's menu
+(Square in the library), starts the BIOS with no game: the PS2's browser (its memory cards and
+discs) and its System Configuration (clock, language, screen). **Quit game** in the quick menu goes
+back to the library.
 
 ## Where the games are
 
@@ -450,6 +467,20 @@ On my console the adapter and the hard drive worked. The lines beginning `net:` 
 answered about its network, and count the adapter's name lookups and connections. A game's
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
+
+## What v1.0.1 changed
+
+Added:
+- **USB controllers (experimental):** a DualShock 3 or SIXAXIS with its pressure-sensitive buttons,
+  Xbox 360 pads, and guitars, drums and other USB pads (see Controls). Off by default; the boot log
+  says how it went on the console.
+- **The PlayStation 2 menu:** Settings > BIOS > Start the PlayStation 2 menu, or the library's
+  Square menu: the PS2's browser and its System Configuration.
+
+Fixed:
+- **The PS2's start-up ran at double speed at 120 Hz** (frames paced by the screen) until Crux2
+  noticed four seconds later. The clock now keeps a frame from coming sooner than the game's own
+  rate while the screen paces, from the first frame; the boot log says once when it had to.
 
 ## What Crux2 v1.0.0 has
 

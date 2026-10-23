@@ -933,13 +933,23 @@ void PS5InputSource::ApplyUsbState(u32 slot, const PS5UsbPadLogic::MappedPad& st
 	const PS5UsbPadLogic::MappedPad old = usb.state;
 	usb.state = state;
 
-	const u32 changed = old.buttons ^ state.buttons;
+	// A pad that says how hard its buttons are pressed (the DualShock 3) passes that on: the pad's
+	// button bindings are axis handlers in InputManager, so a value below 1 reaches PadDualshock2 as
+	// the button's pressure, and a change of it while the button is held is passed on too.
+	const auto value_of = [](const PS5UsbPadLogic::MappedPad& p, u32 button) {
+		if (!(p.buttons & (1u << button)))
+			return 0.0f;
+		if (p.has_pressure && button < p.pressure.size() && p.pressure[button] > 0.0f)
+			return std::min(p.pressure[button], 1.0f);
+		return 1.0f;
+	};
 	for (u32 button = 0; button < BUTTON_COUNT; button++)
 	{
-		if (changed & (1u << button))
+		const float before = value_of(old, button), now = value_of(state, button);
+		if (before != now)
 		{
-			InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::SDL, index, button),
-				(state.buttons & (1u << button)) ? 1.0f : 0.0f, s_button_info[button].generic_binding);
+			InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::SDL, index, button), now,
+				s_button_info[button].generic_binding);
 		}
 	}
 	const u32 generic_changed = old.generic_buttons ^ state.generic_buttons;
@@ -1033,7 +1043,8 @@ std::vector<InputBindingKey> PS5InputSource::EnumerateMotors()
 	}
 	for (u32 i = 0; i < MAX_USB_PADS; i++)
 	{
-		if (m_usb_pads[i].connected && m_usb_pads[i].protocol == PS5UsbPadLogic::Protocol::XInput)
+		if (m_usb_pads[i].connected && (m_usb_pads[i].protocol == PS5UsbPadLogic::Protocol::XInput ||
+											m_usb_pads[i].protocol == PS5UsbPadLogic::Protocol::DualShock3))
 			add(USB_PAD_BASE + i);
 	}
 	return ret;
@@ -1078,8 +1089,9 @@ bool PS5InputSource::GetGenericBindingMapping(const std::string_view device, Inp
 		return true;
 	}
 
-	// A USB pad: an Xbox 360 pad's buttons have SDL's names (its Start is Start: it has no touch
-	// pad); a generic pad has its sticks and hat under SDL's names and its buttons numbered.
+	// A USB pad: an Xbox 360 pad's and a DualShock 3's buttons have SDL's names (their Start is
+	// Start: they have no touch pad); a generic pad has its sticks and hat under SDL's names and its
+	// buttons numbered.
 	const u32 i = index.value();
 	const UsbPad& usb = m_usb_pads[i - USB_PAD_BASE];
 	for (const AxisInfo& ai : s_axis_info)

@@ -418,6 +418,8 @@ void drawGameCover(ImDrawList* dl, const GameInfo& game, float x, float y, float
 void setLoadingGame(const GameInfo& game);
 /// Starts a game from the library's list (remembers it for the loading screen).
 void launchGame(const GameInfo& game, int state = INT_MIN, int boot = 0);
+/// The PlayStation 2's own menu: the BIOS with no game (its browser and system configuration).
+void startPs2Menu();
 
 /// Opens the settings: of all games, or (with a game) that game's own. `back` is the screen they
 /// return to.

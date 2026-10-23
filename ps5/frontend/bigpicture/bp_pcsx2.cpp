@@ -89,6 +89,7 @@
 #include "fmt/format.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -1771,6 +1772,13 @@ public:
 			page.rows.push_back(Action("Map it to a controller of the console",
 				fmt::format("Every button of this port goes on the console's controller {} (the first one, if there are fewer)", global + 1),
 				[this, global] { AutomaticMapping(global); }, bp::Option::AllGames));
+			if (Host::GetBaseBoolSettingValue("PS5", "USBPads", false))
+			{
+				page.rows.push_back(Action("Map it to a USB controller",
+					"Every button of this port goes on a controller in the console's USB port (a DualShock 3, an Xbox 360 pad, a guitar...): "
+					"the first one for port 1, the second for port 2, and so on",
+					[this, global] { AutomaticMapping(global, true); }, bp::Option::AllGames));
+			}
 
 			for (const InputBindingInfo& bi : ci->bindings)
 			{
@@ -3321,6 +3329,11 @@ public:
 				"A keyboard in the console's USB port types into the menus' text fields, and is the PlayStation 2's keyboard for a game that has one "
 				"(\"HID Keyboard\" in a USB port below)",
 				"PS5", "USBKeyboard", true, A | bp::Option::Restart));
+			rows.push_back(Toggle("USB controllers (experimental)",
+				"Controllers the console does not take itself, plugged into its USB ports: a DualShock 3 or SIXAXIS (with its pressure-sensitive "
+				"buttons), Xbox 360 pads, guitars, drums and other USB pads. They are players 5 to 8 here: choose them for a port under "
+				"Controllers. New, and not yet tried on many consoles: the boot log says how it went (usb pads)",
+				"PS5", "USBPads", false, A));
 		}
 		else if (w == "saves")
 		{
@@ -4845,16 +4858,24 @@ private:
 			7.f);
 	}
 
-	void AutomaticMapping(u32 port)
+	void AutomaticMapping(u32 port, bool usb = false)
 	{
 		// (The controllers are the emulation thread's to list.)
-		Host::RunOnCPUThread([this, port]() {
+		Host::RunOnCPUThread([this, port, usb]() {
 			// (The emulator lists a keyboard and a mouse first, wherever it runs.)
 			std::vector<std::pair<std::string, std::string>> devices = InputManager::EnumerateDevices();
 			std::erase_if(devices, [](const auto& device) { return device.first.compare(0, 4, "SDL-") != 0; });
+			// The USB controllers are SDL-4 to SDL-7 (ps5_input_source.cpp); the console's own, SDL-0 to SDL-3.
+			std::erase_if(devices, [usb](const auto& device) {
+				const int n = std::atoi(device.first.c_str() + 4);
+				return usb ? (n < 4) : (n >= 4);
+			});
 			if (devices.empty())
 			{
-				MTGS::RunOnGSThread([]() { bp::toast("No controller is connected."); });
+				MTGS::RunOnGSThread([usb]() {
+					bp::toast(usb ? "No USB controller is connected (or it was not taken: the boot log says, under usb pads)." :
+									"No controller is connected.");
+				});
 				return;
 			}
 			const std::string device = devices[std::min<size_t>(port, devices.size() - 1)].first;
@@ -4865,9 +4886,10 @@ private:
 			}
 			s_shared_apply.store(true, std::memory_order_release);
 			s_shared_changed.store(true, std::memory_order_release);
-			MTGS::RunOnGSThread([this, mapped, port]() {
+			MTGS::RunOnGSThread([this, mapped, port, usb]() {
 				m_pages++;
-				bp::toast(mapped ? fmt::format("Port {} is on the console's controller.", port + 1) : std::string("The port could not be mapped."));
+				bp::toast(mapped ? fmt::format("Port {} is on the {} controller.", port + 1, usb ? "USB" : "console's") :
+								   std::string("The port could not be mapped."));
 			});
 		});
 	}

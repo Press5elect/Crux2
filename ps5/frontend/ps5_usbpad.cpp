@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 //
-// See ps5_usbpad.h for what is and is not there: the console's transport is a stub, so on the
-// console Start() logs one line and returns false. The rest builds and runs on the PC as well,
-// where the tests drive it with a made-up transport.
+// See ps5_usbpad.h. The console's transport is in ps5_usbpad_console.cpp; the rest builds and runs
+// on the PC as well, where the tests drive it with a made-up transport.
 
 #include "ps5_usbpad.h"
 #include "ps5_priority.h"
@@ -24,7 +23,8 @@ namespace PS5UsbPads
 {
 	namespace
 	{
-		// The console's transport: no USB access yet (ps5_usbpad.h says why).
+#ifndef __PROSPERO__
+		// Off the console: no USB access.
 		class StubTransport final : public Transport
 		{
 		public:
@@ -40,6 +40,7 @@ namespace PS5UsbPads
 			bool Write(int, const uint8_t*, uint32_t) override { return false; }
 			void Close(int) override {}
 		};
+#endif
 
 		double NowSeconds()
 		{
@@ -47,10 +48,46 @@ namespace PS5UsbPads
 		}
 	} // namespace
 
+#ifndef __PROSPERO__
 	std::unique_ptr<Transport> CreateConsoleTransport()
 	{
 		return std::make_unique<StubTransport>();
 	}
+#endif
+
+	namespace
+	{
+		// The DualShock 3's HID requests on the default pipe.
+		constexpr uint8_t HID_GET_REPORT = 0x01, HID_SET_REPORT = 0x09;
+		constexpr uint8_t TO_INTERFACE_IN = 0xa1, TO_INTERFACE_OUT = 0x21;
+
+		/// A DualShock 3 sends nothing until asked for feature report 0xF2 (then 0xF5), as Linux's
+		/// hid-sony.c wakes it (sixaxis_set_operational_usb).
+		bool WakeDualShock3(Transport& t, int handle, uint8_t iface)
+		{
+			uint8_t buf[17] = {};
+			const int f2 = t.Control(handle, TO_INTERFACE_IN, HID_GET_REPORT, 0x03f2, iface, buf, sizeof(buf));
+			uint8_t buf5[8] = {};
+			const int f5 = t.Control(handle, TO_INTERFACE_IN, HID_GET_REPORT, 0x03f5, iface, buf5, sizeof(buf5));
+			if (f2 < 0)
+			{
+				// The other way some drivers have it: SET_REPORT feature 0xF4 {0x42, 0x0C, 0x00, 0x00}.
+				uint8_t enable[4] = {0x42, 0x0c, 0x00, 0x00};
+				const int f4 = t.Control(handle, TO_INTERFACE_OUT, HID_SET_REPORT, 0x03f4, iface, enable, sizeof(enable));
+				USBPAD_LOG("usb pads: DualShock 3: feature 0xF2 %d, 0xF5 %d, 0xF4 %d", f2, f5, f4);
+				return f4 >= 0;
+			}
+			USBPAD_LOG("usb pads: DualShock 3: woken (feature 0xF2 %d bytes, 0xF5 %d)", f2, f5);
+			return true;
+		}
+
+		bool SendDualShock3Output(Transport& t, int handle, uint8_t iface, uint8_t large, uint8_t small, uint32_t player)
+		{
+			auto report = PS5UsbPadLogic::DualShock3OutputReport(large, small, player);
+			// (36 bytes, the size Linux's struct sixaxis_output_report has.)
+			return t.Control(handle, TO_INTERFACE_OUT, HID_SET_REPORT, 0x0201, iface, report.data(), 36) >= 0;
+		}
+	} // namespace
 
 	Manager::~Manager()
 	{
@@ -64,7 +101,7 @@ namespace PS5UsbPads
 
 		if (!transport->Start())
 		{
-			USBPAD_LOG("usb pads: no USB access in this build (the transport is a stub: libSceUsbd has no SDK stubs); "
+			USBPAD_LOG("usb pads: no USB access (the transport said no; the lines above say why); "
 					   "only the console's own controllers are read");
 			return false;
 		}
@@ -118,6 +155,8 @@ namespace PS5UsbPads
 				const auto report = PS5UsbPadLogic::XInputRumbleReport(0, 0);
 				m_transport->Write(o.handle, report.data(), static_cast<uint32_t>(report.size()));
 			}
+			if (o.protocol == PS5UsbPadLogic::Protocol::DualShock3 && (o.rumble_sent[0] || o.rumble_sent[1]))
+				SendDualShock3Output(*m_transport, o.handle, o.interface_number, 0, 0, slot + 1);
 			m_transport->Close(o.handle);
 		}
 		if (o.used)
@@ -161,7 +200,7 @@ namespace PS5UsbPads
 			if (d.interface_class == 0x03 && !d.report_descriptor.empty())
 				layout = PS5UsbPadLogic::ParseReportDescriptor(d.report_descriptor.data(), d.report_descriptor.size());
 			const PS5UsbPadLogic::Protocol protocol =
-				PS5UsbPadLogic::Classify(d.vendor, d.interface_class, d.interface_subclass, d.interface_protocol, &layout);
+				PS5UsbPadLogic::ClassifyDevice(d.vendor, d.product, d.interface_class, d.interface_subclass, d.interface_protocol, &layout);
 			if (protocol == PS5UsbPadLogic::Protocol::None)
 				continue;
 
@@ -180,6 +219,8 @@ namespace PS5UsbPads
 				USBPAD_LOG("usb pads: %04x:%04x could not be opened (%d)", d.vendor, d.product, handle);
 				continue;
 			}
+			if (protocol == PS5UsbPadLogic::Protocol::DualShock3 && !WakeDualShock3(*m_transport, handle, d.interface_number))
+				USBPAD_LOG("usb pads: the DualShock 3 did not take the request that starts its reports; reading it anyway");
 			Open& o = m_open[slot];
 			o.used = true;
 			o.id = d.id;
@@ -187,17 +228,24 @@ namespace PS5UsbPads
 			o.protocol = protocol;
 			o.layout = std::move(layout);
 			o.hid = {};
+			o.interface_number = d.interface_number;
+			o.output_sent = false;
+			const char* const kind = protocol == PS5UsbPadLogic::Protocol::XInput     ? "Xbox 360 protocol" :
+									 protocol == PS5UsbPadLogic::Protocol::DualShock3 ? "DualShock 3, pressure-sensitive buttons" :
+																						"HID";
 			USBPAD_LOG("usb pads: %04x:%04x (%s) is player %u, %s, %u buttons", d.vendor, d.product,
-				d.name.empty() ? "no name" : d.name.c_str(), slot + 5,
-				protocol == PS5UsbPadLogic::Protocol::XInput ? "Xbox 360 protocol" : "HID",
-				protocol == PS5UsbPadLogic::Protocol::XInput ? 15u : o.layout.button_count);
+				d.name.empty() ? "no name" : d.name.c_str(), slot + 5, kind,
+				protocol == PS5UsbPadLogic::Protocol::Hid ? o.layout.button_count : 15u);
 
 			std::lock_guard lock(m_mutex);
 			Slot& s = m_slots[slot];
 			s.connected = true;
 			s.generation++;
 			s.protocol = protocol;
-			s.name = d.name.empty() ? (protocol == PS5UsbPadLogic::Protocol::XInput ? "Xbox 360 Controller" : "USB Controller") : d.name;
+			s.name = d.name.empty() ? (protocol == PS5UsbPadLogic::Protocol::XInput     ? "Xbox 360 Controller" :
+										  protocol == PS5UsbPadLogic::Protocol::DualShock3 ? "DualShock 3" :
+																							 "USB Controller") :
+									  d.name;
 			s.state = {};
 		}
 	}
@@ -236,6 +284,10 @@ namespace PS5UsbPads
 				{
 					changed = PS5UsbPadLogic::DecodeXInputReport(buffer, static_cast<size_t>(got), &mapped) || changed;
 				}
+				else if (o.protocol == PS5UsbPadLogic::Protocol::DualShock3)
+				{
+					changed = PS5UsbPadLogic::DecodeDualShock3Report(buffer, static_cast<size_t>(got), &mapped) || changed;
+				}
 				else if (PS5UsbPadLogic::DecodeHidReport(o.layout, buffer, static_cast<size_t>(got), &o.hid))
 				{
 					mapped = PS5UsbPadLogic::MapHid(o.layout, o.hid);
@@ -257,6 +309,20 @@ namespace PS5UsbPads
 				const auto report = PS5UsbPadLogic::XInputRumbleReport(rumble[0], rumble[1]);
 				if (m_transport->Write(o.handle, report.data(), static_cast<uint32_t>(report.size())))
 					o.rumble_sent = rumble;
+			}
+			// A DualShock 3: its player's light once (it blinks all four until told), and the rumble.
+			if (o.protocol == PS5UsbPadLogic::Protocol::DualShock3 && (!o.output_sent || rumble != o.rumble_sent))
+			{
+				if (SendDualShock3Output(*m_transport, o.handle, o.interface_number, rumble[0], rumble[1], i + 1))
+				{
+					o.rumble_sent = rumble;
+					o.output_sent = true;
+				}
+				else if (!o.output_sent)
+				{
+					o.output_sent = true; // (tried once: not every report is taken)
+					USBPAD_LOG("usb pads: the DualShock 3 did not take its light and rumble report");
+				}
 			}
 		}
 	}

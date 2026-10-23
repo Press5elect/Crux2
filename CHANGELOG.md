@@ -1,5 +1,12 @@
 # Crux2 - what changed
 
+## v1.0.1 (2026-10-23)
+
+- Added: USB controllers (experimental): DualShock 3 / SIXAXIS with pressure-sensitive buttons,
+  Xbox 360 pads, guitars, drums and other USB pads.
+- Added: Start the PlayStation 2 menu (Settings > BIOS, and the library's Square menu).
+- Fixed: the PS2's start-up ran at double speed at 120 Hz with frames paced by the screen.
+
 ## v1.0.0 (2026-10-23)
 
 The first release, built on PCSX2 v2.9.138.

@@ -7,13 +7,20 @@
 // controller layout the input source speaks (SDL's buttons and axes, plus numbered buttons and
 // axes for what has no standard name).
 //
-// Two kinds of pad:
+// Three kinds of pad:
 //
 //  * Xbox 360 wired pads (and the many third-party pads that speak their protocol): USB class
 //    0xFF, subclass 0x5D, protocol 0x01. Their input report is always the same 20 bytes, so no
 //    descriptor is read: 0x00, 0x14, two bytes of buttons, the two triggers (0 to 255), then the
 //    four stick axes as signed 16-bit little-endian values with up positive. The rumble is an
 //    8-byte output report: 0x00, 0x08, 0x00, large motor, small motor, 0, 0, 0.
+//
+//  * Sony's DualShock 3 and SIXAXIS (054c:0268), which the PS5 does not take as a controller of its
+//    own: woken by a feature report (GET_REPORT 0xF2), then a 49-byte input report 0x01 with the
+//    buttons, the sticks and how hard each of the twelve pressure-sensitive buttons is pressed
+//    (d-pad, L1/R1/L2/R2 and the four face buttons, 0 to 255): the pressure the DualShock 2 had.
+//    The lights and the rumble are an output report 0x01 (sixaxis_send_output_report in Linux's
+//    hid-sony.c is the reference for the layout).
 //
 //  * Generic HID game pads and joysticks (class 0x03 with a Joystick or Game Pad application
 //    collection in the report descriptor): what each report holds is read from the descriptor.
@@ -79,6 +86,10 @@ namespace PS5UsbPadLogic
 		uint32_t generic_buttons = 0; // bit n: "Button<n>"
 		std::array<float, MAX_GENERIC_AXES> generic_axes = {}; // "Axis<n>", -1 to 1
 		uint32_t generic_axes_present = 0; // bit n: the pad has Axis<n>
+		// How hard each SDL button is pressed, 0 to 1, for a pad that says so (the DualShock 3);
+		// has_pressure false: a pressed button is a full press.
+		bool has_pressure = false;
+		std::array<float, 15> pressure = {};
 
 		bool operator==(const MappedPad&) const = default;
 	};
@@ -141,6 +152,99 @@ namespace PS5UsbPadLogic
 	inline std::array<uint8_t, 8> XInputRumbleReport(uint8_t large, uint8_t small)
 	{
 		return {0x00, 0x08, 0x00, large, small, 0x00, 0x00, 0x00};
+	}
+
+	// ---------------------------------------------------------------- DualShock 3 / SIXAXIS
+
+	inline bool IsDualShock3(uint16_t vendor, uint16_t product)
+	{
+		return vendor == 0x054c && product == 0x0268;
+	}
+
+	/// The input report: 0x01, then 48 bytes (49 in all; a report read without its id byte is 48).
+	/// False for anything else.
+	inline bool DecodeDualShock3Report(const uint8_t* data, size_t size, MappedPad* out)
+	{
+		if (size >= 49 && data[0] == 0x01)
+			; // with its id
+		else if (size == 48)
+			data--, size++; // without: every offset below is one less
+		else
+			return false;
+
+		MappedPad pad;
+		pad.has_pressure = true;
+		const uint8_t b2 = data[2], b3 = data[3], b4 = data[4];
+		const auto set = [&pad](bool on, uint32_t button) {
+			if (on)
+				pad.buttons |= 1u << button;
+		};
+		set(b2 & 0x01, SDL_BACK); // Select
+		set(b2 & 0x02, SDL_LEFT_STICK);
+		set(b2 & 0x04, SDL_RIGHT_STICK);
+		set(b2 & 0x08, SDL_START);
+		set(b2 & 0x10, SDL_DPAD_UP);
+		set(b2 & 0x20, SDL_DPAD_RIGHT);
+		set(b2 & 0x40, SDL_DPAD_DOWN);
+		set(b2 & 0x80, SDL_DPAD_LEFT);
+		set(b3 & 0x04, SDL_LEFT_SHOULDER);
+		set(b3 & 0x08, SDL_RIGHT_SHOULDER);
+		set(b3 & 0x10, SDL_NORTH); // Triangle
+		set(b3 & 0x20, SDL_EAST); // Circle
+		set(b3 & 0x40, SDL_SOUTH); // Cross
+		set(b3 & 0x80, SDL_WEST); // Square
+		set(b4 & 0x01, SDL_GUIDE); // PS
+
+		const auto stick = [](uint8_t v) { return std::clamp((static_cast<float>(v) - 128.0f) / 127.0f, -1.0f, 1.0f); };
+		pad.axes[SDL_AXIS_LEFT_X] = stick(data[6]);
+		pad.axes[SDL_AXIS_LEFT_Y] = stick(data[7]); // down is positive, as SDL has it
+		pad.axes[SDL_AXIS_RIGHT_X] = stick(data[8]);
+		pad.axes[SDL_AXIS_RIGHT_Y] = stick(data[9]);
+		pad.axes[SDL_AXIS_LEFT_TRIGGER] = static_cast<float>(data[18]) / 255.0f; // L2's pressure
+		pad.axes[SDL_AXIS_RIGHT_TRIGGER] = static_cast<float>(data[19]) / 255.0f; // R2's
+
+		// The pressures, each with its button. A button whose bit is set reads at least a light press
+		// (the pressure byte lags the bit by a report now and then).
+		const auto press = [&pad, data](uint32_t button, size_t at) {
+			const float p = static_cast<float>(data[at]) / 255.0f;
+			pad.pressure[button] = (pad.buttons & (1u << button)) ? std::max(p, 1.0f / 255.0f) : 0.0f;
+		};
+		press(SDL_DPAD_UP, 14);
+		press(SDL_DPAD_RIGHT, 15);
+		press(SDL_DPAD_DOWN, 16);
+		press(SDL_DPAD_LEFT, 17);
+		press(SDL_LEFT_SHOULDER, 20);
+		press(SDL_RIGHT_SHOULDER, 21);
+		press(SDL_NORTH, 22);
+		press(SDL_EAST, 23);
+		press(SDL_SOUTH, 24);
+		press(SDL_WEST, 25);
+		*out = pad;
+		return true;
+	}
+
+	/// The output report: the rumble (the small motor on or off, the large one 0 to 255) and the
+	/// player's light (1 to 4), 49 bytes with its id, as Linux's hid-sony.c sends it.
+	inline std::array<uint8_t, 49> DualShock3OutputReport(uint8_t large, uint8_t small, uint32_t player)
+	{
+		std::array<uint8_t, 49> r = {};
+		r[0] = 0x01;
+		r[2] = small ? 0xff : 0x00; // the small motor's duration
+		r[3] = small ? 1 : 0; // and on/off
+		r[4] = large ? 0xff : 0x00;
+		r[5] = large;
+		r[10] = static_cast<uint8_t>(1u << (std::clamp<uint32_t>(player, 1, 4))); // LED 1 is bit 1
+		// Each light's blink settings: on, not blinking.
+		for (size_t led = 0; led < 4; led++)
+		{
+			uint8_t* l = &r[11 + led * 5];
+			l[0] = 0xff;
+			l[1] = 0x27;
+			l[2] = 0x10;
+			l[3] = 0x00;
+			l[4] = 0x32;
+		}
+		return r;
 	}
 
 	// ---------------------------------------------------------------- HID report descriptors
@@ -558,12 +662,14 @@ namespace PS5UsbPadLogic
 	}
 
 	/// What kind of pad an interface is, from its descriptors. Sony's controllers are left to the
-	/// console's pad service (they are the scePad players already).
+	/// console's pad service (they are the scePad players already), but for the DualShock 3, which the
+	/// console does not take (see ClassifyDevice).
 	enum class Protocol : uint8_t
 	{
 		None,
 		XInput,
 		Hid,
+		DualShock3,
 	};
 
 	inline Protocol Classify(uint16_t vendor, uint8_t interface_class, uint8_t subclass, uint8_t protocol,
@@ -579,5 +685,15 @@ namespace PS5UsbPadLogic
 			layout_if_hid->is_gamepad && !layout_if_hid->fields.empty())
 			return Protocol::Hid;
 		return Protocol::None;
+	}
+
+	/// Classify with the product too: a DualShock 3 / SIXAXIS is one of the console's own vendor
+	/// that is read here.
+	inline Protocol ClassifyDevice(uint16_t vendor, uint16_t product, uint8_t interface_class, uint8_t subclass, uint8_t protocol,
+		const HidLayout* layout_if_hid)
+	{
+		if (IsDualShock3(vendor, product) && interface_class == 0x03)
+			return Protocol::DualShock3;
+		return Classify(vendor, interface_class, subclass, protocol, layout_if_hid);
 	}
 } // namespace PS5UsbPadLogic

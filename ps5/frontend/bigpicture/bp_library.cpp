@@ -3100,6 +3100,15 @@ void setLoadingGame(const GameInfo& game)
 	}
 }
 
+void startPs2Menu()
+{
+	setLoadingGame(GameInfo());
+	loadingTitle = "PlayStation 2 menu";
+	insertedPath.clear();
+	be->startBios();
+	setScreen(Screen::Loading);
+}
+
 void launchGame(const GameInfo& game, int state, int boot)
 {
 	setLoadingGame(game);
@@ -3390,7 +3399,7 @@ void quickViewsMenu()
 
 void listMenu()
 {
-	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Whole };
+	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Ps2Menu, Whole };
 	std::vector<std::string> names;
 	names.push_back(nar.search.empty() ? std::string(ICON_FA_MAGNIFYING_GLASS "   Search by name") :
 	                                     std::string(ICON_FA_MAGNIFYING_GLASS "   Search: \"") + nar.search + "\"  (change it)");
@@ -3409,6 +3418,7 @@ void listMenu()
 	names.push_back(std::string(ICON_FA_TABLE_CELLS "   View: ") + viewNames[std::clamp(options().view, 0, static_cast<int>(ViewCount) - 1)]);
 	names.push_back(ICON_FA_DICE "   A game at random");
 	names.push_back(ICON_FA_ROTATE "   Look for new games");
+	names.push_back(ICON_FA_MICROCHIP "   The PlayStation 2 menu");
 	if (narrowed())
 		names.push_back(ICON_FA_XMARK "   Show all games again");
 	pick("The list", std::move(names), -1, [](int choice) {
@@ -3461,6 +3471,9 @@ void listMenu()
 				// (Not under a running game: a scan reads discs too.)
 				be->scan(false);
 				toast("Looking for new games...", 3.f);
+				break;
+			case Ps2Menu:
+				startPs2Menu();
 				break;
 			case Whole:
 				applyQuick(-1);
