@@ -49,6 +49,7 @@ HERE = Path(__file__).resolve().parent
 RECOMP = HERE.parent
 sys.path.insert(0, str(HERE))
 import ps2disc  # noqa: E402
+import ps2unpack  # noqa: E402
 
 PS2RECOMP_URL = "https://github.com/ran-j/PS2Recomp.git"
 PS2RECOMP_REVISION = "eb8688b2fd191129f103a39543002c005b33409c"
@@ -231,6 +232,23 @@ def convert(converter: Path, toml: Path, game: Path, out: Path, label: str, name
     say(f"    {len(list(out.glob('*.cpp')))} files")
 
 
+def ensure_unicorn():
+    """The unicorn package (a CPU emulator, for unpacking), installed for this Python if it is not."""
+    import importlib
+    import importlib.util
+    if importlib.util.find_spec("unicorn") is not None:
+        return
+    say("    installing the unicorn package (pip), to run the game's decompressor")
+    command = [sys.executable, "-m", "pip", "install", "--user", "unicorn"]
+    if subprocess.run(command).returncode != 0:
+        command.insert(4, "--break-system-packages")  # (Debian's and Ubuntu's Python ask for it)
+        if subprocess.run(command).returncode != 0:
+            raise Failure(f"the unicorn package could not be installed: {Path(sys.executable).name} -m pip install unicorn")
+    import site
+    sys.path.append(site.getusersitepackages())
+    importlib.invalidate_caches()
+
+
 class Game:
     """What one input gives: the executable (from a disc, or as it is) and the disc, if any."""
 
@@ -240,14 +258,26 @@ class Game:
         head = path.read_bytes()[:4] if path.is_file() else b""
         if head == b"\x7fELF":
             self.name = path.name
-            self.elf = path.resolve()
-            return
-        self.disc = ps2disc.Disc(path)
-        say(f"==> {path.name}: {self.disc.describe()}")
-        self.name, data = self.disc.boot()
-        say(f"    boots {self.name} ({len(data) // 1024} KiB)")
+            data = path.read_bytes()
+        else:
+            self.disc = ps2disc.Disc(path)
+            say(f"==> {path.name}: {self.disc.describe()}")
+            self.name, data = self.disc.boot()
+            say(f"    boots {self.name} ({len(data) // 1024} KiB)")
         folder = work / self.name / "executable"
         folder.mkdir(parents=True, exist_ok=True)
+        # A packed executable (its game compressed, unpacked at start) is unpacked first: converted
+        # as it is, the module would hold only the decompressor. The unpacked one goes to the console.
+        if ps2unpack.packed_target(data):
+            say(f"    {self.name} is packed: the game is unpacked from it at start")
+            digest = hashlib.sha256(data).hexdigest()[:16]
+            cached = folder / f"{self.name}.unpacked-{digest}"
+            if not cached.is_file():
+                ensure_unicorn()
+                for old in folder.glob(f"{self.name}.unpacked-*"):
+                    old.unlink()
+                cached.write_bytes(ps2unpack.unpack(data, log=say))
+            data = cached.read_bytes()
         self.elf = folder / self.name
         if not self.elf.is_file() or self.elf.read_bytes() != data:
             self.elf.write_bytes(data)
@@ -414,7 +444,7 @@ def main() -> int:
             game = Game(path, args.work)
             results += make(game, args.what, tools, converter, analyzer, tree, args)
             say(f"    ({path.name}: {time.time() - start:.0f} s)")
-        except (Failure, ps2disc.DiscError, OSError) as e:
+        except (Failure, ps2disc.DiscError, ps2unpack.UnpackError, OSError) as e:
             say(f"recomp-game: {path.name}: {e}")
             failures.append(path.name)
         finally:

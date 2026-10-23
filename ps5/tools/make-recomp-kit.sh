@@ -158,6 +158,14 @@ every codec they use; zstd, used only when asked for with -c zstd, needs Python 
 \`pip install zstandard\`), .iso, .cue/.bin, .cso. "ps2disc.py info GAME.chd" says what a disc is;
 "ps2disc.py iso GAME.chd GAME.iso" writes the disc out as an .iso by itself.
 
+Packed executables
+------------------
+Some games ship their executable compressed: a small decompressor that unpacks the game into
+memory at start. Converted as it is, the module would hold only the decompressor (the game shows a
+black screen). recomp-game.py finds such an executable and unpacks it first, by running its
+decompressor in an emulator (recomp/tools/ps2unpack.py, with the unicorn package, which it installs
+with pip the first time). The unpacked executable is the one that goes beside the module.
+
 The modules, the executables and the .iso files are the game: keep them to yourself, as you would
 the disc. This kit holds no game code, BIOS, firmware or keys.
 
