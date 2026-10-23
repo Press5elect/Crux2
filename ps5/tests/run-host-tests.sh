@@ -24,6 +24,8 @@
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
 #     page protection and the fault handler), over a stand-in for the platform layer with the same
 #     argument rules (mock_platform.cpp), compiled for 16 KiB host pages as the console build is;
+#   - the interface's and host's sources: no setting read through Host while the settings' lock
+#     is held (check-settings-lock.py; such a read ends the title);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
 #     reads from a real Samba and a real FTP server when they are installed).
 #
@@ -142,6 +144,9 @@ if [[ -n ${LIBSMB2_PREFIX:-} ]]; then
 else
     echo "== virtual file layer: skipped (set LIBSMB2_PREFIX to a libsmb2 built for the PC)"
 fi
+
+echo "== no setting read through Host while the settings' lock is held"
+python3 "$tests/check-settings-lock.py" || status=1
 
 [[ $status == 0 ]] && echo "all host tests passed" || echo "host tests FAILED"
 exit $status

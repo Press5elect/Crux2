@@ -468,6 +468,12 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.3 changed
+
+Fixed:
+- **Opening Settings stopped Crux2** (since v1.0.1): the controllers page read a setting while it
+  already held the settings' lock.
+
 ## What v1.0.2 changed
 
 Changed:

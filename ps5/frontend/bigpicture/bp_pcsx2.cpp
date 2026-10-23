@@ -1772,7 +1772,8 @@ public:
 			page.rows.push_back(Action("Map it to a controller of the console",
 				fmt::format("Every button of this port goes on the console's controller {} (the first one, if there are fewer)", global + 1),
 				[this, global] { AutomaticMapping(global); }, bp::Option::AllGames));
-			if (Host::GetBaseBoolSettingValue("PS5", "USBPads", false))
+			// (Read from si: this page holds the settings lock, which Host::GetBase*SettingValue takes again.)
+			if (si->GetBoolValue("PS5", "USBPads", false))
 			{
 				page.rows.push_back(Action("Map it to a USB controller",
 					"Every button of this port goes on a controller in the console's USB port (a DualShock 3, an Xbox 360 pad, a guitar...): "

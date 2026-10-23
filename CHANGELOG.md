@@ -1,5 +1,9 @@
 # Crux2 - what changed
 
+## v1.0.3 (2026-10-23)
+
+- Fixed: opening Settings stopped Crux2 (the controllers page, since v1.0.1).
+
 ## v1.0.2 (2026-10-23)
 
 - Changed: the on-screen display is one panel in sections (graphics chip, processor, frames with
