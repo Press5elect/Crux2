@@ -425,6 +425,15 @@ Page biosPageOf(int layer, bool forGame)
 			[] { startPs2Menu(); }, Option::NoGame));
 	}
 	addPageRows(rows, be->biosPage(layer), "BIOS SELECTION");
+	// The language a game is told the console has (Crux2): many European games pick theirs from it.
+	// Not written to the BIOS's own settings; for one game, in its options.
+	rows.push_back(heading("LANGUAGE"));
+	rows.push_back(list("Console language",
+		"The language games are told the PlayStation 2 is set to: many European games show theirs in it. As the BIOS has it: the "
+		"language its own System Configuration chose. The BIOS's setting is left as it is",
+		"PS5", "ConsoleLanguage", -1,
+		{"As the BIOS has it", "Japanese", "English", "French", "Spanish", "German", "Italian", "Dutch", "Portuguese"}, -1,
+		Option::NextStart));
 	if (!forGame)
 	{
 		rows.push_back(heading("OPTIONS AND PATCHES"));

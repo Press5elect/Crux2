@@ -1,5 +1,10 @@
 # Crux2 - what changed
 
+## v1.0.4 (2026-10-23)
+
+- Added: Console language (Settings > BIOS, and per game): the language games are told the PS2 has,
+  over the BIOS's own, without changing the BIOS's setting.
+
 ## v1.0.3 (2026-10-23)
 
 - Fixed: opening Settings stopped Crux2 (the controllers page, since v1.0.1).

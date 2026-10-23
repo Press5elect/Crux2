@@ -793,6 +793,24 @@ index 4ccad5a..af12d0c 100644
  	};
  
  	/// The type of the surface. Surfaceless indicates it will not be displayed on screen at all.
+diff --git a/pcsx2/CDVD/CDVD.cpp b/pcsx2/CDVD/CDVD.cpp
+index 3b6ab2e..31de0a9 100644
+--- a/pcsx2/CDVD/CDVD.cpp
++++ b/pcsx2/CDVD/CDVD.cpp
+@@ -355,6 +355,13 @@ s32 cdvdReadConfig(u8* config)
+ 				// HACK: Set the "initialized" flag when fast booting, otherwise some games crash (e.g. Jak 1).
+ 				config[2] |= 0x80;
+ 			}
++			// Crux2: the language chosen in the settings (config1 + 0x11, its low five bits), as the
++			// BIOS and the game read it, over the one the NVRAM holds.
++			if (cdvd.CBlockIndex == 1)
++			{
++				if (const int forced = GetForcedConsoleLanguage(); forced >= 0)
++					config[1] = static_cast<u8>((config[1] & 0xE0) | forced);
++			}
+ 
+ 			cdvd.CBlockIndex++;
+ 		}
 diff --git a/pcsx2/CDVD/CDVDdiscReader.h b/pcsx2/CDVD/CDVDdiscReader.h
 index c9f00a6..617cd5e 100644
 --- a/pcsx2/CDVD/CDVDdiscReader.h
@@ -7928,10 +7946,51 @@ index 1dc9d08..1f55b12 100644
  	bool LoadStateFromSlot(s32 slot, bool backup = false, Error* error = nullptr);
  
 diff --git a/pcsx2/ps2/BiosTools.cpp b/pcsx2/ps2/BiosTools.cpp
-index 9043e14..26cd253 100644
+index 9043e14..fb30352 100644
 --- a/pcsx2/ps2/BiosTools.cpp
 +++ b/pcsx2/ps2/BiosTools.cpp
-@@ -255,6 +255,12 @@ static void LoadIrx(const std::string& filename, u8* dest, size_t maxSize)
+@@ -12,6 +12,10 @@
+ #include "Common.h"
+ #include "BiosTools.h"
+ #include "Config.h"
++#include "Host.h"
++#ifdef __PROSPERO__
++#include "ps5_platform.h"
++#endif
+ 
+ static constexpr u32 MIN_BIOS_SIZE = 4 * _1mb;
+ static constexpr u32 MAX_BIOS_SIZE = 8 * _1mb;
+@@ -50,6 +54,12 @@ std::string BiosPath;
+ BiosDebugInformation CurrentBiosInformation;
+ std::vector<u8> BiosRom;
+ 
++int GetForcedConsoleLanguage()
++{
++	const int language = Host::GetIntSettingValue("PS5", "ConsoleLanguage", -1);
++	return (language >= 0 && language <= 7) ? language : -1;
++}
++
+ void ReadOSDConfigParames()
+ {
+ 	if (ParamsRead)
+@@ -75,6 +85,16 @@ void ReadOSDConfigParames()
+ 	// FIXME: format, version and language are set manually by the bios. Not sure if any game needs them, but it seems to set version to 2 and duplicate the language value.
+ 	configParams2.version = 2;
+ 	configParams2.language = configParams1.language;
++
++	// Crux2: the language chosen in the settings, over the BIOS's own.
++	if (const int forced = GetForcedConsoleLanguage(); forced >= 0)
++	{
++#ifdef __PROSPERO__
++		ps5px_log("bios: the game is told language %d (the BIOS's own is %d)", forced, configParams1.language);
++#endif
++		configParams1.language = forced;
++		configParams2.language = forced;
++	}
+ }
+ 
+ static bool LoadBiosVersion(std::FILE* fp, u32& version, std::string& description, u32& region, std::string& zone, std::string& serial)
+@@ -255,6 +275,12 @@ static void LoadIrx(const std::string& filename, u8* dest, size_t maxSize)
  	return;
  }
  
@@ -7944,7 +8003,7 @@ index 9043e14..26cd253 100644
  static std::string FindBiosImage()
  {
  	Console.WriteLn("Searching for a BIOS image in '%s'...", EmuFolders::Bios.c_str());
-@@ -277,6 +283,16 @@ static std::string FindBiosImage()
+@@ -277,6 +303,16 @@ static std::string FindBiosImage()
  		}
  	}
  
@@ -7961,6 +8020,22 @@ index 9043e14..26cd253 100644
  	Console.Error("Unable to auto locate a BIOS image");
  	return std::string();
  }
+diff --git a/pcsx2/ps2/BiosTools.h b/pcsx2/ps2/BiosTools.h
+index 1dc3826..fb5ce08 100644
+--- a/pcsx2/ps2/BiosTools.h
++++ b/pcsx2/ps2/BiosTools.h
+@@ -114,6 +114,11 @@ extern std::vector<u8> BiosRom;
+ 
+ extern void ReadOSDConfigParames();
+ 
++// Crux2: the console language a game is told, chosen in the settings ([PS5] ConsoleLanguage, a
++// game's own settings first): 0 Japanese ... 7 Portuguese, or -1 for the BIOS's own (its NVRAM).
++// It is not written to the NVRAM, so the BIOS keeps its own. needs proper testing on a console
++extern int GetForcedConsoleLanguage();
++
+ extern bool IsBIOS(const char* filename, u32& version, std::string& description, u32& region, std::string& zone);
+ extern bool IsBIOSAvailable(const std::string& full_path);
+ 
 diff --git a/pcsx2/vtlb.cpp b/pcsx2/vtlb.cpp
 index 51af0b4..9843612 100644
 --- a/pcsx2/vtlb.cpp

@@ -468,6 +468,13 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.4 changed
+
+Added:
+- **Console language** (Settings > BIOS, and in a game's own options): the language games are told
+  the PlayStation 2 is set to, for the many European games that show theirs in it. "As the BIOS has
+  it" keeps the BIOS's own; the BIOS's setting is never changed. Takes effect at the game's next start.
+
 ## What v1.0.3 changed
 
 Fixed:
