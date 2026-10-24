@@ -1,5 +1,13 @@
 # Crux2 - what changed
 
+## v1.0.9 (2026-10-24)
+
+- Fixed: paraLLEl-GS drew a picture of dots or froze in some games (since v1.0.8).
+- Fixed: the D-pad's Up and Down stopped working after stepping Renderer through Software.
+- Added: Dithering works with paraLLEl-GS (Off and Force 32 bit draw without the dot pattern).
+- Changed: paraLLEl-GS's samples and picture at twice the size change while a game runs.
+- Changed: paraLLEl-GS handing work over as it goes is a setting, off until proven on the console.
+
 ## v1.0.8 (2026-10-24)
 
 - Changed: built on PCSX2 v2.9.142 (was v2.9.138) and Mesa 26.2.5's RADV (was 26.2.0).

@@ -41,6 +41,8 @@ namespace PS5PGS
 		uint32_t s_wait_frames = 0;
 		float s_wait_ms = 0.0f;
 		uint32_t s_samples_now = 0;
+		uint32_t s_samples_setting = 0; // Settings' samples and twice-the-size, as last seen (a change is taken live)
+		bool s_high_res_setting = true;
 		uint32_t s_status_seconds = 0;
 		const uint8_t* s_regs = nullptr; // the PS2's GS privileged registers (PMODE at 0, 16 bytes apart)
 		uint64_t s_tick = 0;
@@ -187,6 +189,18 @@ namespace PS5PGS
 		// fixes) is greyed out in Settings while paraLLEl-GS is on.
 		void SendScanout()
 		{
+			// The samples and the picture at twice the size, changed in Settings while the game runs: taken at once
+			// (automatic quality then counts the new samples as yours).
+			const uint32_t samples = ReadSamples();
+			const bool high_res = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSHighRes", true);
+			if (s_scanout_any && (samples != s_samples_setting || high_res != s_high_res_setting))
+			{
+				ps5px_log("paraLLEl-GS: %u samples a pixel now%s (Settings)", samples, high_res && samples >= 4 ? ", the picture at twice the size" : "");
+				s_samples_now = 0;
+				SetSamples(samples);
+			}
+			s_samples_setting = samples;
+			s_high_res_setting = high_res;
 			GSGpuScanout want;
 			want.forceProgressive = GSConfig.InterlaceMode == GSInterlaceMode::Automatic;
 			want.antiBlur = GSConfig.PCRTCAntiBlur;
@@ -194,7 +208,12 @@ namespace PS5PGS
 			want.crtcOffsets = GSConfig.PCRTCOffsets;
 			want.mipmaps = GSConfig.HWMipmap;
 			want.sharp2D = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSSharp2D", false);
-			want.backbufferPromotion = false;
+			// Dithering (Settings > Graphics): Off (0) and Force 32 bit (3) draw without the PS2's dot pattern; Force 32 bit
+			// also shows the 32-bit picture a game blits into a 16-bit frame buffer at the end (paraLLEl-GS's backbuffer
+			// promotion). Scaled and Unscaled: as the PS2 dithers.
+			want.dither = GSConfig.Dithering == 1 || GSConfig.Dithering == 2;
+			want.backbufferPromotion = GSConfig.Dithering == 3;
+			want.eagerSubmit = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSEarlySubmit", false); // (experimental: off unless chosen)
 			// Hardware download mode "Unsynchronised": a read of GS memory the graphics card has not finished
 			// drawing answers zeros instead of waiting for the card (paraLLEl-GS's unsynced read-backs; the read
 			// still comes in order). "Off": the game's read is answered with zeros before it reaches here
@@ -206,9 +225,11 @@ namespace PS5PGS
 			s_gs->setScanout(want);
 			s_scanout_sent = want;
 			if (s_scanout_any)
-				ps5px_log("paraLLEl-GS: scan-out now %s%s%s%s%s%s%s", want.forceProgressive ? "progressive where possible" : "the PS2's own fields",
+				ps5px_log("paraLLEl-GS: scan-out now %s%s%s%s%s%s%s%s%s%s", want.forceProgressive ? "progressive where possible" : "the PS2's own fields",
 					want.antiBlur ? ", anti-blur" : "", want.overscan ? ", overscan shown" : "", want.crtcOffsets ? ", screen offsets" : "",
-					want.mipmaps ? "" : ", no mipmaps", want.sharp2D ? ", sharp 2-D" : "", want.unsyncedReadbacks ? ", unsynchronised read-backs" : "");
+					want.mipmaps ? "" : ", no mipmaps", want.sharp2D ? ", sharp 2-D" : "", want.unsyncedReadbacks ? ", unsynchronised read-backs" : "",
+					want.dither ? "" : ", no dithering", want.backbufferPromotion ? ", 32-bit pictures promoted" : "",
+					want.eagerSubmit ? "" : ", work handed over a frame at a time");
 			s_scanout_any = true;
 		}
 	} // namespace

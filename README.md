@@ -468,6 +468,25 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.9 changed
+
+Added:
+- **Dithering works with paraLLEl-GS**: Off and Force 32 bit draw without the PS2's dot pattern
+  (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end);
+  Scaled and Unscaled dither as the PS2.
+
+Changed:
+- **paraLLEl-GS's samples and its picture at twice the size** change while a game runs.
+- **paraLLEl-GS handing work over as it goes** is a setting (*paraLLEl-GS hands work over as it
+  goes (experimental)*), off until it is proven on the console.
+
+Fixed:
+- **paraLLEl-GS drew a picture of dots, or froze with the sound going on**, in some games since
+  v1.0.8: handing work over early could upload a texture before what decides its contents, and
+  recycled memory the frame still used.
+- **The D-pad's Up and Down stopped working** after stepping Renderer through Software with
+  Left/Right: a release during the graphics device's restart was lost.
+
 ## What v1.0.8 changed
 
 Added:

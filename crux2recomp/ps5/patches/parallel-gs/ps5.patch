@@ -3,9 +3,20 @@ https://github.com/Themaister/Granite.git 16e7395f6a4858c1783dbf6f521f90b9d5f82a
 files they change (paraLLEl-GS: LGPL-3.0-or-later, Granite: MIT).
 
 diff --git a/gs/gs_interface.cpp b/gs/gs_interface.cpp
-index db519b3..6b8ee4e 100644
+index db519b3..ca0ba26 100644
 --- a/gs/gs_interface.cpp
 +++ b/gs/gs_interface.cpp
+@@ -1072,8 +1072,8 @@ uint32_t GSInterface::drawing_kick_update_state_vector()
+ 
+ 	StateVector state = {};
+ 
+-	// Dither enable
+-	if (registers.dthe.desc.DTHE)
++	// Dither enable (Crux2: unless the dithering is switched off)
++	if (registers.dthe.desc.DTHE && !hacks.disable_dither)
+ 	{
+ 		state.blend_mode |= BLEND_MODE_DTHE_BIT;
+ 		state.dimx.x = registers.dimx.words[0];
 @@ -3168,6 +3168,16 @@ void GSInterface::flush_pending_transfer(bool keep_alive)
  	}
  }
@@ -23,11 +34,31 @@ index db519b3..6b8ee4e 100644
  void GSInterface::read_transfer_fifo(void *data, uint32_t num_128b_words)
  {
  	uint32_t to_copy = std::min<uint32_t>(num_128b_words, transfer_state.fifo_readback_128b_size - transfer_state.fifo_readback_128b_offset);
+@@ -4455,6 +4465,9 @@ void GSInterface::set_debug_mode(const DebugMode &mode)
+ 
+ void GSInterface::set_hacks(const Hacks &hacks_)
+ {
++	// Crux2: the drawing state is worked out again (the dithering is part of it).
++	if (hacks_.disable_dither != hacks.disable_dither)
++		state_tracker.dirty_flags |= STATE_DIRTY_STATE_BIT;
+ 	hacks = hacks_;
+ 	renderer.set_upscale_flat_ui(hacks.upscale_sprites);
+ 
 diff --git a/gs/gs_interface.hpp b/gs/gs_interface.hpp
-index 70adbe0..c2ec394 100644
+index 70adbe0..5a8daa7 100644
 --- a/gs/gs_interface.hpp
 +++ b/gs/gs_interface.hpp
-@@ -312,6 +312,12 @@ public:
+@@ -243,6 +243,9 @@ struct Hacks
+ 	// triangles too (triangle_setup's UI detection): 2-D art and text (with bilinear textures) gain the
+ 	// super-sampled detail, at the risk of seams where pieces meet.
+ 	bool upscale_sprites = false;
++
++	// Crux2: the GS's dithering (DTHE) ignored: gradients without the PS2's dot pattern (PCSX2's "Dithering: Off").
++	bool disable_dither = false;
+ };
+ 
+ class SignalInterface
+@@ -312,6 +315,12 @@ public:
  
  	void read_transfer_fifo(void *data, uint32_t num_128b_words);
  
@@ -41,7 +72,7 @@ index 70adbe0..c2ec394 100644
  	friend class PageTracker;
  	void flush(PageTrackerFlushFlags flags, FlushReason reason);
 diff --git a/gs/gs_renderer.cpp b/gs/gs_renderer.cpp
-index b6ebdac..ad43d31 100644
+index b6ebdac..c18371a 100644
 --- a/gs/gs_renderer.cpp
 +++ b/gs/gs_renderer.cpp
 @@ -19,6 +19,7 @@
@@ -74,7 +105,7 @@ index b6ebdac..ad43d31 100644
  
  	if (enable_timestamps && device)
  	{
-@@ -1105,6 +1113,25 @@ uint64_t GSRenderer::query_timeline(const Vulkan::SemaphoreHolder &sem) const
+@@ -1105,6 +1113,34 @@ uint64_t GSRenderer::query_timeline(const Vulkan::SemaphoreHolder &sem) const
  		return value;
  }
  
@@ -91,20 +122,80 @@ index b6ebdac..ad43d31 100644
 +		return false;
 +	// Only command buffers count: the render pass being built (vertices in the attribute scratch, pending
 +	// texture uploads) is untouched, flush_submit() only flushes what is before the current reservation.
++	// Not while a texture's analysis pass (which decides what of it its upload copies) is still to be recorded:
++	// it goes into binning_cmd when the render pass ends, and is ordered before the upload (in direct_cmd) only
++	// by being submitted in the same batch. Submitted early, the upload would run with nothing to copy and the
++	// pass would sample a texture never filled (a picture of dots).
++	if (!texture_analysis.empty())
++		return false;
 +	if (!direct_cmd && !async_transfer_cmd && !triangle_setup_cmd && !clear_cmd && !heuristic_cmd && !binning_cmd)
 +		return false;
-+	flush_submit(0);
++	flush_submit(0, false);
++	// Granite only queues a submission without a fence or semaphore: this hands it to the GPU (it neither ends
++	// the frame context nor recycles anything).
++	device->flush_frame();
 +	return true;
 +}
 +
  uint64_t GSRenderer::query_timeline()
  {
  	// Actually spam-calling vkGetSemaphoreValue a ton of times has serious CPU overhead.
+@@ -1139,7 +1175,7 @@ void GSRenderer::flush_qword_clears()
+ 	qword_clears.clear();
+ }
+ 
+-void GSRenderer::flush_submit(uint64_t value)
++void GSRenderer::flush_submit(uint64_t value, bool end_frame)
+ {
+ 	if (!device)
+ 		return;
+@@ -1148,6 +1184,10 @@ void GSRenderer::flush_submit(uint64_t value)
+ 	if (enable_timestamps)
+ 		start_ts = device->write_calibrated_timestamp();
+ 
++	// Crux2: a submission in the middle of a frame (submit_pending_work) keeps the statistics the pressure flush
++	// decides on, so that memory allocated this frame still makes it flush (and free) as before.
++	if (end_frame)
++	{
+ 	total_stats.allocated_scratch_memory += stats.allocated_scratch_memory;
+ 	total_stats.allocated_image_memory += stats.allocated_image_memory;
+ 	total_stats.num_copies += stats.num_copies;
+@@ -1157,6 +1197,7 @@ void GSRenderer::flush_submit(uint64_t value)
+ 	total_stats.num_copy_barriers += stats.num_copy_barriers;
+ 	total_stats.num_copy_threads += stats.num_copy_threads;
+ 	stats = {};
++	}
+ 
+ 	flush_attribute_scratch(buffers.pos_scratch);
+ 	flush_attribute_scratch(buffers.attr_scratch);
+@@ -1238,7 +1279,11 @@ void GSRenderer::flush_submit(uint64_t value)
+ 
+ 	// If we have a timeline trace, we'd like it to be somewhat readable.
+ 	// Only do garbage collection at frame boundaries.
+-	if (!device->get_system_handles().timeline_trace_file)
++	// Crux2: never in the middle of a frame (end_frame = false): advancing the frame context frees, a few
++	// contexts later, what was released in this one, which the render pass being built may still draw with
++	// (textures, palettes, buffers): with submissions every fraction of a millisecond that came before the pass
++	// was even recorded, and the GPU drew from freed memory (a picture of dots, or a hang).
++	if (end_frame && !device->get_system_handles().timeline_trace_file)
+ 		device->next_frame_context();
+ 
+ 	log_timestamps();
 diff --git a/gs/gs_renderer.hpp b/gs/gs_renderer.hpp
-index 938642e..46f6948 100644
+index 938642e..cd21745 100644
 --- a/gs/gs_renderer.hpp
 +++ b/gs/gs_renderer.hpp
-@@ -300,6 +300,13 @@ public:
+@@ -293,13 +293,22 @@ public:
+ 	void flush_readback(const uint32_t *page_indices, uint32_t num_indices);
+ 
+ 	// Submit to GPU and signal when done.
+-	void flush_submit(uint64_t timeline);
++	// Crux2: end_frame = false submits without advancing Granite's frame context or resetting the flush
++	// statistics (submit_pending_work: the render pass being built may still use what was released this frame).
++	void flush_submit(uint64_t timeline, bool end_frame = true);
+ 
+ 	// Wait until timeline reaches value. After waiting, it may be safe to read from host VRAM.
+ 	void wait_timeline(uint64_t value);
  	// Query current timeline value.
  	uint64_t query_timeline();
  
@@ -118,7 +209,7 @@ index 938642e..46f6948 100644
  	// Cache management mostly on GPUs that need it.
  	void *begin_host_vram_access();
  	void end_host_write_vram_access();
-@@ -341,6 +348,7 @@ private:
+@@ -341,6 +350,7 @@ private:
  	std::thread timeline_thread;
  	uint64_t last_submitted_timeline = 0;
  	std::atomic<uint64_t> timeline_value;

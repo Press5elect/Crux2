@@ -83,6 +83,8 @@ struct GSGpuScanout
     // (paraLLEl-GS's unsynced read-backs): faster where a game reads its picture back every frame, wrong where
     // it uses what it read. Off: every read waits and is right.
     bool unsyncedReadbacks = false;
+    bool dither = true;           // the GS's dithering as the PS2 draws it (off: smooth gradients, no dot pattern)
+    bool eagerSubmit = true;      // recorded work handed to the graphics card as it goes (off: at a frame's end and at reads)
 };
 
 // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).

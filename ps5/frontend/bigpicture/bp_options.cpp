@@ -735,7 +735,7 @@ Page graphicsPage(int layer, bool forGame)
 				 "the graphics chip in compute shaders: far less work for the processor, no texture cache; the picture is the PS2's own "
 				 "resolution made sharp by super-sampling (the rows below), so the resolution setting does not apply. It takes Deinterlacing, "
 				 "Anti-blur, Screen offsets, Show overscan, Mipmapping and everything after the picture is made (FSR, looks, FXAA, shade "
-				 "boost); what it has no equivalent of (texture filtering, dithering, the hardware fixes, texture packs) is greyed out. Its "
+				 "boost); what it has no equivalent of (texture filtering, the hardware fixes, texture packs) is greyed out. Its "
 				 "save states are its own. Takes effect when a game starts";
 		o.section = GS;
 		o.key = "Renderer";
@@ -757,14 +757,18 @@ Page graphicsPage(int layer, bool forGame)
 	rows.push_back(adv(when(listOf("paraLLEl-GS samples",
 		"Samples for each pixel: more is a smoother, sharper picture and more work for the graphics chip. Its picture is enlarged "
 		"to the screen as Upscaling and sharpening says (an FSR 1 choice enlarges it with FSR)",
-		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, Option::NextStart), GS, "PS5ParallelGS", false)));
+		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS at twice the size",
 		"With 4 samples or more, the picture is made at twice the PS2's size from the samples: sharper, where the game draws its "
 		"3-D straight to the screen",
-		GS, "PS5ParallelGSHighRes", true, Option::NextStart), GS, "PS5ParallelGS", false)));
+		GS, "PS5ParallelGSHighRes", true, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS sharp 2-D",
 		"Text, menus and other 2-D super-sampled like the 3-D. Sharper, at the risk of seams where pieces of 2-D meet",
-		GS, "PS5ParallelGSSharp2D", false, Option::NextStart), GS, "PS5ParallelGS", false)));
+		GS, "PS5ParallelGSSharp2D", false, 0), GS, "PS5ParallelGS", false)));
+	rows.push_back(adv(when(toggle("paraLLEl-GS hands work over as it goes (experimental)",
+		"The graphics chip gets what is recorded so far while paraLLEl-GS's thread waits for the game, instead of a frame at a time: "
+		"a game that reads its picture back waits for less. Off: a frame at a time, as before v1.0.8",
+		GS, "PS5ParallelGSEarlySubmit", false, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS full-detail effects",
 		"Keeps the samples where a game draws its picture into a texture and over the screen again (blur, glow, depth of field): "
 		"without them such effects bring the picture back to the PS2's resolution, as the PS2 showed them. More work for the "
@@ -845,7 +849,9 @@ Page graphicsPage(int layer, bool forGame)
 		{"Automatic", "Off", "As the PS2", "Always"}, -1))));
 	rows.push_back(hw(listOf("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle. Costs little", GS, "MaxAnisotropy", 0,
 		{"Off", "2x", "4x", "8x", "16x"}, {0, 2, 4, 8, 16})));
-	rows.push_back(adv(hw(list("Dithering", "The fine pattern the PS2 lays over colour gradients", GS, "dithering_ps2", 2,
+	rows.push_back(adv(hwAny(list("Dithering", "The fine pattern the PS2 lays over colour gradients. With paraLLEl-GS: Off and Force 32 bit "
+		"draw without it (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end), Scaled and Unscaled "
+		"as the PS2", GS, "dithering_ps2", 2,
 		{"Off", "Scaled", "Unscaled (as the PS2)", "Force 32 bit"}))));
 	rows.push_back(hw(list("Blending accuracy",
 		"How exactly transparent effects (smoke, glass, lights) are drawn. Basic suits most games; higher is more exact and slower. "

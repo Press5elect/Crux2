@@ -6420,7 +6420,7 @@ index 91abe00..c65971f 100644
  	decoder.coding_type			= I_TYPE;
  	decoder.mpeg1				= ipuRegs.ctrl.MP1;
 diff --git a/pcsx2/ImGui/ImGuiManager.cpp b/pcsx2/ImGui/ImGuiManager.cpp
-index 53abe0f..f42b94f 100644
+index 53abe0f..21a7919 100644
 --- a/pcsx2/ImGui/ImGuiManager.cpp
 +++ b/pcsx2/ImGui/ImGuiManager.cpp
 @@ -113,6 +113,12 @@ struct ControllerNavState
@@ -6552,7 +6552,7 @@ index 53abe0f..f42b94f 100644
  	ImGuiFullscreen::SetFont(s_standard_font);
  	return true;
  }
-@@ -1228,7 +1328,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+@@ -1228,16 +1328,25 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
  		ImGuiKey_GamepadL1, // L1
  		ImGuiKey_GamepadL2, // L2
  		ImGuiKey_GamepadR1, // R1
@@ -6563,8 +6563,34 @@ index 53abe0f..f42b94f 100644
 +#endif
  	};
  
++#ifndef __PROSPERO__
  	if (!ImGui::GetCurrentContext())
-@@ -1317,6 +1421,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
+ 		return false;
++#endif
+ 
+ 	if (static_cast<u32>(key) >= std::size(key_map) || key_map[static_cast<u32>(key)] == ImGuiKey_None)
+ 		return false;
+ 
+ 	// Ignore diagonal D-pad input — neither direction fires when both axes are held simultaneously.
++	// (PS5: noted before the context check below. A Renderer change makes the GS device, and the ImGui context,
++	// again; a d-pad release in that time was lost, its axis stayed "held", and every press on the other axis
++	// was then dropped as a diagonal: Up/Down dead after stepping Renderer with Left/Right.)
+ 	const bool is_dpad_h = (key == GenericInputBinding::DPadLeft || key == GenericInputBinding::DPadRight);
+ 	const bool is_dpad_v = (key == GenericInputBinding::DPadUp || key == GenericInputBinding::DPadDown);
+ 	if (is_dpad_h || is_dpad_v)
+@@ -1252,6 +1361,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+ 			return false;
+ 	}
+ 
++#ifdef __PROSPERO__
++	if (!ImGui::GetCurrentContext())
++		return false;
++#endif
++
+ 	MTGS::RunOnGSThread(
+ 		[key = key_map[static_cast<u32>(key)], value, layout]() mutable {
+ 			if (s_gamepad_swap_noth_west)
+@@ -1317,6 +1431,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
  	// Treat as binary like the D-pad: either fully pressed or released, with a deadzone.
  	bool* neg_active_ptr = state ? (is_x_axis ? &state->x_neg_active : &state->y_neg_active) : nullptr;
  	bool* pos_active_ptr = state ? (is_x_axis ? &state->x_pos_active : &state->y_pos_active) : nullptr;
