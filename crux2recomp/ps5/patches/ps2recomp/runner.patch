@@ -1,6 +1,19 @@
 Crux2 Recomp's changes to PS2Recomp (https://github.com/ran-j/PS2Recomp.git eb8688b2fd191129f103a39543002c005b33409c). Copyright (C) 2026 Press5elect.
 GPL-3.0-or-later, with the attribution term of the NOTICE: keep "Crux2 by Press5elect".
 
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index 0189154..8c1fdb4 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -419,7 +419,7 @@ if(PS2X_PARALLEL_GS_DIR AND EXISTS "${PS2X_PARALLEL_GS_DIR_CM}/gs/gs_interface.h
+     target_sources(ps2_runtime PRIVATE src/lib/gs/gs_gpu_parallel.cpp src/lib/gs/gs_vulkan_present.cpp)
+     set_source_files_properties(src/lib/gs/gs_gpu_parallel.cpp src/lib/gs/gs_vulkan_present.cpp PROPERTIES
+         COMPILE_DEFINITIONS "NOMINMAX;WIN32_LEAN_AND_MEAN;_SILENCE_CXX20_IS_POD_DEPRECATION_WARNING")
+-    target_link_libraries(ps2_runtime PRIVATE parallel-gs)
++    target_link_libraries(ps2_runtime PRIVATE parallel-gs parallel-gs-dump) # (dump: GS dumps, recordDump)
+     target_compile_definitions(ps2_runtime PRIVATE PS2X_HAS_PARALLEL_GS=1)
+     message(STATUS "paraLLEl-GS: ${PS2X_PARALLEL_GS_DIR_CM}")
+ else()
 diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
 index 3bee601..2320a3f 100644
 --- a/ps2xRuntime/include/ps2_runtime.h
@@ -26,10 +39,10 @@ index 3bee601..2320a3f 100644
  
  #endif // PS2_RUNTIME_H
 diff --git a/ps2xRuntime/include/runtime/gs/gs_gpu.h b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-index e9f8308..643be86 100644
+index e9f8308..6d5bb07 100644
 --- a/ps2xRuntime/include/runtime/gs/gs_gpu.h
 +++ b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-@@ -58,11 +58,40 @@ struct GSGpuOptions
+@@ -58,11 +58,46 @@ struct GSGpuOptions
      bool libraryLog = false;
      bool sync = false;
      size_t ringBytes = size_t{16} << 20u;
@@ -45,6 +58,12 @@ index e9f8308..643be86 100644
 +    // The graphics card's time measured with its timestamps (GSGpuStatus::gpuMsPerFrame): a query per pass.
 +    bool gpuTimestamps = false;
      std::string gpuSelector;
++    // A file kept between sessions: the driver's compiled pipelines (its VkPipelineCache data) and the shading
++    // variants the games drew with. Read before paraLLEl-GS starts (the recorded variants are compiled first in the
++    // background, the pipelines in the file need no compiling), written at shutdown, and now and then while new
++    // pipelines appear (a session that ends without a shutdown keeps most of them). One saved by another driver
++    // build or another set of shaders gives its variants but not its pipelines. Empty: none. (Crux2)
++    std::string pipelineCachePath;
  
      static GSGpuOptions fromEnvironment();
  };
@@ -70,7 +89,7 @@ index e9f8308..643be86 100644
  // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).
  struct GSGpuFrame
  {
-@@ -76,6 +105,20 @@ struct GSGpuFrame
+@@ -76,6 +111,20 @@ struct GSGpuFrame
      uint32_t modeHeight = 0;
      bool highResolution = false;
      std::vector<uint8_t> rgba;
@@ -91,7 +110,7 @@ index e9f8308..643be86 100644
      // Shown straight from the graphics card (VENDETTA_PRESENT=vulkan): the picture is in shared image sharedImage
      // (R8G8B8A8, width x height) of the current set (Windows handles sharedHandles, made again when sharedGeneration
      // changes), finished once the shared timeline semaphore (sharedTimeline) reaches seq; rgba stays empty. The
-@@ -101,6 +144,32 @@ struct GSGpuStatus
+@@ -101,6 +150,43 @@ struct GSGpuStatus
      float presentsPerSecond = 0.0f;
      float gifMegabytesPerSecond = 0.0f;
      float renderPassesPerSecond = 0.0f;
@@ -121,10 +140,21 @@ index e9f8308..643be86 100644
 +    float eagerSubmitsPerFrame = 0.0f;
 +    // How long a frame the emulator's thread waited for room in the ring (the renderer thread behind).
 +    float ringWaitMs = 0.0f;
++};
++
++// The GS dumps recorded (GSGpuRenderer::recordDump), for whoever asked for them to say when one is done.
++struct GSGpuDumpStatus
++{
++    uint32_t ended = 0;    // dumps that ended (written whole, cut short or not opened), counted from the start
++    bool ok = false;       // the last one that ended was written whole
++    uint32_t presents = 0; // the presentations it holds
++    uint64_t bytes = 0;    // its size
++    std::string path;      // its file
++    std::string why;       // why it ended ("" when it holds all it was asked for)
  };
  
  // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).
-@@ -108,6 +177,7 @@ class GSGpuFrameMailbox
+@@ -108,6 +194,7 @@ class GSGpuFrameMailbox
  {
  public:
      GSGpuFrame &writeSlot() noexcept { return m_slot[m_back]; }
@@ -132,7 +162,7 @@ index e9f8308..643be86 100644
      void publish() noexcept
      {
          m_back = m_middle.exchange(m_back | kFresh, std::memory_order_acq_rel) & kIndexMask;
-@@ -127,6 +197,11 @@ public:
+@@ -127,6 +214,11 @@ public:
      // The shared image the reader is drawing from (-1: none): the writer never draws into it. Set by the reader
      // before it uses a taken frame's image, cleared once its graphics card work on it is done.
      std::atomic<int> sharedReading{-1};
@@ -144,7 +174,7 @@ index e9f8308..643be86 100644
  
  private:
      static constexpr uint32_t kFresh = 4u;
-@@ -155,6 +230,12 @@ public:
+@@ -155,6 +247,25 @@ public:
      // The producer, blocking: answered after everything sent before (GS memory as of this point in the order).
      virtual void snapshotVram(std::vector<uint8_t> &out) = 0;              // all 4 MiB
      virtual uint32_t readTransfer(uint8_t *dst, uint32_t maxBytes) = 0;    // a local -> host transfer's data
@@ -154,10 +184,23 @@ index e9f8308..643be86 100644
 +    virtual bool loadState(const uint8_t *data, size_t bytes) { (void)data; (void)bytes; return false; }
 +    // The producer: the GIF paths in `mask` (bit 0 = path 1) start over (a GIF reset).
 +    virtual void softReset(uint32_t mask) { (void)mask; }
++    // The producer: a GS dump of the GS input from here on, in PCSX2's .gs format (uncompressed), into `path`: it
++    // starts right after the next presentation (a frame's start: GS memory, the registers and the GIF paths as they
++    // are then, with the game's `serial` if given), holds every GIF transfer, register write, read of GS memory and
++    // presentation after it, and ends after `presents` presentations. Posted in order, not waited for; a dump being
++    // recorded ends first. A null or empty path (or presents = 0): the dump being recorded, or about to start,
++    // ends here. dumpStatus() says when one ended. False: this renderer records no dumps. (Crux2)
++    virtual bool recordDump(const char *path, uint32_t presents, const char *serial = nullptr)
++    {
++        (void)path; (void)presents; (void)serial;
++        return false;
++    }
++    // Any thread: the dumps that ended.
++    virtual GSGpuDumpStatus dumpStatus() const { return {}; }
  
      // The game thread, holding no lock: wait while more than maxAhead presentations are not yet drawn.
      virtual bool waitPresentBacklog(uint32_t maxAhead, const std::atomic<bool> &stop) = 0;
-@@ -166,12 +247,17 @@ public:
+@@ -166,12 +277,17 @@ public:
      virtual void setOutputSize(uint32_t width, uint32_t height) = 0;
      // The main thread, with shared pictures: the shared image it is drawing from (-1 when done with it).
      virtual void setSharedReading(int image) { (void)image; }
@@ -219,10 +262,17 @@ index 8fa3249..f137353 100644
      return converter.PresentFromLocalMemory(request);
  }
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-index 7bb06d3..568d7ce 100644
+index 7bb06d3..1dec70f 100644
 --- a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-@@ -18,8 +18,21 @@
+@@ -12,14 +12,30 @@
+ #include "context.hpp"
+ #include "device.hpp"
+ #include "gs_interface.hpp"
++#include "gs_dump_generator.hpp" // (paraLLEl-GS's dump/: GS dumps, recordDump)
+ #include "logging.hpp"
+ #include "muglm/muglm_impl.hpp"
+ #include "shaders/slangmosh.hpp"
  #include "gs_vulkan_shared.h"
  #include "gs_vulkan_present.h"
  
@@ -231,8 +281,10 @@ index 7bb06d3..568d7ce 100644
 -
 +#else
 +#include <sys/mman.h> // host-shared pictures' memory (GSGpuOptions::hostSharedFrames)
++#include <sys/stat.h> // chmod (the pipeline cache file)
 +#include <unistd.h>
 +#endif
++#include <cerrno>
 +#if defined(__PROSPERO__)
 +// The console has no Vulkan loader: RADV is linked into the title, and Granite's volk is given its
 +// entry point (PS5_Vulkan's link recipe). Crux2 Recomp.
@@ -245,7 +297,7 @@ index 7bb06d3..568d7ce 100644
  #include <algorithm>
  #include <atomic>
  #include <cctype>
-@@ -46,6 +59,10 @@ void stopSharedPictures() { g_sharedStopped.store(true, std::memory_order_releas
+@@ -46,6 +62,10 @@ void stopSharedPictures() { g_sharedStopped.store(true, std::memory_order_releas
  
  bool vulkanPresentWanted()
  {
@@ -256,7 +308,195 @@ index 7bb06d3..568d7ce 100644
      static const bool wanted = []
      {
          const char *present = std::getenv("VENDETTA_PRESENT");
-@@ -161,7 +178,19 @@ namespace
+@@ -89,6 +109,187 @@ namespace
+         return text;
+     }
+ 
++    // ---- the pipeline cache file (GSGpuOptions::pipelineCachePath) ----------------------------------------------
++    // A header, the recorded shading variants (ParallelGS::ShadingVariant as it is), then Granite's pipeline cache
++    // blob: the driver's pipelineCacheUUID (16 bytes), a hash of what follows (8), and the driver's VkPipelineCache
++    // data, which starts with VkPipelineCacheHeaderVersionOne. The pipelines are used only when the header's driver
++    // (vendor, device, driver version, cache UUID) and shader set are this session's and the driver's own header
++    // inside agrees; the variants are used whenever the file is whole.
++    namespace PipelineCacheFile
++    {
++        constexpr char kMagic[8] = {'C', 'R', 'X', '2', 'P', 'G', 'S', 'C'};
++        constexpr uint32_t kVersion = 1u;
++        constexpr size_t kMaxVariants = 4096u;
++        constexpr uint64_t kMaxBlobBytes = uint64_t{256} << 20u; // larger is not kept (memory for the copy)
++        constexpr size_t kGranitePrefix = VK_UUID_SIZE + sizeof(uint64_t);
++
++        struct Header
++        {
++            char magic[8];
++            uint32_t version;
++            uint32_t headerBytes;
++            uint32_t vendorID;
++            uint32_t deviceID;
++            uint32_t driverVersion;
++            uint32_t variantBytes; // sizeof(ParallelGS::ShadingVariant)
++            uint8_t pipelineCacheUUID[VK_UUID_SIZE];
++            uint64_t shaderSet; // ParallelGS::shader_set_fingerprint()
++            uint32_t variantCount;
++            uint32_t reserved;
++            uint64_t blobBytes;
++            uint64_t variantChecksum;
++        };
++        static_assert(sizeof(Header) == 80u, "the file's header");
++
++        uint64_t checksum(const void *data, size_t bytes)
++        {
++            uint64_t h = 0xcbf29ce484222325ull;
++            const auto *p = static_cast<const uint8_t *>(data);
++            for (size_t i = 0; i < bytes; i++)
++                h = (h ^ p[i]) * 0x100000001b3ull;
++            return h;
++        }
++
++        Header headerFor(const VkPhysicalDeviceProperties &props)
++        {
++            Header h{};
++            std::memcpy(h.magic, kMagic, sizeof(kMagic));
++            h.version = kVersion;
++            h.headerBytes = sizeof(Header);
++            h.vendorID = props.vendorID;
++            h.deviceID = props.deviceID;
++            h.driverVersion = props.driverVersion;
++            h.variantBytes = sizeof(ParallelGS::ShadingVariant);
++            std::memcpy(h.pipelineCacheUUID, props.pipelineCacheUUID, VK_UUID_SIZE);
++            h.shaderSet = ParallelGS::shader_set_fingerprint();
++            return h;
++        }
++
++        struct Loaded
++        {
++            bool present = false;  // a file was there
++            bool whole = false;    // and was a whole file of this format
++            std::vector<ParallelGS::ShadingVariant> variants;
++            std::vector<uint8_t> blob; // Granite's blob, only when usable here
++            uint32_t entries = 0;      // the driver's entries in it (Mesa's layout: a count after its header)
++            std::string blobIgnored;   // why a blob in the file is not used ("" when used or none)
++        };
++
++        Loaded load(const std::string &path, const VkPhysicalDeviceProperties &props)
++        {
++            Loaded out;
++            FILE *file = std::fopen(path.c_str(), "rb");
++            if (!file)
++                return out;
++            out.present = true;
++            std::vector<uint8_t> bytes;
++            if (std::fseek(file, 0, SEEK_END) == 0)
++            {
++                const long size = std::ftell(file);
++                if (size > 0 && static_cast<uint64_t>(size) <= sizeof(Header) + kMaxVariants * sizeof(ParallelGS::ShadingVariant) + kMaxBlobBytes &&
++                    std::fseek(file, 0, SEEK_SET) == 0)
++                {
++                    bytes.resize(static_cast<size_t>(size));
++                    if (std::fread(bytes.data(), 1, bytes.size(), file) != bytes.size())
++                        bytes.clear();
++                }
++            }
++            std::fclose(file);
++
++            Header h{};
++            if (bytes.size() < sizeof(Header))
++                return out;
++            std::memcpy(&h, bytes.data(), sizeof(Header));
++            const uint64_t variantBytes = uint64_t{h.variantCount} * sizeof(ParallelGS::ShadingVariant);
++            if (std::memcmp(h.magic, kMagic, sizeof(kMagic)) != 0 || h.version != kVersion || h.headerBytes != sizeof(Header) ||
++                h.variantBytes != sizeof(ParallelGS::ShadingVariant) || h.variantCount > kMaxVariants ||
++                h.blobBytes > kMaxBlobBytes || bytes.size() != sizeof(Header) + variantBytes + h.blobBytes)
++                return out;
++            const uint8_t *variants = bytes.data() + sizeof(Header);
++            if (checksum(variants, static_cast<size_t>(variantBytes)) != h.variantChecksum)
++                return out;
++            out.whole = true;
++            out.variants.resize(h.variantCount);
++            if (variantBytes)
++                std::memcpy(out.variants.data(), variants, static_cast<size_t>(variantBytes));
++
++            if (h.blobBytes == 0)
++                return out;
++            const Header here = headerFor(props);
++            const uint8_t *blob = variants + variantBytes;
++            if (h.vendorID != here.vendorID || h.deviceID != here.deviceID)
++                out.blobIgnored = "saved on another graphics card";
++            else if (h.driverVersion != here.driverVersion || std::memcmp(h.pipelineCacheUUID, here.pipelineCacheUUID, VK_UUID_SIZE) != 0)
++                out.blobIgnored = "saved by another driver build";
++            else if (h.shaderSet != here.shaderSet)
++                out.blobIgnored = "saved with other shaders (another Crux2 build)";
++            else if (h.blobBytes < kGranitePrefix + 32u || std::memcmp(blob, props.pipelineCacheUUID, VK_UUID_SIZE) != 0)
++                out.blobIgnored = "its pipelines are not this driver's";
++            else
++            {
++                // The driver's own header (VkPipelineCacheHeaderVersionOne), as the specification lays it out.
++                const uint8_t *vk = blob + kGranitePrefix;
++                uint32_t headerSize = 0, headerVersion = 0, vendorID = 0, deviceID = 0;
++                std::memcpy(&headerSize, vk + 0, 4);
++                std::memcpy(&headerVersion, vk + 4, 4);
++                std::memcpy(&vendorID, vk + 8, 4);
++                std::memcpy(&deviceID, vk + 12, 4);
++                if (headerSize < 32u || headerVersion != VK_PIPELINE_CACHE_HEADER_VERSION_ONE || vendorID != props.vendorID ||
++                    deviceID != props.deviceID || std::memcmp(vk + 16, props.pipelineCacheUUID, VK_UUID_SIZE) != 0)
++                    out.blobIgnored = "the driver's header in it does not match";
++                else
++                {
++                    if (headerSize == 32u && h.blobBytes >= kGranitePrefix + 36u)
++                        std::memcpy(&out.entries, vk + 32, 4);
++                    out.blob.assign(blob, blob + h.blobBytes);
++                }
++            }
++            return out;
++        }
++
++        // Written to <path>.tmp and renamed over the file: a session that stops while writing leaves the old one.
++        bool save(const std::string &path, const Header &base, const std::vector<ParallelGS::ShadingVariant> &variants,
++                  const std::vector<uint8_t> &blob, std::string &why)
++        {
++            Header h = base;
++            h.variantCount = static_cast<uint32_t>(variants.size());
++            h.blobBytes = blob.size();
++            h.variantChecksum = checksum(variants.data(), variants.size() * sizeof(ParallelGS::ShadingVariant));
++            const std::string temporary = path + ".tmp";
++            FILE *file = std::fopen(temporary.c_str(), "wb");
++            if (!file)
++            {
++                why = std::string("cannot create ") + temporary + ": " + std::strerror(errno);
++                return false;
++            }
++            bool ok = std::fwrite(&h, sizeof(h), 1, file) == 1;
++            if (ok && !variants.empty())
++                ok = std::fwrite(variants.data(), sizeof(ParallelGS::ShadingVariant), variants.size(), file) == variants.size();
++            if (ok && !blob.empty())
++                ok = std::fwrite(blob.data(), 1, blob.size(), file) == blob.size();
++            ok = (std::fclose(file) == 0) && ok;
++            if (!ok)
++            {
++                why = std::string("writing ") + temporary + " failed: " + std::strerror(errno);
++                std::remove(temporary.c_str());
++                return false;
++            }
++#if defined(_WIN32)
++            std::remove(path.c_str());
++#else
++            // (On the PS5 everything a title makes stays reachable by the console's FTP service.)
++            (void)chmod(temporary.c_str(), 0666);
++#endif
++            if (std::rename(temporary.c_str(), path.c_str()) != 0)
++            {
++                why = std::string("renaming ") + temporary + " failed: " + std::strerror(errno);
++                std::remove(temporary.c_str());
++                return false;
++            }
++            return true;
++        }
++    }
++
+     // VENDETTA_GPU: a device index (as Vulkan lists them) or part of its name, e.g. "nvidia" / "intel".
+     VkPhysicalDevice pickPhysicalDevice(VkInstance instance, const std::string &selector)
+     {
+@@ -161,7 +362,19 @@ namespace
      constexpr uint64_t align16(uint64_t bytes) { return (bytes + 15u) & ~uint64_t{15u}; }
      constexpr uint32_t kMaxGifChunk = 256u * 1024u;         // larger GIF transfers go in pieces (paths keep their tag)
      constexpr uint64_t kPublishBytes = 16u * 1024u;         // hand records over at least this often
@@ -277,7 +517,7 @@ index 7bb06d3..568d7ce 100644
  
      inline void cpuRelax() { _mm_pause(); }
  
-@@ -269,6 +298,32 @@ namespace
+@@ -269,6 +482,58 @@ namespace
              return call.result;
          }
  
@@ -307,10 +547,36 @@ index 7bb06d3..568d7ce 100644
 +            commit();
 +        }
 +
++        bool recordDump(const char *path, uint32_t presents, const char *serial) override
++        {
++            // payload: DumpRecord, the path, the serial (no terminators)
++            DumpRecord record{};
++            record.presents = presents;
++            record.pathBytes = static_cast<uint16_t>(path ? std::min<size_t>(std::strlen(path), 4000u) : 0u);
++            record.serialBytes = static_cast<uint16_t>(serial ? std::min<size_t>(std::strlen(serial), 64u) : 0u);
++            if (presents == 0u)
++                record.pathBytes = record.serialBytes = 0u;
++            uint8_t *dst = reserve(Cmd::Dump, static_cast<uint32_t>(sizeof(record) + record.pathBytes + record.serialBytes));
++            std::memcpy(dst, &record, sizeof(record));
++            if (record.pathBytes)
++                std::memcpy(dst + sizeof(record), path, record.pathBytes);
++            if (record.serialBytes)
++                std::memcpy(dst + sizeof(record) + record.pathBytes, serial, record.serialBytes);
++            commit();
++            publish();
++            return true;
++        }
++
++        GSGpuDumpStatus dumpStatus() const override
++        {
++            std::lock_guard<std::mutex> lock(m_statusMutex);
++            return m_dumpStatus;
++        }
++
          void kick() override
          {
              if (m_options.sync)
-@@ -312,6 +367,11 @@ namespace
+@@ -312,6 +577,11 @@ namespace
          }
  
          void setSharedReading(int image) override { m_frames.sharedReading.store(image, std::memory_order_release); }
@@ -322,7 +588,7 @@ index 7bb06d3..568d7ce 100644
  
          void setSuperSampling(uint32_t rate) override
          {
-@@ -324,6 +384,11 @@ namespace
+@@ -324,6 +594,11 @@ namespace
          {
              m_wantSharpness.store(std::clamp(stops, 0.0f, 2.0f), std::memory_order_relaxed);
          }
@@ -334,7 +600,7 @@ index 7bb06d3..568d7ce 100644
  
          GSGpuStatus status() const override
          {
-@@ -337,8 +402,7 @@ namespace
+@@ -337,8 +612,7 @@ namespace
                  return;
              m_shutDown = true;
              m_stop.store(true, std::memory_order_seq_cst);
@@ -344,15 +610,22 @@ index 7bb06d3..568d7ce 100644
              if (m_thread.joinable())
                  m_thread.join();
              m_readPos.store(m_localWrite, std::memory_order_release);
-@@ -355,6 +419,7 @@ namespace
+@@ -355,6 +629,14 @@ namespace
              Reset,
              Present,  // payload = PresentRecord
              Call,     // payload = a CallRecord * (on the waiting producer's stack)
 +            SoftReset, // aux = the paths' mask
++            Dump,      // payload = DumpRecord, then the path and the serial (recordDump)
++        };
++        struct DumpRecord
++        {
++            uint32_t presents;
++            uint16_t pathBytes;
++            uint16_t serialBytes;
          };
          struct alignas(16) Header
          {
-@@ -370,9 +435,13 @@ namespace
+@@ -370,9 +652,13 @@ namespace
              {
                  Snapshot,
                  ReadTransfer,
@@ -366,7 +639,7 @@ index 7bb06d3..568d7ce 100644
              uint8_t *dst = nullptr;
              uint32_t bytes = 0u;
              uint32_t result = 0u;
-@@ -395,8 +464,12 @@ namespace
+@@ -395,8 +681,12 @@ namespace
              std::memcpy(dst, &pointer, sizeof(pointer));
              commit();
              publish();
@@ -379,7 +652,7 @@ index 7bb06d3..568d7ce 100644
          }
  
          uint8_t *reserve(Cmd cmd, uint32_t payloadBytes)
-@@ -412,11 +485,14 @@ namespace
+@@ -412,11 +702,14 @@ namespace
                  if (m_size - (m_localWrite - m_cachedRead) < needed)
                  {
                      publish();
@@ -394,7 +667,7 @@ index 7bb06d3..568d7ce 100644
                  }
              }
              if (wrap)
-@@ -451,10 +527,7 @@ namespace
+@@ -451,10 +744,7 @@ namespace
              m_published = m_localWrite;
              m_writePos.store(m_localWrite, std::memory_order_seq_cst);
              if (m_consumerSleeping.load(std::memory_order_seq_cst) != 0u)
@@ -406,7 +679,7 @@ index 7bb06d3..568d7ce 100644
          }
  
          void drain()
-@@ -470,13 +543,13 @@ namespace
+@@ -470,13 +760,13 @@ namespace
          template <typename Pred>
          void waitProgress(const char *what, Pred pred)
          {
@@ -422,7 +695,7 @@ index 7bb06d3..568d7ce 100644
              bool reported = false;
              std::unique_lock<std::mutex> lock(m_progressMutex);
              m_producerWaiting.fetch_add(1u, std::memory_order_seq_cst);
-@@ -496,6 +569,14 @@ namespace
+@@ -496,6 +786,14 @@ namespace
  
          // ---- the graphics card thread -------------------------------------------------------------------------
  
@@ -437,7 +710,7 @@ index 7bb06d3..568d7ce 100644
          void publishProgress(uint64_t readPos)
          {
              m_readPos.store(readPos, std::memory_order_seq_cst);
-@@ -505,7 +586,15 @@ namespace
+@@ -505,7 +803,15 @@ namespace
  
          void threadMain()
          {
@@ -453,7 +726,7 @@ index 7bb06d3..568d7ce 100644
              GpuLog logger(m_options.libraryLog);
              Util::set_thread_logging_interface(&logger);
  
-@@ -521,8 +610,13 @@ namespace
+@@ -521,8 +827,13 @@ namespace
  
              try
              {
@@ -467,10 +740,44 @@ index 7bb06d3..568d7ce 100644
  
                  // Closed in reverse order: the GS interface, the device (both explicitly, below), then the context.
                  Vulkan::Context context;
-@@ -552,6 +646,12 @@ namespace
+@@ -540,6 +851,18 @@ namespace
+                 Vulkan::Device &device = *deviceHolder;
+                 device.set_context(context);
+                 device.init_frame_contexts(12);
++                // The pipeline cache's saver thread uses the device: stopped before the device goes, however this
++                // thread leaves (declared after the device, so destroyed before it).
++                struct CacheSaverGuard
++                {
++                    ParallelGsRenderer *self;
++                    ~CacheSaverGuard() { self->stopPipelineCacheSaver(); }
++                } cacheSaverGuard{this};
++
++                // Before paraLLEl-GS starts: its background compile and every pipeline after it go through the
++                // device's pipeline cache, filled from the file.
++                std::vector<ParallelGS::ShadingVariant> recordedVariants;
++                openPipelineCache(device, context.get_gpu_props(), recordedVariants);
+ 
+                 auto gsHolder = std::make_unique<ParallelGS::GSInterface>();
+                 ParallelGS::GSInterface &gs = *gsHolder;
+@@ -548,10 +871,27 @@ namespace
+                 gsOptions.ordered_super_sampling = m_options.orderedGrid;
+                 gsOptions.super_sampled_textures = m_options.superSampledTextures;
+                 gsOptions.dynamic_super_sampling = true;
++                gsOptions.precompile_variants = std::move(recordedVariants);
+                 if (!gs.init(&device, gsOptions))
                      return fail(std::string("paraLLEl-GS could not start on ") + context.get_gpu_props().deviceName +
                                  " (it needs descriptor indexing, timeline semaphores, 8/16-bit storage and subgroup "
                                  "size control)");
++                {
++                    const ParallelGS::PrecompileProgress p = gs.get_precompile_progress();
++                    if (p.threads != 0)
++                        std::fprintf(stderr, "[gpu-gs] background compile: %u pipelines on %u threads (%u recorded shading variants "
++                                     "first); the drawing thread compiles what it needs before they are done\n",
++                                     p.queued, p.threads, p.recorded);
++                    else
++                        std::fprintf(stderr, "[gpu-gs] background compile: off (PGS_SKIP_COMPILATION_TASKS=1)\n");
++                }
++                startPipelineCacheSaver(device);
 +                if (m_options.gpuTimestamps)
 +                {
 +                    ParallelGS::DebugMode mode{};
@@ -480,7 +787,7 @@ index 7bb06d3..568d7ce 100644
  
                  {
                      // 2-D detail: VENDETTA_UPSCALE_SPRITES=1 (settings.toml graphics.sharp_2d) super-samples sprites
-@@ -559,9 +659,19 @@ namespace
+@@ -559,9 +899,19 @@ namespace
                      // own pixel; VENDETTA_HIRES4=0: 2x as before). VENDETTA_PROMOTE=1 (a test): show a final blit's
                      // source instead (paraLLEl-GS's backbuffer promotion).
                      auto on = [](const char *name) { const char *v = std::getenv(name); return v && *v && *v != '0'; };
@@ -502,7 +809,7 @@ index 7bb06d3..568d7ce 100644
                      gs.set_hacks(hacks);
                      const char *hires4 = std::getenv("VENDETTA_HIRES4");
                      m_quadScanout = !(hires4 && *hires4 == '0');
-@@ -603,6 +713,27 @@ namespace
+@@ -603,16 +953,49 @@ namespace
                      }
                  }
  
@@ -530,7 +837,12 @@ index 7bb06d3..568d7ce 100644
                  m_device = &device;
                  m_gs = &gs;
                  consume();
-@@ -612,7 +743,16 @@ namespace
++                // A GS dump still being recorded keeps what it has.
++                endDump(false, "the renderer closed");
++                m_dump.armed = false;
+                 const auto stopStart = Clock::now();
+                 auto stepMs = [&]()
+                 { return std::chrono::duration<double, std::milli>(Clock::now() - stopStart).count(); };
                  m_gs = nullptr;
                  m_device = nullptr;
                  m_lastScanout = {};
@@ -547,7 +859,7 @@ index 7bb06d3..568d7ce 100644
                  m_fsrUpscaled.reset();
                  m_fsrSharpened.reset();
                  for (auto &image : m_sharedImages)
-@@ -620,14 +760,23 @@ namespace
+@@ -620,14 +1003,31 @@ namespace
                  m_sharedTimeline.reset();
                  closeSharedHandles(m_sharedHandles);
                  closeSharedHandles(m_sharedOldHandles);
@@ -556,9 +868,17 @@ index 7bb06d3..568d7ce 100644
                      CloseHandle(m_sharedTimelineHandle);
 +#endif
                  m_sharedTimelineHandle = nullptr;
++                // The variants drawn with, taken before the GS interface goes.
++                std::vector<ParallelGS::ShadingVariant> finalVariants;
++                if (m_cacheOn)
++                    finalVariants = gs.get_shading_variants(PipelineCacheFile::kMaxVariants);
                  // The GS interface first: it submits the command buffers it holds (waiting for the device while it
                  // holds one never ends), then the device.
                  gsHolder.reset();
++                // (Its background compile has stopped with it: the cache holds what it finished.)
++                stopPipelineCacheSaver();
++                if (m_cacheOn)
++                    savePipelineCache(device, finalVariants, true);
                  device.wait_idle();
                  deviceHolder.reset();
 +                // The reader has let go of the memory before shutdown() (its contract): nothing imports it now.
@@ -571,7 +891,213 @@ index 7bb06d3..568d7ce 100644
                  if (m_profile)
                      std::fprintf(stderr, "[gpu-gs] closed in %.1f ms%c", stepMs(), 10);
              }
-@@ -652,25 +801,55 @@ namespace
+@@ -641,6 +1041,205 @@ namespace
+             Util::set_thread_logging_interface(nullptr);
+         }
+ 
++        // ---- the pipeline cache file (GSGpuOptions::pipelineCachePath) -------------------------------------------
++        // Read before paraLLEl-GS starts: its pipelines go into the device's VkPipelineCache (every pipeline Granite
++        // makes passes it), its recorded variants into GSOptions::precompile_variants. Without a usable file the cache
++        // starts empty and fills from this session.
++        void openPipelineCache(Vulkan::Device &device, const VkPhysicalDeviceProperties &props,
++                               std::vector<ParallelGS::ShadingVariant> &recorded)
++        {
++            const std::string &path = m_options.pipelineCachePath;
++            if (path.empty())
++                return;
++            if (device.get_device_features().pipeline_binary_features.pipelineBinaries)
++            {
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: the device uses pipeline binaries; %s is not kept\n", path.c_str());
++                return;
++            }
++            const auto start = Clock::now();
++            PipelineCacheFile::Loaded loaded = PipelineCacheFile::load(path, props);
++            if (!loaded.blob.empty())
++            {
++                // Granite's hash of the driver's data (its init_pipeline_cache starts afresh on a mismatch too; here
++                // it is said why).
++                Util::Hasher h;
++                h.data(loaded.blob.data() + PipelineCacheFile::kGranitePrefix, loaded.blob.size() - PipelineCacheFile::kGranitePrefix);
++                uint64_t stored = 0;
++                std::memcpy(&stored, loaded.blob.data() + VK_UUID_SIZE, sizeof(stored));
++                if (uint64_t(h.get()) != stored)
++                {
++                    loaded.blob.clear();
++                    loaded.blobIgnored = "its pipelines are damaged";
++                }
++            }
++            const bool used = !loaded.blob.empty() && device.init_pipeline_cache(loaded.blob.data(), loaded.blob.size());
++            if (!used && !device.init_pipeline_cache(nullptr, 0))
++            {
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: the driver made no pipeline cache; %s is not kept\n", path.c_str());
++                return;
++            }
++            const double ms = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
++            m_cacheOn = true;
++            m_cacheHeader = PipelineCacheFile::headerFor(props);
++            m_cacheSavedBytes = used ? loaded.blob.size() : 0u;
++            m_cacheSavedVariants = loaded.variants;
++            m_cacheVariants = loaded.variants;
++            recorded = std::move(loaded.variants);
++            if (!loaded.present)
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: loaded 0 bytes (no %s yet); this session's pipelines are kept in it\n",
++                             path.c_str());
++            else if (!loaded.whole)
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: loaded 0 bytes (%s is not a whole pipeline cache file; written anew)\n",
++                             path.c_str());
++            else if (used)
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: loaded %zu bytes (%.1f MB, %u driver entries) and %zu recorded shading "
++                             "variants from %s in %.0f ms\n",
++                             m_cacheSavedBytes, m_cacheSavedBytes / 1048576.0, loaded.entries, recorded.size(), path.c_str(), ms);
++            else
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: loaded 0 bytes of pipelines from %s (%s) and %zu recorded shading "
++                             "variants (compiled first in the background)\n",
++                             path.c_str(), loaded.blobIgnored.empty() ? "none in it" : loaded.blobIgnored.c_str(), recorded.size());
++        }
++
++        // The driver's cache and the variants written when anything is new since the last save (or the load).
++        // final: at shutdown (says so when nothing is new). Any thread; one save at a time.
++        void savePipelineCache(Vulkan::Device &device, const std::vector<ParallelGS::ShadingVariant> &variants, bool final)
++        {
++            std::lock_guard<std::mutex> saving(m_cacheSaveMutex);
++            const auto start = Clock::now();
++            const std::string &path = m_options.pipelineCachePath;
++            size_t bytes = device.get_pipeline_cache_size();
++            if (bytes > PipelineCacheFile::kMaxBlobBytes)
++            {
++                if (!m_cacheTooLargeSaid)
++                    std::fprintf(stderr, "[gpu-gs] pipeline cache: %.1f MB of pipelines is more than the %.0f MB kept; only the "
++                                 "shading variants are saved\n",
++                                 bytes / 1048576.0, PipelineCacheFile::kMaxBlobBytes / 1048576.0);
++                m_cacheTooLargeSaid = true;
++                bytes = 0;
++            }
++            // (The same variants in another order are nothing new: each session lists them in the order first drawn.)
++            const auto sorted = [](std::vector<ParallelGS::ShadingVariant> list)
++            {
++                std::sort(list.begin(), list.end(), [](const ParallelGS::ShadingVariant &a, const ParallelGS::ShadingVariant &b)
++                          { return std::memcmp(&a, &b, sizeof(a)) < 0; });
++                return list;
++            };
++            bool sameVariants = variants.size() == m_cacheSavedVariants.size();
++            if (sameVariants && !variants.empty())
++            {
++                const auto a = sorted(variants), b = sorted(m_cacheSavedVariants);
++                sameVariants = std::memcmp(a.data(), b.data(), a.size() * sizeof(ParallelGS::ShadingVariant)) == 0;
++            }
++            if (bytes == m_cacheSavedBytes && sameVariants)
++            {
++                if (final)
++                    std::fprintf(stderr, "[gpu-gs] pipeline cache: saved 0 bytes (nothing new since %s: %zu bytes, %zu shading "
++                                 "variants in %s)\n",
++                                 m_cacheEverSaved ? "the last save" : "it was loaded", m_cacheSavedBytes, variants.size(), path.c_str());
++                return;
++            }
++            std::vector<uint8_t> blob(bytes);
++            if (bytes != 0 && !device.get_pipeline_cache_data(blob.data(), blob.size()))
++            {
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: the driver gave no data; only the shading variants are saved\n");
++                blob.clear();
++            }
++            std::string why;
++            if (!PipelineCacheFile::save(path, m_cacheHeader, variants, blob, why))
++            {
++                std::fprintf(stderr, "[gpu-gs] pipeline cache: not saved (%s)\n", why.c_str());
++                return;
++            }
++            m_cacheSavedBytes = blob.size();
++            m_cacheSavedVariants = variants;
++            m_cacheEverSaved = true;
++            std::fprintf(stderr, "[gpu-gs] pipeline cache: saved %zu bytes (%.1f MB) and %zu shading variants to %s in %.0f ms%s\n",
++                         blob.size(), blob.size() / 1048576.0, variants.size(), path.c_str(),
++                         std::chrono::duration<double, std::milli>(Clock::now() - start).count(), final ? " (at close)" : "");
++        }
++
++        // Writes the cache now and then on a thread of its own, so a session that ends without a shutdown (the
++        // console closing the title) keeps most of what it compiled: every 2 minutes while the background compile
++        // runs (the cache grows all the time then), once when it is done, then every 30 s when anything is new.
++        void startPipelineCacheSaver(Vulkan::Device &device)
++        {
++            if (!m_cacheOn)
++                return;
++            m_cacheStop = false;
++            m_cacheThread = std::thread([this, &device]
++            {
++#if defined(__PROSPERO__)
++                if (ps5_title_thread_named)
++                    ps5_title_thread_named("paraLLEl-GS cache");
++#endif
++                std::unique_lock<std::mutex> lock(m_cacheMutex);
++                auto last = Clock::now();
++                bool savedAfterCompile = false;
++                for (;;)
++                {
++                    m_cacheCv.wait_for(lock, std::chrono::seconds(5), [&]() { return m_cacheStop; });
++                    if (m_cacheStop)
++                        return;
++                    const bool compiled = m_precompileFinished.load(std::memory_order_acquire);
++                    const auto since = Clock::now() - last;
++                    const bool due = compiled ? (!savedAfterCompile || since >= std::chrono::seconds(30))
++                                              : since >= std::chrono::seconds(120);
++                    if (!due)
++                        continue;
++                    const std::vector<ParallelGS::ShadingVariant> variants = m_cacheVariants;
++                    lock.unlock();
++                    savePipelineCache(device, variants, false);
++                    lock.lock();
++                    last = Clock::now();
++                    savedAfterCompile = savedAfterCompile || compiled;
++                }
++            });
++        }
++
++        void stopPipelineCacheSaver()
++        {
++            {
++                std::lock_guard<std::mutex> lock(m_cacheMutex);
++                m_cacheStop = true;
++            }
++            m_cacheCv.notify_all();
++            if (m_cacheThread.joinable())
++                m_cacheThread.join();
++        }
++
++        // The graphics card thread, at its status updates: the variants drawn so far handed to the saver (when new
++        // ones appeared), and the background compile's end said once.
++        void pollPipelineCache(Clock::time_point now)
++        {
++            if (!m_gs)
++                return;
++            if (!m_precompileReported)
++            {
++                const ParallelGS::PrecompileProgress p = m_gs->get_precompile_progress();
++                if (p.threads == 0 || p.finished)
++                {
++                    m_precompileReported = true;
++                    m_precompileFinished.store(true, std::memory_order_release);
++                    if (p.threads != 0)
++                        std::fprintf(stderr, "[gpu-gs] background compile done: %u of %u pipelines in %.1f s on %u threads\n", p.done,
++                                     p.queued, p.seconds, p.threads);
++                }
++            }
++            if (m_cacheOn && now - m_cacheSnapshotAt >= std::chrono::seconds(5))
++            {
++                m_cacheSnapshotAt = now;
++                const uint32_t seen = m_gs->get_new_shading_variant_count();
++                if (seen != m_cacheNewVariantsSeen)
++                {
++                    m_cacheNewVariantsSeen = seen;
++                    std::vector<ParallelGS::ShadingVariant> variants = m_gs->get_shading_variants(PipelineCacheFile::kMaxVariants);
++                    std::lock_guard<std::mutex> lock(m_cacheMutex);
++                    m_cacheVariants = std::move(variants);
++                }
++            }
++        }
++
+         void consume()
+         {
+             uint64_t read = m_readPos.load(std::memory_order_relaxed);
+@@ -652,25 +1251,55 @@ namespace
                      publishProgress(read);
                      if (m_stop.load(std::memory_order_acquire))
                          return;
@@ -635,7 +1161,7 @@ index 7bb06d3..568d7ce 100644
                  while (read != write)
                  {
                      if (m_stop.load(std::memory_order_relaxed))
-@@ -697,8 +876,17 @@ namespace
+@@ -697,8 +1326,17 @@ namespace
                      {
                          sinceProgress = 0u;
                          publishProgress(read);
@@ -653,24 +1179,62 @@ index 7bb06d3..568d7ce 100644
                  publishProgress(read);
                  reportStats();
              }
-@@ -711,26 +899,31 @@ namespace
+@@ -711,26 +1349,69 @@ namespace
              case Cmd::Wrap:
                  break;
              case Cmd::Gif:
 -            {
 -                const auto start = Clock::now();
++                if (m_dump.recording)
++                    dumpWrite([&] { m_dumpGen->write_transfer(header.flags, payload, header.bytes); });
                  m_gs->gif_transfer(header.flags, payload, header.bytes);
 -                m_stats.gif += Clock::now() - start;
                  m_stats.gifBytes += header.bytes;
                  break;
 -            }
              case Cmd::Reg:
++                if (m_dump.recording)
++                    dumpRegister(static_cast<uint8_t>(header.flags), header.aux);
                  m_gs->write_register(static_cast<ParallelGS::RegisterAddr>(header.flags), header.aux);
                  break;
              case Cmd::Reset:
++                // (A dump holds no GS reset: a replay would go on from the registers as they were.)
++                if (m_dump.recording || m_dump.armed)
++                    endDump(false, "the GS was reset, which a GS dump cannot hold");
                  m_gs->reset_context_state();
                  break;
++            case Cmd::Dump:
++            {
++                DumpRecord record{};
++                std::memcpy(&record, payload, sizeof(record));
++                if (m_dump.recording || m_dump.armed)
++                    endDump(m_dump.recording, record.presents ? "a new GS dump was asked for" : "ended when asked");
++                if (record.presents != 0u && record.pathBytes != 0u)
++                {
++                    const char *text = reinterpret_cast<const char *>(payload + sizeof(record));
++                    m_dump.path.assign(text, record.pathBytes);
++                    m_dump.serial.assign(text + record.pathBytes, record.serialBytes);
++                    m_dump.presents = record.presents;
++                    m_dump.armed = true;
++                    m_dump.armedPresents = 0u;
++                }
++                break;
++            }
 +            case Cmd::SoftReset:
++                // A path that is reset in the middle of a packet: a replay would go on with the packet (a dump holds
++                // no GIF reset), so the dump ends here. One between packets changes nothing.
++                if (m_dump.recording)
++                {
++                    for (uint32_t path = 0; path < 4; ++path)
++                    {
++                        const ParallelGS::GIFPath &gifPath = m_gs->get_gif_path(path);
++                        if ((header.aux & (1u << path)) && gifPath.loop != gifPath.tag.NLOOP)
++                        {
++                            endDump(false, "a GIF path was reset in the middle of a packet, which a GS dump cannot hold");
++                            break;
++                        }
++                    }
++                }
 +                for (uint32_t path = 0; path < 4; ++path)
 +                {
 +                    if (header.aux & (1u << path))
@@ -689,7 +1253,18 @@ index 7bb06d3..568d7ce 100644
                  }
                  catch (...)
                  {
-@@ -755,9 +948,11 @@ namespace
+@@ -747,6 +1428,10 @@ namespace
+                 PresentRecord record;
+                 std::memcpy(&record, payload, sizeof(record));
+                 doPresent(record);
++                if (m_dump.recording)
++                    dumpPresent(record);
++                else if (m_dump.armed)
++                    startDump();
+                 m_presentsDone.fetch_add(1u, std::memory_order_release);
+                 if (m_producerWaiting.load(std::memory_order_seq_cst) != 0u)
+                     wake();
+@@ -755,9 +1440,11 @@ namespace
              }
          }
  
@@ -702,7 +1277,12 @@ index 7bb06d3..568d7ce 100644
              switch (call.kind)
              {
              case CallRecord::Snapshot:
-@@ -770,6 +965,55 @@ namespace
+@@ -767,12 +1454,178 @@ namespace
+                 break;
+             }
+             case CallRecord::ReadTransfer:
++                if (m_dump.recording)
++                    dumpWrite([&] { m_dumpGen->write_read_fifo(call.bytes / 16u); });
                  m_gs->read_transfer_fifo(call.dst, call.bytes / 16u);
                  call.result = call.bytes & ~15u;
                  break;
@@ -742,6 +1322,8 @@ index 7bb06d3..568d7ce 100644
 +                    break;
 +                }
 +                const uint8_t *p = call.src + sizeof(header);
++                if (m_dump.recording || m_dump.armed)
++                    endDump(false, "a saved state was loaded, which a GS dump cannot hold");
 +                m_gs->reset_context_state();
 +                std::memcpy(&m_gs->get_register_state(), p, sizeof(ParallelGS::RegisterState));
 +                p += sizeof(ParallelGS::RegisterState);
@@ -755,10 +1337,126 @@ index 7bb06d3..568d7ce 100644
 +                call.result = 1u;
 +                break;
 +            }
++            }
++        }
++
++        // ---- GS dumps (recordDump): written on this thread through the dump generator's buffered file ------------
++
++        // A write to the dump; a failed one (the drive full, say) ends it, cut short, and never stops the GS.
++        template <typename Fn>
++        void dumpWrite(Fn fn)
++        {
++            try
++            {
++                fn();
++            }
++            catch (const std::exception &e)
++            {
++                endDump(false, (std::string("a write failed: ") + e.what()).c_str());
              }
          }
  
-@@ -796,6 +1040,56 @@ namespace
++        // A register written outside the GIF (reg()): an A+D packet of its own on GIF path index 3, which no producer
++        // of this renderer leaves in the middle of a packet when it writes a register.
++        void dumpRegister(uint8_t addr, uint64_t value)
++        {
++            ParallelGS::GIFTagBits tag{};
++            tag.NLOOP = 1;
++            tag.EOP = 1;
++            tag.FLG = 0; // PACKED
++            tag.NREG = 1;
++            tag.REGS = uint32_t(ParallelGS::GIFAddr::A_D);
++            uint8_t packet[32];
++            const uint64_t data[2] = {value, addr};
++            std::memcpy(packet, &tag, 16);
++            std::memcpy(packet + 16, data, 16);
++            dumpWrite([&] { m_dumpGen->write_transfer(3u, packet, sizeof(packet)); });
++        }
++
++        // Right after a presentation: GS memory and the state as they are now open the dump. Not while a path is in
++        // the middle of an image upload (the dump holds no upload's position: a replay would start it again at its
++        // first pixel), for up to a second of presentations.
++        void startDump()
++        {
++            bool uploading = false;
++            for (uint32_t path = 0; path < 4; ++path)
++            {
++                const ParallelGS::GIFPath &gifPath = m_gs->get_gif_path(path);
++                uploading |= gifPath.loop != gifPath.tag.NLOOP && gifPath.tag.FLG == 2u;
++            }
++            if (uploading && ++m_dump.armedPresents < 60u)
++                return;
++            m_dump.armed = false;
++            if (!m_dumpGen)
++                m_dumpGen = std::make_unique<ParallelGS::GSDumpGenerator>();
++            m_gs->flush();
++            errno = 0;
++            if (!m_dumpGen->init(m_dump.path.c_str(), static_cast<uint32_t>(kVramBytes), *m_gs,
++                                 m_dump.serial.empty() ? nullptr : m_dump.serial.c_str()))
++            {
++                const std::string why = std::string("it could not be written (") + (errno ? std::strerror(errno) : "a write failed") + ")";
++                std::fprintf(stderr, "[gpu-gs] GS dump: %s: %s\n", m_dump.path.c_str(), why.c_str());
++                setDumpEnded(false, 0u, 0u, why);
++                return;
++            }
++            m_dump.recording = true;
++            m_dump.left = m_dump.presents;
++            m_dump.held = 0u;
++            m_dump.started = Clock::now();
++            std::fprintf(stderr, "[gpu-gs] GS dump: recording %u presentations into %s%s\n", m_dump.presents, m_dump.path.c_str(),
++                         uploading ? " (from the middle of an image upload: that upload is replayed from its start)" : "");
++        }
++
++        void dumpPresent(const PresentRecord &record)
++        {
++            // (doPresent put the presentation's privileged registers into the GS interface: written with the vsync.)
++            dumpWrite([&] { m_dumpGen->write_vsync(static_cast<uint32_t>(record.vsyncTick & 1u), *m_gs); });
++            if (!m_dump.recording)
++                return;
++            ++m_dump.held;
++            if (--m_dump.left == 0u)
++                endDump(true, "");
++        }
++
++        // The dump ends: the file closed (whole: it holds what was asked for, as far as asked).
++        void endDump(bool whole, const char *why)
++        {
++            if (m_dump.armed && !m_dump.recording)
++            {
++                m_dump.armed = false;
++                std::fprintf(stderr, "[gpu-gs] GS dump: %s not started: %s\n", m_dump.path.c_str(), why);
++                setDumpEnded(false, 0u, 0u, std::string("not started: ") + why);
++                return;
++            }
++            if (!m_dump.recording)
++                return;
++            m_dump.recording = false;
++            uint64_t bytes = 0u;
++            const bool closed = m_dumpGen->close(&bytes);
++            const bool ok = whole && closed;
++            const double seconds = std::chrono::duration<double>(Clock::now() - m_dump.started).count();
++            const std::string note = closed ? std::string(why) : std::string("the file could not be finished");
++            std::fprintf(stderr, "[gpu-gs] GS dump: %s %s (%.1f MB, %u presentations, %.1f s)%s%s\n", m_dump.path.c_str(),
++                         ok ? "saved" : "cut short", static_cast<double>(bytes) / 1048576.0, m_dump.held, seconds,
++                         note.empty() ? "" : ": ", note.c_str());
++            setDumpEnded(ok, m_dump.held, bytes, note);
++        }
++
++        void setDumpEnded(bool ok, uint32_t presents, uint64_t bytes, const std::string &why)
++        {
++            std::lock_guard<std::mutex> lock(m_statusMutex);
++            m_dumpStatus.ended++;
++            m_dumpStatus.ok = ok;
++            m_dumpStatus.presents = presents;
++            m_dumpStatus.bytes = bytes;
++            m_dumpStatus.path = m_dump.path;
++            m_dumpStatus.why = why;
++        }
++
+         // VENDETTA_HOSTPROF: every 5 s, where the graphics card thread's time went.
+         // Every second: the debug panel's status (from what was counted since the last one).
+         void updateStatus(Clock::time_point now)
+@@ -796,6 +1649,56 @@ namespace
                  static_cast<float>((m_stats.gifBytes - m_statusBase.gifBytes) / seconds / 1048576.0);
              status.renderPassesPerSecond =
                  static_cast<float>((m_stats.renderPasses - m_statusBase.renderPasses) / seconds);
@@ -815,7 +1513,15 @@ index 7bb06d3..568d7ce 100644
              {
                  std::lock_guard<std::mutex> lock(m_statusMutex);
                  m_status = status;
-@@ -824,11 +1118,12 @@ namespace
+@@ -809,6 +1712,7 @@ namespace
+         {
+             const auto now = Clock::now();
+             updateStatus(now);
++            pollPipelineCache(now);
+             if (m_stats.since == Clock::time_point{})
+                 m_stats.since = now;
+             const double seconds = std::chrono::duration<double>(now - m_stats.since).count();
+@@ -824,11 +1728,12 @@ namespace
              auto pct = [&](Clock::duration d)
              { return static_cast<int>(100.0 * std::chrono::duration<double>(d).count() / seconds + 0.5); };
              std::fprintf(stderr,
@@ -831,7 +1537,7 @@ index 7bb06d3..568d7ce 100644
              m_stats = Stats{};
              m_stats.since = now;
              m_statusBase = Stats{};
-@@ -837,9 +1132,11 @@ namespace
+@@ -837,9 +1742,11 @@ namespace
          void doPresent(const PresentRecord &record)
          {
              ParallelGS::GSInterface &gs = *m_gs;
@@ -844,7 +1550,7 @@ index 7bb06d3..568d7ce 100644
              ParallelGS::PrivRegisterState &priv = gs.get_priv_register_state();
              for (uint32_t i = 0; i < kPrivRegCount; ++i)
                  priv.qwords_lo[2u * i] = record.regs[i];
-@@ -860,16 +1157,46 @@ namespace
+@@ -860,16 +1767,46 @@ namespace
                  }
              }
  
@@ -897,7 +1603,7 @@ index 7bb06d3..568d7ce 100644
              const uint32_t wantSsaa = m_wantSsaa.load(std::memory_order_relaxed);
              if (wantSsaa != m_currentSsaa)
              {
-@@ -933,12 +1260,18 @@ namespace
+@@ -933,12 +1870,18 @@ namespace
          // fsrOutput != 0: upscaled + sharpened to that size first (packed width << 32 | height).
          void readBack(const ParallelGS::ScanoutResult &scanout, uint64_t fsrOutput)
          {
@@ -916,7 +1622,7 @@ index 7bb06d3..568d7ce 100644
                  m_frames.publish();
                  m_lastFrameWidth = m_lastFrameHeight = 0u;
                  return;
-@@ -996,42 +1329,303 @@ namespace
+@@ -996,42 +1939,303 @@ namespace
                  return;
              }
              frame.shared = false;
@@ -1243,7 +1949,7 @@ index 7bb06d3..568d7ce 100644
          // shown through Vulkan: the picture copied into one of four images shared with the window's own Vulkan device
          // (no read back): one the window isn't drawing from and that isn't one of the two newest pictures. It is handed
          // over in the sampling layout, released to the "external" queue family; the shared timeline semaphore reaches the
-@@ -1039,6 +1633,10 @@ namespace
+@@ -1039,6 +2243,10 @@ namespace
          bool shareFrame(GSGpuFrame &frame, Vulkan::CommandBufferHandle &cmd, const Vulkan::Image &source,
                          uint32_t width, uint32_t height)
          {
@@ -1254,7 +1960,7 @@ index 7bb06d3..568d7ce 100644
              if (!m_sharedTimeline)
              {
                  m_sharedTimeline = m_device->request_semaphore_external(VK_SEMAPHORE_TYPE_TIMELINE,
-@@ -1117,14 +1715,17 @@ namespace
+@@ -1117,14 +2325,17 @@ namespace
              m_sharedNewest[1] = m_sharedNewest[0];
              m_sharedNewest[0] = target;
              return true;
@@ -1272,7 +1978,7 @@ index 7bb06d3..568d7ce 100644
                  handle = nullptr;
              }
          }
-@@ -1234,6 +1835,9 @@ namespace
+@@ -1234,6 +2445,9 @@ namespace
          uint64_t m_cachedRead = 0u;
          uint64_t m_pendingRecordBytes = 0u;
          alignas(64) std::atomic<uint64_t> m_presentsIssued{0u};
@@ -1282,7 +1988,7 @@ index 7bb06d3..568d7ce 100644
  
          // the graphics card thread only
          alignas(64) Vulkan::Device *m_device = nullptr;
-@@ -1241,13 +1845,36 @@ namespace
+@@ -1241,13 +2455,50 @@ namespace
          bool m_quadScanout = false;
          ParallelGS::ScanoutResult m_lastScanout{};
          Vulkan::BufferHandle m_readback;
@@ -1310,6 +2016,20 @@ index 7bb06d3..568d7ce 100644
 +        std::vector<RetiredHost> m_hostRetired;
          uint64_t m_frameSeq = 0u;
          bool m_reportedException = false;
++        // the GS dump being recorded (recordDump), or about to start at the next presentation
++        struct DumpState
++        {
++            bool armed = false;
++            bool recording = false;
++            std::string path;
++            std::string serial;
++            uint32_t presents = 0u;      // asked for
++            uint32_t armedPresents = 0u; // presentations it waited for an image upload to end
++            uint32_t left = 0u;
++            uint32_t held = 0u;
++            Clock::time_point started{};
++        } m_dump;
++        std::unique_ptr<ParallelGS::GSDumpGenerator> m_dumpGen; // (kept: its write buffer serves the next dump)
          alignas(64) std::atomic<uint64_t> m_presentsDone{0u};
  
          // waking the consumer (atomic wait) and the producers (condition variable, with a stall report)
@@ -1320,7 +2040,7 @@ index 7bb06d3..568d7ce 100644
          std::atomic<uint32_t> m_producerWaiting{0u};
          std::mutex m_progressMutex;
          std::condition_variable m_progressCv;
-@@ -1259,12 +1886,14 @@ namespace
+@@ -1259,12 +2510,14 @@ namespace
          struct Stats
          {
              Clock::time_point since{};
@@ -1336,7 +2056,7 @@ index 7bb06d3..568d7ce 100644
          Clock::time_point m_statusSince{};
  
          // live settings: written by any thread, taken at a presentation
-@@ -1273,6 +1902,10 @@ namespace
+@@ -1273,6 +2526,10 @@ namespace
          std::atomic<bool> m_wantFsr{true};
          std::atomic<float> m_wantSharpness{0.5f};
          std::atomic<uint64_t> m_outputSize{0u};
@@ -1347,7 +2067,28 @@ index 7bb06d3..568d7ce 100644
          // the graphics card thread only
          uint32_t m_currentSsaa = 0u;
          bool m_lastHires = false;
-@@ -1301,7 +1934,7 @@ namespace
+@@ -1298,10 +2555,28 @@ namespace
+         Vulkan::ImageHandle m_fsrSharpened;
+         mutable std::mutex m_statusMutex;
+         GSGpuStatus m_status;
++        GSGpuDumpStatus m_dumpStatus; // (m_statusMutex)
++        // the pipeline cache file (GSGpuOptions::pipelineCachePath)
++        bool m_cacheOn = false; // set before the saver starts; read-only after
++        PipelineCacheFile::Header m_cacheHeader{};
++        std::thread m_cacheThread;
++        std::mutex m_cacheMutex; // m_cacheVariants, m_cacheStop
++        std::condition_variable m_cacheCv;
++        bool m_cacheStop = false;
++        std::vector<ParallelGS::ShadingVariant> m_cacheVariants; // the latest the graphics card thread handed over
++        std::mutex m_cacheSaveMutex;                             // one save at a time, and what it last saved:
++        size_t m_cacheSavedBytes = 0u;
++        std::vector<ParallelGS::ShadingVariant> m_cacheSavedVariants;
++        bool m_cacheEverSaved = false;
++        bool m_cacheTooLargeSaid = false;
++        uint32_t m_cacheNewVariantsSeen = 0u;    // the graphics card thread only
++        Clock::time_point m_cacheSnapshotAt{};   // the graphics card thread only
++        bool m_precompileReported = false;       // the graphics card thread only
++        std::atomic<bool> m_precompileFinished{false};
      };
  }
  

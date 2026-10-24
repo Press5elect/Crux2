@@ -1,5 +1,17 @@
 # Crux2 - what changed
 
+## v1.0.11 (2026-10-24)
+
+- Added: Record a GS dump in the quick menu (5 seconds, to snaps/), with either renderer.
+- Added: the boot log says what the emulator was doing whenever a game stays under full speed
+  for 2 seconds.
+- Added: Keep read render targets uncompressed (experimental setting, off): no decompression of
+  the picture each time a glow or flare reads it.
+- Changed: paraLLEl-GS compiles the shaders a game needs in the background, those it used last
+  time first, and keeps them between sessions.
+- Fixed: the GS dump hotkeys recorded nothing while paraLLEl-GS drew, and said nothing on screen.
+- Fixed: the graphics driver's shader cache could switch itself off on the console (Mesa 26.2.5).
+
 ## v1.0.10 (2026-10-24)
 
 - Added: with Statistics on, the on-screen display shows draws, barriers, render passes, copies,

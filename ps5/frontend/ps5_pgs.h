@@ -66,6 +66,15 @@ namespace PS5PGS
 	int Freeze(freezeData* fd, bool size_only);
 	int Defrost(const freezeData* fd);
 
+	/// A GS dump of what paraLLEl-GS is given (PCSX2's .gs format, uncompressed: GS memory and the GS's state, then
+	/// every GIF transfer, read of GS memory and vsync), into `path`, from the next vsync on for `presents` vsyncs
+	/// (the renderer's recordDump). `presents` 0 or an empty path: the dump being recorded ends now. The folder is
+	/// made if need be; the on-screen display and the boot log say when one starts and when it is saved. False when
+	/// paraLLEl-GS is not drawing.
+	bool RecordDump(const std::string& path, uint32_t presents);
+	/// Where a dump of the running game goes: snaps/<serial>_<YYYYMMDD-HHMMSS>.gs.
+	std::string DumpPath();
+
 	/// One line for the test windows of the boot log ("" when not active).
 	std::string StatusLine();
 

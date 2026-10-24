@@ -18,6 +18,7 @@ set(GRANITE ${PGS}/Granite)
 
 set(sources
 	${PGS}/gs/gs_interface.cpp ${PGS}/gs/gs_util.cpp ${PGS}/gs/page_tracker.cpp ${PGS}/gs/gs_renderer.cpp
+	${PGS}/dump/gs_dump_generator.cpp
 	${GRANITE}/third_party/volk/volk.c
 	${PS2R}/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp)
 foreach(f context device wsi wsi_pacer buffer_pool image cookie sampler command_pool fence_manager descriptor_set
@@ -35,7 +36,7 @@ endforeach()
 
 add_library(paragsobj OBJECT ${sources})
 target_include_directories(paragsobj PRIVATE
-	${PGS}/gs ${GRANITE}/vulkan ${GRANITE}/vulkan/texture ${GRANITE}/util ${GRANITE}/math
+	${PGS}/gs ${PGS}/dump ${GRANITE}/vulkan ${GRANITE}/vulkan/texture ${GRANITE}/util ${GRANITE}/math
 	${GRANITE}/application/global ${GRANITE}/third_party/volk
 	${GRANITE}/third_party/khronos/vulkan-headers/include
 	${PS2R}/ps2xRuntime/include ${PS2R}/ps2xRuntime/src/lib ${PS2R}/ps2xRuntime/src/lib/gs)

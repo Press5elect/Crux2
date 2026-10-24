@@ -713,6 +713,11 @@ public:
 	}
 	void setFrameLimit(bool on) override { run.frameLimit = on; }
 	void toggleSoftwareRenderer() override { run.hardware = !run.hardware; }
+	void recordGsDump() override
+	{
+		g_check.expect(run.valid, "a GS dump is recorded in a running game");
+		gsDumps++;
+	}
 	bool memoryCardBusy() override { return busyCard; }
 	bool canUndoLoad() override { return undo && run.valid; }
 	void undoLoad() override { undone++; }
@@ -1713,7 +1718,7 @@ public:
 	int addresses = 0;
 	int backups = 0, restores = 0, logsShown = 0;
 	bool undo = false;
-	int undone = 0, cheevos = 0, overlay = 0;
+	int undone = 0, cheevos = 0, overlay = 0, gsDumps = 0;
 	int loadedSlot = 0; // the slot of the state last loaded into the running game
 	std::string signedIn;
 	bool recommended = false;
@@ -2610,9 +2615,19 @@ void shots(Harness& h)
 	h.press(P::Cross, 50);
 	h.shot("23-change-disc");
 	h.press(P::Circle, 30);
+	// "Record a GS dump", the row under Change disc: the backend records one and the game goes on.
+	h.press(P::Down);
+	h.press(P::Cross, 30);
+	g_check.expect(b.gsDumps == 1 && bp::screen == bp::Screen::None && !b.run.paused,
+		"Record a GS dump in the quick menu records one and resumes the game");
+	bp::openQuickMenu();
+	h.wait(30);
+	for (int i = 0; i < 4; i++) // to Change disc again
+		h.press(P::Down, 4);
 	// The game's patches and cheats, straight from the quick menu: its options open on that page,
-	// with the focus in its rows; leaving them is back in the quick menu.
-	for (int i = 0; i < 2; i++)
+	// with the focus in its rows; leaving them is back in the quick menu. (Under Change disc: the
+	// GS dump's row, Game options, Patches and cheats.)
+	for (int i = 0; i < 3; i++)
 		h.press(P::Down, 4);
 	h.wait(10);
 	h.press(P::Cross, 40);

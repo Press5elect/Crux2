@@ -854,6 +854,10 @@ Page graphicsPage(int layer, bool forGame)
 		{"Automatic", "Off", "As the PS2", "Always"}, -1))));
 	rows.push_back(hw(listOf("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle. Costs little", GS, "MaxAnisotropy", 0,
 		{"Off", "2x", "4x", "8x", "16x"}, {0, 2, 4, 8, 16})));
+	rows.push_back(adv(hw(toggle("Keep read render targets uncompressed (experimental)",
+		"A render target a glow or flare reads from itself stays in the layout that allows it, instead of being decompressed by the "
+		"graphics chip each time a draw reads it again: faster at light sources in some games. Takes effect at the next start",
+		GS, "PS5HoldFeedbackLayout", false, Option::NextStart))));
 	rows.push_back(adv(hwAny(list("Dithering", "The fine pattern the PS2 lays over colour gradients. With paraLLEl-GS: Off and Force 32 bit "
 		"draw without it (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end), Scaled and Unscaled "
 		"as the PS2", GS, "dithering_ps2", 2,

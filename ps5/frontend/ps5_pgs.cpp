@@ -5,6 +5,8 @@
 
 #include "ps5_pgs.h"
 #include "ps5_pgs_packet.h"
+#include "ps5_platform.h"
+#include "ps5_ui.h"
 
 #include "../pgs/gs_gpu.h"
 
@@ -15,6 +17,9 @@
 #include "Host.h"
 #include "SaveState.h"
 #include "VMManager.h"
+#include "common/Error.h"
+#include "common/FileSystem.h"
+#include "common/Path.h"
 #include "common/Timer.h"
 
 #include "fmt/format.h"
@@ -23,10 +28,12 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <vector>
 
 extern "C" void ps5px_log(const char* format, ...);
+extern "C" const char* ps5px_title_dir(void);
 
 namespace PS5PGS
 {
@@ -72,6 +79,9 @@ namespace PS5PGS
 		bool s_host_release_pending = false;
 		uint64_t s_host_release_generation = 0;
 		u64 s_host_release_counter = 0;   // once completed, nothing of s_host_release_generation is held
+		// GS dumps (RecordDump): how many were asked for, and how many of those the renderer said had ended.
+		uint32_t s_dumps_asked = 0;
+		uint32_t s_dumps_ended = 0;
 
 		uint32_t ReadSamples()
 		{
@@ -129,6 +139,22 @@ namespace PS5PGS
 				options.hostSharedFrames = false;
 			options.fsr = false; // Crux2's own presentation enlarges the picture
 			options.libraryLog = false;
+			// The renderer's compiled pipelines and the shading variants games drew with, kept in the title folder
+			// between sessions (beside the driver's own radv-shader-cache): a game starts with them compiled, and
+			// after an update that changed the shaders the variants it needs are compiled first in the background.
+			options.pipelineCachePath = std::string(ps5px_title_dir()) + "/pgs-pipeline-cache.bin";
+			{
+				// What the driver's own shader cache holds (MESA_SHADER_CACHE_DIR, ps5_platform.cpp): nothing after a
+				// session that compiled shaders means it is not kept, and only pgs-pipeline-cache.bin carries them over.
+				FileSystem::FindResultsArray files;
+				FileSystem::FindFiles((std::string(ps5px_title_dir()) + "/radv-shader-cache").c_str(), "*",
+					FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_RECURSIVE | FILESYSTEM_FIND_HIDDEN_FILES, &files);
+				s64 bytes = 0;
+				for (const FILESYSTEM_FIND_DATA& file : files)
+					bytes += file.Size;
+				ps5px_log("paraLLEl-GS: the driver's shader cache (radv-shader-cache) holds %.1f MB in %zu files", bytes / 1048576.0,
+					files.size());
+			}
 			std::string why;
 			s_stop.store(false);
 			s_gs = makeGpuRenderer(options, why);
@@ -140,6 +166,7 @@ namespace PS5PGS
 			}
 			s_tick = 0;
 			s_last_seq = 0;
+			s_dumps_asked = s_dumps_ended = 0; // (the renderer counts its dumps from its start)
 			s_host_frames = options.hostSharedFrames;
 			s_host_failed = false;
 			s_host_reset = false;
@@ -278,6 +305,35 @@ namespace PS5PGS
 					want.eagerSubmit ? "" : ", work handed over a frame at a time");
 			s_scanout_any = true;
 		}
+
+		// A GS dump asked for has ended (the renderer's thread wrote it): said, and the file opened up for FTP. Said once
+		// every dump asked for has ended (one replaced by the next says nothing).
+		void CheckDump()
+		{
+			if (s_dumps_ended >= s_dumps_asked)
+				return;
+			const GSGpuDumpStatus status = s_gs->dumpStatus();
+			if (status.ended == s_dumps_ended)
+				return;
+			s_dumps_ended = status.ended;
+			if (s_dumps_ended < s_dumps_asked)
+				return;
+			const std::string file(Path::GetFileName(status.path));
+			if (status.ok || status.presents > 0)
+			{
+				PS5Platform::MakePublic(status.path.c_str(), false);
+				ps5px_log("paraLLEl-GS: GS dump %s %s: %u vsyncs, %.1f MB%s%s", status.ok ? "saved" : "cut short", status.path.c_str(),
+					status.presents, static_cast<double>(status.bytes) / 1048576.0, status.why.empty() ? "" : " - ", status.why.c_str());
+				// (A toast: the emulator's on-screen messages are off unless asked for.)
+				PS5UI::Toast(status.ok ? fmt::format("GS dump saved: {}", file) :
+										 fmt::format("GS dump saved, cut short ({}): {}", status.why, file));
+			}
+			else
+			{
+				ps5px_log("paraLLEl-GS: GS dump %s not saved: %s", status.path.c_str(), status.why.c_str());
+				PS5UI::Toast(fmt::format("GS dump not saved: {}", status.why));
+			}
+		}
 	} // namespace
 
 	void VSync(uint32_t field, bool registers_written)
@@ -290,6 +346,7 @@ namespace PS5PGS
 		s_tick = (s_tick & ~1ull) + 2 + (field & 1u);
 		s_gs->present(regs, s_tick, registers_written);
 		s_gs->kick();
+		CheckDump();
 		// No more than two frames ahead of the pictures made: what is shown stays close to the controls.
 		// (The wait is measured: it is where the game's time goes when the graphics card is the limit.)
 		const u64 wait_start = Common::Timer::GetCurrentValue();
@@ -548,6 +605,47 @@ namespace PS5PGS
 	float PictureScale()
 	{
 		return s_picture_scale;
+	}
+
+	std::string DumpPath()
+	{
+		std::string serial = VMManager::GetDiscSerial();
+		if (serial.empty())
+			serial = "PS2";
+		Path::SanitizeFileName(&serial);
+		char stamp[32] = "";
+		const std::time_t now = std::time(nullptr);
+		std::tm local = {};
+		if (localtime_r(&now, &local))
+			std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &local);
+		return Path::Combine(EmuFolders::Snapshots, fmt::format("{}_{}.gs", serial, stamp));
+	}
+
+	bool RecordDump(const std::string& path, uint32_t presents)
+	{
+		if (!s_gs)
+			return false;
+		if (path.empty() || presents == 0)
+		{
+			s_gs->recordDump(nullptr, 0);
+			return true;
+		}
+		Error error;
+		const std::string folder(Path::GetDirectory(path));
+		if (!FileSystem::EnsureDirectoryExists(folder.c_str(), false, &error))
+			ps5px_log("paraLLEl-GS: the folder of GS dumps, %s, could not be made (%s)", folder.c_str(), error.GetDescription().c_str());
+		PS5Platform::MakePublic(folder.c_str(), true);
+		const std::string serial = VMManager::GetDiscSerial();
+		if (!s_gs->recordDump(path.c_str(), presents, serial.empty() ? nullptr : serial.c_str()))
+			return false;
+		s_dumps_asked++;
+		// (Presentations are the game's vsyncs: 60 a second, 50 in PAL games; said as NTSC's.)
+		const std::string length = (presents == 1)         ? std::string("of a single frame") :
+								   (presents == UINT32_MAX) ? std::string("until the button is let go") :
+															  fmt::format("for {} seconds", std::max<uint32_t>(1, (presents + 30) / 60));
+		ps5px_log("paraLLEl-GS: recording a GS dump %s (%u vsyncs) into %s", length.c_str(), presents, path.c_str());
+		PS5UI::Toast(fmt::format("Recording a GS dump {}", length));
+		return true;
 	}
 
 	std::string StatusLine()

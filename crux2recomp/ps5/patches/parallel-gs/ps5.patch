@@ -2,8 +2,210 @@ Crux2 Recomp's changes to paraLLEl-GS and Granite for the PS5 (https://github.co
 https://github.com/Themaister/Granite.git 16e7395f6a4858c1783dbf6f521f90b9d5f82ac5). Copyright (C) 2026 Press5elect; under the licences of the
 files they change (paraLLEl-GS: LGPL-3.0-or-later, Granite: MIT).
 
+diff --git a/dump/gs_dump_generator.cpp b/dump/gs_dump_generator.cpp
+index c876e1c..070425b 100644
+--- a/dump/gs_dump_generator.cpp
++++ b/dump/gs_dump_generator.cpp
+@@ -2,6 +2,8 @@
+ #include "gs_interface.hpp"
+ #include "gs_dump_parser.hpp"
+ #include <stdexcept>
++#include <new>
++#include <string.h>
+ #include "shaders/swizzle_utils.h"
+ 
+ namespace ParallelGS
+@@ -139,6 +141,40 @@ void GSDumpGenerator::write_packed(const PRIMBits &prim, const GIFAddr *register
+ 	write_data(data, sizeof(GIFTagBits) * num_registers * num_loops);
+ }
+ 
++void GSDumpGenerator::write_transfer(uint32_t path, const void *data, size_t size)
++{
++	if (!file || size == 0)
++		return;
++
++	write_u8(uint8_t(GSDumpPacketType::Transfer));
++	write_u8(uint8_t(path));
++	write_u32(uint32_t(size));
++	write_data(data, size);
++}
++
++void GSDumpGenerator::write_read_fifo(uint32_t num_128b_words)
++{
++	if (!file || num_128b_words == 0)
++		return;
++
++	write_u8(uint8_t(GSDumpPacketType::ReadFIFO));
++	write_u32(num_128b_words);
++}
++
++bool GSDumpGenerator::close(uint64_t *bytes)
++{
++	if (bytes)
++		*bytes = 0;
++	if (!file)
++		return false;
++	bool ok = fflush(file.get()) == 0;
++	const long size = ftell(file.get());
++	if (bytes && size > 0)
++		*bytes = uint64_t(size);
++	ok = (fclose(file.release()) == 0) && ok;
++	return ok;
++}
++
+ void GSDumpGenerator::write_image_upload(uint32_t addr, uint32_t fmt,
+ 										 uint32_t width, uint32_t height,
+ 										 const void *data_, size_t size)
+@@ -184,12 +220,17 @@ void GSDumpGenerator::write_image_upload(uint32_t addr, uint32_t fmt,
+ 	}
+ }
+ 
+-bool GSDumpGenerator::init(const char *path, uint32_t vram_size, GSInterface &iface)
++bool GSDumpGenerator::init(const char *path, uint32_t vram_size, GSInterface &iface, const char *serial)
+ {
+ 	file.reset(fopen(path, "wb"));
+ 	if (!file)
+ 		return false;
+ 
++	if (!write_buffer)
++		write_buffer.reset(new (std::nothrow) char[WriteBufferSize]);
++	if (write_buffer)
++		setvbuf(file.get(), write_buffer.get(), _IOFBF, WriteBufferSize);
++
+ 	const void *vram = iface.map_vram_read(0, vram_size);
+ 
+ 	try
+@@ -200,13 +241,20 @@ bool GSDumpGenerator::init(const char *path, uint32_t vram_size, GSInterface &if
+ 		write_u32(UINT32_MAX);
+ 
+ 		DumpHeader header = {};
++		const uint32_t serial_size = serial ? uint32_t(strlen(serial)) : 0u;
+ 
+ 		header.version = STATE_VERSION;
+ 		header.state_size = vram_size + (18 + 12 * 2) * sizeof(uint64_t) + 7 * sizeof(uint32_t) +
+ 		                    4 * 5 * sizeof(uint32_t) + sizeof(float);
++		// The serial follows the header, as PCSX2 writes it (its replayer takes the game's fixes by it).
++		header.serial_offset = sizeof(DumpHeader);
++		header.serial_size = serial_size;
++		header.screenshot_offset = header.serial_offset + serial_size;
+ 
+-		write_u32(sizeof(DumpHeader));
++		write_u32(uint32_t(sizeof(DumpHeader)) + serial_size);
+ 		write_data(&header, sizeof(header));
++		if (serial_size)
++			write_data(serial, serial_size);
+ 
+ 		write_register_state(iface);
+ 		write_data(vram, vram_size);
+diff --git a/dump/gs_dump_generator.hpp b/dump/gs_dump_generator.hpp
+index f950f5c..b8178bc 100644
+--- a/dump/gs_dump_generator.hpp
++++ b/dump/gs_dump_generator.hpp
+@@ -1,7 +1,12 @@
+ #pragma once
+ 
++// Crux2's additions (Copyright (C) 2026 Press5elect, LGPL-3.0+ like the file; keep the credit "Crux2 by
++// Press5elect"): write_transfer, write_read_fifo, the serial in the header, close() and the large write buffer, for
++// recording a running game's GS input as it is fed to a GSInterface (gs_gpu_parallel.cpp's recordDump).
++
+ #include "gs_registers.hpp"
+ #include <stdint.h>
++#include <stddef.h>
+ #include <type_traits>
+ #include <stdio.h>
+ #include <memory>
+@@ -13,7 +18,9 @@ class GSInterface;
+ class GSDumpGenerator
+ {
+ public:
+-	bool init(const char *path, uint32_t vram_size, GSInterface &iface);
++	// PCSX2's .gs format: the header (with the game's serial when one is given), the register state, GS memory, the
++	// GIF paths and the privileged registers as `iface` has them now (flushed by the caller first).
++	bool init(const char *path, uint32_t vram_size, GSInterface &iface, const char *serial = nullptr);
+ 
+ 	void write_register(RegisterAddr addr, uint64_t payload);
+ 
+@@ -37,9 +44,27 @@ public:
+ 	                        uint32_t width, uint32_t height,
+ 	                        const void *data, size_t size);
+ 
++	// GIF data as it went to GSInterface::gif_transfer(path, data, size): a Transfer packet (type, path index, size,
++	// data), which GSDumpParser hands to gif_transfer with the same path. (PCSX2 numbers its paths the same way.)
++	void write_transfer(uint32_t path, const void *data, size_t size);
++
++	// A local -> host transfer read back (GSInterface::read_transfer_fifo): a ReadFIFO packet.
++	void write_read_fifo(uint32_t num_128b_words);
++
++	bool is_open() const { return bool(file); }
++
++	// Flushes and closes the file. False when what was buffered could not be written. `bytes`: the file's size.
++	bool close(uint64_t *bytes = nullptr);
++
++	// Write failures throw std::runtime_error (as all writes here do); after one, close() the file.
++
+ private:
+ 	struct FILEDeleter { void operator()(FILE *f) { if (f) fclose(f); } };
+ 	std::unique_ptr<FILE, FILEDeleter> file;
++	// The stdio buffer of the file: GS input is written in many small packets on a renderer's own thread, which a
++	// large buffer turns into few large writes. Allocated once, kept for the next dump.
++	static constexpr size_t WriteBufferSize = size_t(4) << 20;
++	std::unique_ptr<char[]> write_buffer;
+ 
+ 	void write_u32(uint32_t value);
+ 	void write_f32(float value);
+@@ -51,4 +76,4 @@ private:
+ 	template <typename T>
+ 	void write_reg(const Reg64<T> &t);
+ };
+-}
+\ No newline at end of file
++}
+diff --git a/dump/gs_dump_parser.cpp b/dump/gs_dump_parser.cpp
+index 8df10a7..5bda161 100644
+--- a/dump/gs_dump_parser.cpp
++++ b/dump/gs_dump_parser.cpp
+@@ -195,11 +195,22 @@ bool GSDumpParser::iterate_until_vsync(bool high_res_scanout, bool conservative_
+ 			break;
+ 
+ 		case GSDumpPacketType::ReadFIFO:
+-			// Unimplemented.
+-			LOGW("Unimplemented ReadFIFO\n");
+-			uint32_t size = read_u32();
+-			(void)size;
+-			return true;
++		{
++			// A local -> host transfer the game read back: read here too (in order with the transfers around it, as
++			// the game's read was), into a buffer nobody looks at. (Crux2: was unimplemented, and ended the frame.)
++			uint32_t num_words = read_u32();
++			if (eof)
++				break;
++			if (num_words > fifo_buffer.size())
++				fifo_buffer.resize(num_words);
++			iface->read_transfer_fifo(fifo_buffer.data(), num_words);
++			break;
++		}
++
++		default:
++			LOGW("Unknown GS dump packet type %u\n", unsigned(type));
++			eof = true;
++			break;
+ 		}
+ 	}
+ 
+diff --git a/dump/gs_dump_parser.hpp b/dump/gs_dump_parser.hpp
+index 877b823..a65450e 100644
+--- a/dump/gs_dump_parser.hpp
++++ b/dump/gs_dump_parser.hpp
+@@ -50,6 +50,7 @@ private:
+ 	GSInterface *iface = nullptr;
+ 	std::unique_ptr<FILE, FileDeleter> file;
+ 	std::vector<GIFTagBits> gif_tag_buffer;
++	std::vector<GIFTagBits> fifo_buffer; // ReadFIFO packets' data (128-bit words), read and dropped
+ 	ScanoutResult vsync_result = {};
+ 	uint32_t vram_size;
+ 	bool is_raw = false;
 diff --git a/gs/gs_interface.cpp b/gs/gs_interface.cpp
-index db519b3..0cba9f8 100644
+index db519b3..e830a01 100644
 --- a/gs/gs_interface.cpp
 +++ b/gs/gs_interface.cpp
 @@ -117,6 +117,13 @@ void GSInterface::set_super_sampling_rate(SuperSampling super_sampling,
@@ -44,7 +246,7 @@ index db519b3..0cba9f8 100644
  		fbmsk |= 0xffffff;
  
  	// Any write is ignored. PS2 rendering does not have side effects.
-@@ -3168,6 +3179,16 @@ void GSInterface::flush_pending_transfer(bool keep_alive)
+@@ -3168,6 +3179,31 @@ void GSInterface::flush_pending_transfer(bool keep_alive)
  	}
  }
  
@@ -58,10 +260,25 @@ index db519b3..0cba9f8 100644
 +	return renderer.consume_host_wait_ns();
 +}
 +
++std::vector<ShadingVariant> GSInterface::get_shading_variants(size_t max_count) const
++{
++	return renderer.get_shading_variants(max_count);
++}
++
++uint32_t GSInterface::get_new_shading_variant_count() const
++{
++	return renderer.get_new_shading_variant_count();
++}
++
++PrecompileProgress GSInterface::get_precompile_progress() const
++{
++	return renderer.get_precompile_progress();
++}
++
  void GSInterface::read_transfer_fifo(void *data, uint32_t num_128b_words)
  {
  	uint32_t to_copy = std::min<uint32_t>(num_128b_words, transfer_state.fifo_readback_128b_size - transfer_state.fifo_readback_128b_offset);
-@@ -3545,11 +3566,13 @@ void GSInterface::a_d_PRIM(uint64_t payload)
+@@ -3545,11 +3581,13 @@ void GSInterface::a_d_PRIM(uint64_t payload)
  			render_pass.ofy = int32_t(registers.ctx[prim.desc.CTXT].xyoffset.desc.OFY);
  		}
  
@@ -76,7 +293,7 @@ index db519b3..0cba9f8 100644
  
  		if (!registers.prim.desc.TME)
  			state_tracker.dirty_flags &= ~STATE_DIRTY_TEX_BIT;
-@@ -3730,11 +3753,13 @@ void GSInterface::a_d_PRMODE(uint64_t payload)
+@@ -3730,11 +3768,13 @@ void GSInterface::a_d_PRMODE(uint64_t payload)
  			render_pass.ofy = int32_t(registers.ctx[prim.desc.CTXT].xyoffset.desc.OFY);
  		}
  
@@ -91,7 +308,7 @@ index db519b3..0cba9f8 100644
  
  		if (!registers.prim.desc.TME)
  			state_tracker.dirty_flags &= ~STATE_DIRTY_TEX_BIT;
-@@ -3849,7 +3874,9 @@ void GSInterface::a_d_DIMX(uint64_t payload)
+@@ -3849,7 +3889,9 @@ void GSInterface::a_d_DIMX(uint64_t payload)
  
  void GSInterface::a_d_DTHE(uint64_t payload)
  {
@@ -102,7 +319,7 @@ index db519b3..0cba9f8 100644
  	TRACE("DTHE", registers.dthe);
  }
  
-@@ -3907,19 +3934,23 @@ void GSInterface::update_internal_register(uint64_t &reg, uint64_t value, StateD
+@@ -3907,19 +3949,23 @@ void GSInterface::update_internal_register(uint64_t &reg, uint64_t value, StateD
  
  void GSInterface::a_d_FRAME_1(uint64_t payload)
  {
@@ -128,7 +345,7 @@ index db519b3..0cba9f8 100644
  	TRACE("FRAME_2", registers.ctx[1].frame);
  }
  
-@@ -4455,6 +4486,9 @@ void GSInterface::set_debug_mode(const DebugMode &mode)
+@@ -4455,6 +4501,9 @@ void GSInterface::set_debug_mode(const DebugMode &mode)
  
  void GSInterface::set_hacks(const Hacks &hacks_)
  {
@@ -139,10 +356,20 @@ index db519b3..0cba9f8 100644
  	renderer.set_upscale_flat_ui(hacks.upscale_sprites);
  
 diff --git a/gs/gs_interface.hpp b/gs/gs_interface.hpp
-index 70adbe0..5a8daa7 100644
+index 70adbe0..495ad57 100644
 --- a/gs/gs_interface.hpp
 +++ b/gs/gs_interface.hpp
-@@ -243,6 +243,9 @@ struct Hacks
+@@ -208,6 +208,9 @@ struct GSOptions
+ 	bool dynamic_super_sampling = false; // If super sampling rate can be toggled in-flight.
+ 	bool ordered_super_sampling = true; // Prefers ordered grid. Aids debugging.
+ 	bool super_sampled_textures = false;
++	// Crux2: shading variants recorded in an earlier session, compiled first in the background at init (those a
++	// device cannot build, or recorded for another VRAM size, are skipped).
++	std::vector<ShadingVariant> precompile_variants;
+ };
+ 
+ // Pragmatic hacks which may or may not be useful.
+@@ -243,6 +246,9 @@ struct Hacks
  	// triangles too (triangle_setup's UI detection): 2-D art and text (with bilinear textures) gain the
  	// super-sampled detail, at the risk of seams where pieces meet.
  	bool upscale_sprites = false;
@@ -152,7 +379,7 @@ index 70adbe0..5a8daa7 100644
  };
  
  class SignalInterface
-@@ -312,6 +315,12 @@ public:
+@@ -312,6 +318,20 @@ public:
  
  	void read_transfer_fifo(void *data, uint32_t num_128b_words);
  
@@ -162,14 +389,29 @@ index 70adbe0..5a8daa7 100644
 +	// Crux2: nanoseconds the GS thread stood waiting for the GPU (host reads, pressure) since the last call.
 +	uint64_t consume_host_wait_ns();
 +
++	// Crux2: the shading variants drawn with: this session's in the order first drawn, then those of
++	// GSOptions::precompile_variants not drawn this session; at most max_count. The renderer's thread.
++	std::vector<ShadingVariant> get_shading_variants(size_t max_count) const;
++	// Crux2: how many variants this session has drawn with that were not recorded before (cheap: to see a change).
++	uint32_t get_new_shading_variant_count() const;
++	// Crux2: the background compile kicked at init. Any thread.
++	PrecompileProgress get_precompile_progress() const;
++
  private:
  	friend class PageTracker;
  	void flush(PageTrackerFlushFlags flags, FlushReason reason);
 diff --git a/gs/gs_renderer.cpp b/gs/gs_renderer.cpp
-index b6ebdac..c18371a 100644
+index b6ebdac..21e31c2 100644
 --- a/gs/gs_renderer.cpp
 +++ b/gs/gs_renderer.cpp
-@@ -19,6 +19,7 @@
+@@ -15,10 +15,14 @@
+ #include "thread_id.hpp"
+ #include "gs_util.hpp"
+ #include "thread_name.hpp"
++#include "timer.hpp"
++#include <memory>
++#include <unordered_set>
+ #include <utility>
  #include <algorithm>
  #include <cmath>
  #include <climits>
@@ -177,7 +419,596 @@ index b6ebdac..c18371a 100644
  
  #if defined(__clang__)
  #pragma clang diagnostic ignored "-Wformat-security"
-@@ -1081,10 +1082,17 @@ void GSRenderer::wait_timeline(uint64_t value)
+@@ -463,6 +467,105 @@ bool GSRenderer::can_potentially_super_sample() const
+ 	return buffers.gpu->get_create_info().size > vram_size * 2;
+ }
+ 
++// Crux2: the subgroup size range the shading ubershader is built with at a sampling rate. dispatch_shading and the
++// background compile make this one choice, so a precompiled variant is the one a draw asks for.
++bool GSRenderer::ubershader_subgroup_config(uint32_t rate_x_log2, uint32_t rate_y_log2, uint32_t &lo, uint32_t &hi) const
++{
++	// Prefer Wave64 if we can get away with it.
++	if (device->supports_subgroup_size_log2(true, 6, 6))
++	{
++		lo = 6;
++		hi = 6;
++		return true;
++	}
++
++	uint32_t minimum_subgroup_size_log2 = rate_x_log2 + rate_y_log2;
++	if (device->supports_subgroup_size_log2(true, minimum_subgroup_size_log2, 6))
++	{
++		lo = minimum_subgroup_size_log2;
++		hi = 6;
++		return true;
++	}
++
++	return false;
++}
++
++static Util::Hash hash_shading_variant(const ShadingVariant &v)
++{
++	Util::Hasher h;
++	h.u32(uint32_t(v.feedback_color) | (uint32_t(v.feedback_depth) << 8) |
++	      (uint32_t(v.subgroup_min_log2) << 16) | (uint32_t(v.subgroup_max_log2) << 24));
++	for (uint32_t s : v.spec)
++		h.u32(s);
++	return h.get();
++}
++
++// Crux2: a dispatch of the shading ubershader with current_shading_variant at this sampling rate.
++void GSRenderer::record_shading_variant(uint32_t rate_x_log2, uint32_t rate_y_log2)
++{
++	ShadingVariant v = current_shading_variant;
++	v.spec[0] = rate_x_log2;
++	v.spec[1] = rate_y_log2;
++	Util::Hash hash = hash_shading_variant(v);
++	if (shading_variants_drawn_set.insert(hash).second)
++	{
++		shading_variants_drawn.push_back(v);
++		if (!shading_variants_recorded_set.count(hash))
++			new_shading_variants++;
++	}
++}
++
++std::vector<ShadingVariant> GSRenderer::get_shading_variants(size_t max_count) const
++{
++	std::vector<ShadingVariant> variants;
++	variants.reserve(std::min(max_count, shading_variants_drawn.size() + shading_variants_recorded.size()));
++	for (auto &v : shading_variants_drawn)
++	{
++		if (variants.size() >= max_count)
++			return variants;
++		variants.push_back(v);
++	}
++	for (auto &v : shading_variants_recorded)
++	{
++		if (variants.size() >= max_count)
++			break;
++		if (!shading_variants_drawn_set.count(hash_shading_variant(v)))
++			variants.push_back(v);
++	}
++	return variants;
++}
++
++PrecompileProgress GSRenderer::get_precompile_progress() const
++{
++	PrecompileProgress p;
++	p.queued = precompile_queued.load(std::memory_order_relaxed);
++	p.recorded = precompile_recorded.load(std::memory_order_relaxed);
++	p.done = precompile_done.load(std::memory_order_relaxed);
++	p.threads = precompile_threads.load(std::memory_order_relaxed);
++	int64_t ns = precompile_ns.load(std::memory_order_acquire);
++	p.finished = ns != 0;
++	p.seconds = p.finished ? 1e-9 * double(ns) : 0.0;
++	return p;
++}
++
++// Crux2: every SPIR-V module pipelines are built from (see shader_set_fingerprint in gs_renderer.hpp).
++uint64_t shader_set_fingerprint()
++{
++	static const uint64_t fingerprint = []() {
++		Util::Hasher h;
++		h.u32(uint32_t(sizeof(spirv_bank)));
++		h.data(spirv_bank, sizeof(spirv_bank));
++		h.u32(uint32_t(sizeof(sample_circuit_scaled)));
++		h.data(sample_circuit_scaled, sizeof(sample_circuit_scaled));
++		h.u32(uint32_t(sizeof(sample_circuit_scaled_promoted)));
++		h.data(sample_circuit_scaled_promoted, sizeof(sample_circuit_scaled_promoted));
++		h.u32(uint32_t(sizeof(triangle_setup_upscale)));
++		h.data(triangle_setup_upscale, sizeof(triangle_setup_upscale));
++		return uint64_t(h.get());
++	}();
++	return fingerprint;
++}
++
+ void GSRenderer::kick_compilation_tasks()
+ {
+ 	const char *env = getenv("PGS_SKIP_COMPILATION_TASKS");
+@@ -473,140 +576,60 @@ void GSRenderer::kick_compilation_tasks()
+ 	}
+ 
+ 	// Pre-prime all potential shader variants early.
++	// Crux2: in the order they are needed, each pipeline once: the shading variants this game drew with in earlier
++	// sessions (GSOptions::precompile_variants); the copies, uploads, binning, triangle setup and the other small
++	// shaders every game needs from its first frame; the generic shading variants at one sample and at the rate
++	// asked for; then those of the other rates. The threads take the next task from the one list, so the order
++	// holds and none is lost (each thread used to take a fixed share, and the remainder was never compiled).
+ 	std::vector<Vulkan::DeferredPipelineCompile> tasks;
++	std::unordered_set<Util::Hash> queued;
++	const auto push_task = [&](const Vulkan::DeferredPipelineCompile &deferred) {
++		if (deferred.program && queued.insert(deferred.hash).second)
++			tasks.push_back(deferred);
++	};
+ 	compilation_tasks_active = true;
+ 
+ 	{
+-		auto cmd = device->request_command_buffer();
+-		cmd->set_program(shaders.ubershader[0][0]);
+ 		Vulkan::DeferredPipelineCompile deferred = {};
+-
+-		static const struct { uint32_t sample_x, sample_y; } sampling_rates[] = {
+-			{ 0, 0 },
+-			{ 0, 1 },
+-			{ 1, 1 },
+-			{ 0, 2 },
+-			{ 1, 2 },
+-			{ 2, 2 },
+-			{ 1, 3 },
+-		};
+-
+-		static const uint32_t variant_flags[] = {
+-			0,
+-			VARIANT_FLAG_HAS_AA1_BIT,
+-			VARIANT_FLAG_HAS_SCANMSK_BIT,
+-			VARIANT_FLAG_HAS_AA1_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
+-			VARIANT_FLAG_FEEDBACK_BIT,
+-			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_AA1_BIT,
+-			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
+-			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_AA1_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
+-		};
+-
+-		// Prime all common combinations.
+-		static const struct { uint32_t color_psm, depth_psm; } formats[] = {
+-			{ PSMCT24, PSMZ24 },
+-			{ PSMCT32, PSMZ24 },
+-			{ PSMCT16S, PSMZ24 },
+-			{ PSMCT24, PSMZ16S },
+-			{ PSMCT32, PSMZ16S },
+-			{ PSMCT16S, PSMZ16S },
+-			{ PSMCT24, UINT32_MAX },
+-			{ PSMCT32, UINT32_MAX },
+-			{ PSMCT16S, UINT32_MAX },
+-			{ PSMZ24, UINT32_MAX },
+-			{ PSMZ32, UINT32_MAX },
+-			{ PSMZ16S, UINT32_MAX },
+-			{ PSMZ16, UINT32_MAX },
+-		};
+-
+-		static const struct { uint32_t feedback_psm, feedback_cpsm; } feedbacks[] = {
+-			{ PSMCT32, 0 },
+-			{ PSMCT24, 0 },
+-			{ PSMCT16S, 0 },
+-			{ PSMT4HL, PSMCT32 },
+-			{ PSMT4HL, PSMCT16 },
+-			{ PSMT4HH, PSMCT32 },
+-			{ PSMT4HH, PSMCT16 },
+-			{ PSMT8H, PSMCT32 },
+-			{ PSMT8H, PSMCT16 },
+-		};
+-
++		auto cmd = device->request_command_buffer();
+ 		cmd->set_specialization_constant_mask(0xff);
+ 		cmd->enable_subgroup_size_control(true);
+-
+-		static const struct
++		for (auto &v : shading_variants_recorded)
+ 		{
+-			uint32_t lo, hi;
+-		} subgroup_configs[] = {
+-			{ 6, 6 },
+-			{ 4, 6 },
+-			{ 3, 6 },
+-			{ 2, 6 },
+-		};
+-
+-		for (auto &subgroup_config : subgroup_configs)
+-		{
+-			if (device->supports_subgroup_size_log2(true, subgroup_config.lo, subgroup_config.hi))
+-				cmd->set_subgroup_size_log2(true, subgroup_config.lo, subgroup_config.hi);
+-			else
+-				continue;
+-
+-			for (auto &format : formats)
+-			{
+-				for (auto &flags : variant_flags)
+-				{
+-					for (auto &rates : sampling_rates)
+-					{
+-						for (auto &feedback : feedbacks)
+-						{
+-							if ((flags & VARIANT_FLAG_FEEDBACK_BIT) != 0)
+-							{
+-								if (swizzle_compat_key(feedback.feedback_psm) != swizzle_compat_key(format.color_psm))
+-									continue;
+-							}
+-							else if (feedback.feedback_psm != 0 || feedback.feedback_cpsm != 0)
+-								continue;
+-
+-							cmd->set_specialization_constant(0, rates.sample_x);
+-							cmd->set_specialization_constant(1, rates.sample_y);
+-							cmd->set_specialization_constant(2, format.color_psm);
+-							cmd->set_specialization_constant(3, format.depth_psm);
+-							cmd->set_specialization_constant(4, vram_size - 1);
+-							cmd->set_specialization_constant(6, feedback.feedback_psm);
+-							cmd->set_specialization_constant(7, feedback.feedback_cpsm);
+-
+-							uint32_t active_flags =
+-									flags | (rates.sample_y ? VARIANT_FLAG_HAS_SUPER_SAMPLE_REFERENCE_BIT : 0);
+-							cmd->set_specialization_constant(5, active_flags);
+-							cmd->extract_pipeline_state(deferred);
+-							tasks.push_back(deferred);
+-
+-							if (rates.sample_y != 0)
+-							{
+-								active_flags |= VARIANT_FLAG_HAS_TEXTURE_ARRAY_BIT;
+-								cmd->set_specialization_constant(5, active_flags);
+-								cmd->extract_pipeline_state(deferred);
+-								tasks.push_back(deferred);
+-							}
++			cmd->set_subgroup_size_log2(true, v.subgroup_min_log2, v.subgroup_max_log2);
++			for (uint32_t i = 0; i < 8; i++)
++				cmd->set_specialization_constant(i, v.spec[i]);
++			cmd->set_program(shaders.ubershader[v.feedback_color][v.feedback_depth]);
++			cmd->extract_pipeline_state(deferred);
++			push_task(deferred);
++		}
++		device->submit_discard(cmd);
++	}
+ 
+-							if (rates.sample_x == 0 && rates.sample_y == 0 && can_potentially_super_sample())
+-							{
+-								cmd->set_specialization_constant(
+-									5, flags | VARIANT_FLAG_HAS_SUPER_SAMPLE_REFERENCE_BIT);
+-								cmd->extract_pipeline_state(deferred);
+-								tasks.push_back(deferred);
+-							}
+-						}
+-					}
+-				}
+-			}
++	const uint32_t num_recorded = uint32_t(tasks.size());
+ 
+-			// If device has wave64, we always use it.
+-			if (device->supports_subgroup_size_log2(true, 6, 6))
+-				break;
+-		}
++	struct Rate { uint32_t sample_x, sample_y; };
++	static const Rate sampling_rates[] = {
++		{ 0, 0 },
++		{ 0, 1 },
++		{ 1, 1 },
++		{ 0, 2 },
++		{ 1, 2 },
++		{ 2, 2 },
++		{ 1, 3 },
++	};
+ 
+-		device->submit_discard(cmd);
++	// One sample (the single-sample work of every render pass) and the rate asked for first.
++	std::vector<Rate> rates;
++	rates.push_back({ 0, 0 });
++	if (preferred_rate_y_log2 != 0)
++		rates.push_back({ preferred_rate_x_log2, preferred_rate_y_log2 });
++	const size_t num_preferred_rates = rates.size();
++	for (auto &rate : sampling_rates)
++	{
++		if (std::none_of(rates.begin(), rates.end(), [&](const Rate &r) {
++			    return r.sample_x == rate.sample_x && r.sample_y == rate.sample_y; }))
++			rates.push_back(rate);
+ 	}
+ 
+ 	{
+@@ -646,7 +669,7 @@ void GSRenderer::kick_compilation_tasks()
+ 			{
+ 				cmd->set_specialization_constant(6, prepare_only);
+ 				cmd->extract_pipeline_state(deferred);
+-				tasks.push_back(deferred);
++				push_task(deferred);
+ 			}
+ 		}
+ 
+@@ -691,7 +714,7 @@ void GSRenderer::kick_compilation_tasks()
+ 				{
+ 					cmd->set_program(prog);
+ 					cmd->extract_pipeline_state(deferred);
+-					tasks.push_back(deferred);
++					push_task(deferred);
+ 				}
+ 			}
+ 		}
+@@ -724,7 +747,7 @@ void GSRenderer::kick_compilation_tasks()
+ 					{
+ 						cmd->set_specialization_constant(1, feedback);
+ 						cmd->extract_pipeline_state(deferred);
+-						tasks.push_back(deferred);
++						push_task(deferred);
+ 					}
+ 				}
+ 			}
+@@ -733,28 +756,216 @@ void GSRenderer::kick_compilation_tasks()
+ 		device->submit_discard(cmd);
+ 	}
+ 
++	{
++		// Crux2: triangle setup (dispatch_triangle_setup): the rate, a texture array bound, field rendering (only
++		// with one), and the flat UI upscale; then the CLUT write, EXTWRITE, the single-sample heuristic and the
++		// qword clears, one variant each.
++		Vulkan::DeferredPipelineCompile deferred = {};
++		auto cmd = device->request_command_buffer();
++		cmd->set_program(shaders.triangle_setup);
++		cmd->set_specialization_constant_mask(0x1f);
++		for (auto &rate : rates)
++		{
++			for (uint32_t upscale = 0; upscale < 2; upscale++)
++			{
++				for (uint32_t array_mode = 0; array_mode < 3; array_mode++)
++				{
++					cmd->set_specialization_constant(0, rate.sample_x);
++					cmd->set_specialization_constant(1, rate.sample_y);
++					cmd->set_specialization_constant(2, uint32_t(array_mode != 0));
++					cmd->set_specialization_constant(3, uint32_t(array_mode == 2));
++					cmd->set_specialization_constant(4, upscale);
++					cmd->extract_pipeline_state(deferred);
++					push_task(deferred);
++				}
++			}
++		}
++
++		cmd->set_program(shaders.clut_write);
++		cmd->set_specialization_constant_mask(1);
++		cmd->set_specialization_constant(0, vram_size - 1);
++		cmd->extract_pipeline_state(deferred);
++		push_task(deferred);
++
++		cmd->set_program(shaders.extwrite);
++		cmd->set_specialization_constant_mask(3);
++		cmd->set_specialization_constant(0, vram_size - 1);
++		cmd->set_specialization_constant(1, uint32_t(can_potentially_super_sample()));
++		cmd->extract_pipeline_state(deferred);
++		push_task(deferred);
++
++		cmd->set_program(shaders.single_sample_heuristic);
++		cmd->set_specialization_constant_mask(1);
++		cmd->set_specialization_constant(
++				0, std::min<uint32_t>(512u, device->get_gpu_properties().limits.maxComputeWorkGroupSize[0]));
++		cmd->extract_pipeline_state(deferred);
++		push_task(deferred);
++
++		cmd->set_program(shaders.qword_clear);
++		cmd->set_specialization_constant_mask(0);
++		cmd->extract_pipeline_state(deferred);
++		push_task(deferred);
++
++		device->submit_discard(cmd);
++	}
++
++	{
++		Vulkan::DeferredPipelineCompile deferred = {};
++		auto cmd = device->request_command_buffer();
++		cmd->set_program(shaders.ubershader[0][0]);
++
++		static const uint32_t variant_flags[] = {
++			0,
++			VARIANT_FLAG_HAS_AA1_BIT,
++			VARIANT_FLAG_HAS_SCANMSK_BIT,
++			VARIANT_FLAG_HAS_AA1_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
++			VARIANT_FLAG_FEEDBACK_BIT,
++			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_AA1_BIT,
++			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
++			VARIANT_FLAG_FEEDBACK_BIT | VARIANT_FLAG_HAS_AA1_BIT | VARIANT_FLAG_HAS_SCANMSK_BIT,
++		};
++
++		// Prime all common combinations.
++		// Crux2: most common first, and 32-bit Z with 32/24-bit colour and 16-bit colour with or without its own Z
++		// added (common on the PS2; dispatch_shading keeps such a depth format as it is).
++		static const struct { uint32_t color_psm, depth_psm; } formats[] = {
++			{ PSMCT32, PSMZ24 },
++			{ PSMCT32, PSMZ32 },
++			{ PSMCT32, UINT32_MAX },
++			{ PSMCT24, PSMZ24 },
++			{ PSMCT32, PSMZ16S },
++			{ PSMCT24, PSMZ32 },
++			{ PSMCT24, UINT32_MAX },
++			{ PSMCT16S, PSMZ24 },
++			{ PSMCT24, PSMZ16S },
++			{ PSMCT16S, PSMZ16S },
++			{ PSMCT16S, UINT32_MAX },
++			{ PSMCT16, PSMZ16 },
++			{ PSMCT16, UINT32_MAX },
++			{ PSMZ24, UINT32_MAX },
++			{ PSMZ32, UINT32_MAX },
++			{ PSMZ16S, UINT32_MAX },
++			{ PSMZ16, UINT32_MAX },
++		};
++
++		static const struct { uint32_t feedback_psm, feedback_cpsm; } feedbacks[] = {
++			{ PSMCT32, 0 },
++			{ PSMCT24, 0 },
++			{ PSMCT16S, 0 },
++			{ PSMT4HL, PSMCT32 },
++			{ PSMT4HL, PSMCT16 },
++			{ PSMT4HH, PSMCT32 },
++			{ PSMT4HH, PSMCT16 },
++			{ PSMT8H, PSMCT32 },
++			{ PSMT8H, PSMCT16 },
++		};
++
++		cmd->set_specialization_constant_mask(0xff);
++		cmd->enable_subgroup_size_control(true);
++
++		const auto push_rates = [&](size_t first_rate, size_t end_rate) {
++			for (auto &format : formats)
++			{
++				for (auto &flags : variant_flags)
++				{
++					for (size_t rate_index = first_rate; rate_index < end_rate; rate_index++)
++					{
++						const Rate &rate = rates[rate_index];
++						uint32_t lo, hi;
++						if (!ubershader_subgroup_config(rate.sample_x, rate.sample_y, lo, hi))
++							continue;
++						cmd->set_subgroup_size_log2(true, lo, hi);
++
++						for (auto &feedback : feedbacks)
++						{
++							if ((flags & VARIANT_FLAG_FEEDBACK_BIT) != 0)
++							{
++								if (swizzle_compat_key(feedback.feedback_psm) != swizzle_compat_key(format.color_psm))
++									continue;
++							}
++							else if (feedback.feedback_psm != 0 || feedback.feedback_cpsm != 0)
++								continue;
++
++							cmd->set_specialization_constant(0, rate.sample_x);
++							cmd->set_specialization_constant(1, rate.sample_y);
++							cmd->set_specialization_constant(2, format.color_psm);
++							cmd->set_specialization_constant(3, format.depth_psm);
++							cmd->set_specialization_constant(4, vram_size - 1);
++							cmd->set_specialization_constant(6, feedback.feedback_psm);
++							cmd->set_specialization_constant(7, feedback.feedback_cpsm);
++
++							uint32_t active_flags =
++									flags | (rate.sample_y ? VARIANT_FLAG_HAS_SUPER_SAMPLE_REFERENCE_BIT : 0);
++							cmd->set_specialization_constant(5, active_flags);
++							cmd->extract_pipeline_state(deferred);
++							push_task(deferred);
++
++							if (rate.sample_y != 0)
++							{
++								active_flags |= VARIANT_FLAG_HAS_TEXTURE_ARRAY_BIT;
++								cmd->set_specialization_constant(5, active_flags);
++								cmd->extract_pipeline_state(deferred);
++								push_task(deferred);
++							}
++
++							if (rate.sample_x == 0 && rate.sample_y == 0 && can_potentially_super_sample())
++							{
++								cmd->set_specialization_constant(
++									5, flags | VARIANT_FLAG_HAS_SUPER_SAMPLE_REFERENCE_BIT);
++								cmd->extract_pipeline_state(deferred);
++								push_task(deferred);
++							}
++						}
++					}
++				}
++			}
++		};
++
++		push_rates(0, num_preferred_rates);
++		push_rates(num_preferred_rates, rates.size());
++
++		device->submit_discard(cmd);
++	}
++
+ 	size_t num_tasks = tasks.size();
+-	size_t target_threads = (std::thread::hardware_concurrency() + 1) / 2;
+-	size_t tasks_per_thread = num_tasks / target_threads;
++	size_t target_threads = std::max<size_t>(1, (std::thread::hardware_concurrency() + 1) / 2);
++	target_threads = std::min<size_t>(target_threads, std::max<size_t>(1, num_tasks));
++
++	precompile_queued = uint32_t(num_tasks);
++	precompile_recorded = num_recorded;
++	precompile_done = 0;
++	precompile_threads = uint32_t(target_threads);
++	precompile_threads_left = uint32_t(target_threads);
++	precompile_ns.store(0, std::memory_order_release);
++
++	auto shared_tasks = std::make_shared<const std::vector<Vulkan::DeferredPipelineCompile>>(std::move(tasks));
++	auto next_task = std::make_shared<std::atomic<size_t>>(0);
++	const int64_t start_ns = Util::get_current_time_nsecs();
+ 
+ 	for (size_t thread_index = 0; thread_index < target_threads; thread_index++)
+ 	{
+-		std::vector<Vulkan::DeferredPipelineCompile> deferred(
+-			tasks.data() + thread_index * tasks_per_thread,
+-			tasks.data() + std::min<size_t>((thread_index + 1) * tasks_per_thread, tasks.size())
+-		);
+-
+-		auto async_task = std::async(std::launch::async, [this, moved_tasks = std::move(deferred)]()
++		auto async_task = std::async(std::launch::async, [this, shared_tasks, next_task, start_ns]()
+ 		{
+ 			// Just shuts up warnings.
+ 			Util::register_thread_index(0);
+-			for (auto &task: moved_tasks)
++			Util::set_current_thread_name("PGS-Precompile");
++			for (;;)
+ 			{
+ 				// If we destroy the device before threads are done spinning.
+ 				if (!compilation_tasks_active)
+ 					break;
++				size_t index = next_task->fetch_add(1, std::memory_order_relaxed);
++				if (index >= shared_tasks->size())
++					break;
+ 				Vulkan::CommandBuffer::build_compute_pipeline(
+-						device, task, Vulkan::CommandBuffer::CompileMode::AsyncThread);
++						device, (*shared_tasks)[index], Vulkan::CommandBuffer::CompileMode::AsyncThread);
++				precompile_done.fetch_add(1, std::memory_order_relaxed);
++			}
++
++			if (precompile_threads_left.fetch_sub(1, std::memory_order_acq_rel) == 1)
++			{
++				precompile_ns.store(std::max<int64_t>(1, Util::get_current_time_nsecs() - start_ns),
++				                    std::memory_order_release);
+ 			}
+ 		});
+ 
+@@ -870,6 +1081,44 @@ bool GSRenderer::init(Vulkan::Device *device_, const GSOptions &options)
+ 	descriptor_timeline = device->request_semaphore(VK_SEMAPHORE_TYPE_TIMELINE);
+ 	init_luts();
+ 
++	{
++		// Crux2: the sampling rate asked for (as GSInterface::set_super_sampling_rate maps it), compiled first.
++		auto ssaa = SuperSampling(std::min<uint32_t>(uint32_t(options.super_sampling),
++		                                             uint32_t(get_max_supported_super_sampling())));
++		preferred_rate_x_log2 = 0;
++		preferred_rate_y_log2 = 0;
++		switch (ssaa)
++		{
++		case SuperSampling::X2: preferred_rate_y_log2 = 1; break;
++		case SuperSampling::X4:
++			preferred_rate_x_log2 = options.ordered_super_sampling ? 1 : 0;
++			preferred_rate_y_log2 = options.ordered_super_sampling ? 1 : 2;
++			break;
++		case SuperSampling::X8: preferred_rate_x_log2 = 1; preferred_rate_y_log2 = 2; break;
++		case SuperSampling::X16:
++			preferred_rate_x_log2 = options.ordered_super_sampling ? 2 : 1;
++			preferred_rate_y_log2 = options.ordered_super_sampling ? 2 : 3;
++			break;
++		default: break;
++		}
++
++		// Crux2: the shading variants of earlier sessions this device can build (see GSOptions::precompile_variants).
++		shading_variants_drawn.clear();
++		shading_variants_drawn_set.clear();
++		shading_variants_recorded.clear();
++		shading_variants_recorded_set.clear();
++		new_shading_variants = 0;
++		for (auto &v : options.precompile_variants)
++		{
++			if (v.feedback_color > 1 || v.feedback_depth > 1 || v.spec[0] > 2 || v.spec[1] > 3 ||
++			    v.spec[4] != vram_size - 1 || v.subgroup_min_log2 > v.subgroup_max_log2 ||
++			    !device->supports_subgroup_size_log2(true, v.subgroup_min_log2, v.subgroup_max_log2))
++				continue;
++			if (shading_variants_recorded_set.insert(hash_shading_variant(v)).second)
++				shading_variants_recorded.push_back(v);
++		}
++	}
++
+ 	kick_compilation_tasks();
+ 
+ 	// Reserve 1/3 of our budget to slab-allocate image handles.
+@@ -1081,10 +1330,17 @@ void GSRenderer::wait_timeline(uint64_t value)
  	if (enable_timestamps && device)
  		start_ts = device->write_calibrated_timestamp();
  
@@ -199,7 +1030,7 @@ index b6ebdac..c18371a 100644
  
  	if (enable_timestamps && device)
  	{
-@@ -1105,6 +1113,34 @@ uint64_t GSRenderer::query_timeline(const Vulkan::SemaphoreHolder &sem) const
+@@ -1105,6 +1361,34 @@ uint64_t GSRenderer::query_timeline(const Vulkan::SemaphoreHolder &sem) const
  		return value;
  }
  
@@ -234,7 +1065,7 @@ index b6ebdac..c18371a 100644
  uint64_t GSRenderer::query_timeline()
  {
  	// Actually spam-calling vkGetSemaphoreValue a ton of times has serious CPU overhead.
-@@ -1139,7 +1175,7 @@ void GSRenderer::flush_qword_clears()
+@@ -1139,7 +1423,7 @@ void GSRenderer::flush_qword_clears()
  	qword_clears.clear();
  }
  
@@ -243,7 +1074,7 @@ index b6ebdac..c18371a 100644
  {
  	if (!device)
  		return;
-@@ -1148,6 +1184,10 @@ void GSRenderer::flush_submit(uint64_t value)
+@@ -1148,6 +1432,10 @@ void GSRenderer::flush_submit(uint64_t value)
  	if (enable_timestamps)
  		start_ts = device->write_calibrated_timestamp();
  
@@ -254,7 +1085,7 @@ index b6ebdac..c18371a 100644
  	total_stats.allocated_scratch_memory += stats.allocated_scratch_memory;
  	total_stats.allocated_image_memory += stats.allocated_image_memory;
  	total_stats.num_copies += stats.num_copies;
-@@ -1157,6 +1197,7 @@ void GSRenderer::flush_submit(uint64_t value)
+@@ -1157,6 +1445,7 @@ void GSRenderer::flush_submit(uint64_t value)
  	total_stats.num_copy_barriers += stats.num_copy_barriers;
  	total_stats.num_copy_threads += stats.num_copy_threads;
  	stats = {};
@@ -262,7 +1093,7 @@ index b6ebdac..c18371a 100644
  
  	flush_attribute_scratch(buffers.pos_scratch);
  	flush_attribute_scratch(buffers.attr_scratch);
-@@ -1238,7 +1279,11 @@ void GSRenderer::flush_submit(uint64_t value)
+@@ -1238,7 +1527,11 @@ void GSRenderer::flush_submit(uint64_t value)
  
  	// If we have a timeline trace, we'd like it to be somewhat readable.
  	// Only do garbage collection at frame boundaries.
@@ -275,11 +1106,117 @@ index b6ebdac..c18371a 100644
  		device->next_frame_context();
  
  	log_timestamps();
+@@ -2482,6 +2775,7 @@ void GSRenderer::dispatch_shading_commands(
+ 		{
+ 			cmd.set_specialization_constant(0, inst.sampling_rate_x_log2);
+ 			cmd.set_specialization_constant(1, inst.sampling_rate_y_log2);
++			record_shading_variant(inst.sampling_rate_x_log2, inst.sampling_rate_y_log2);
+ 			cmd.set_storage_buffer(DESCRIPTOR_SET_WORKGROUP_LIST, 0,
+ 			                       *work_list_super_sample.buffer, work_list_super_sample.offset + 256, VK_WHOLE_SIZE);
+ 			if (debug)
+@@ -2491,6 +2785,7 @@ void GSRenderer::dispatch_shading_commands(
+ 
+ 		cmd.set_specialization_constant(0, 0);
+ 		cmd.set_specialization_constant(1, 0);
++		record_shading_variant(0, 0);
+ 		cmd.set_storage_buffer(DESCRIPTOR_SET_WORKGROUP_LIST, 0,
+ 		                       *work_list_single_sample.buffer, work_list_single_sample.offset + 256,
+ 		                       VK_WHOLE_SIZE);
+@@ -2593,13 +2888,10 @@ void GSRenderer::dispatch_shading(Vulkan::CommandBuffer &cmd, const RenderPass &
+ 
+ 	cmd.enable_subgroup_size_control(true);
+ 
+-	uint32_t minimum_subgroup_size_log2 = inst.sampling_rate_x_log2 + inst.sampling_rate_y_log2;
+-
+-	// Prefer Wave64 if we can get away with it.
+-	if (device->supports_subgroup_size_log2(true, 6, 6))
+-		cmd.set_subgroup_size_log2(true, 6, 6);
+-	else if (device->supports_subgroup_size_log2(true, minimum_subgroup_size_log2, 6))
+-		cmd.set_subgroup_size_log2(true, minimum_subgroup_size_log2, 6);
++	// Prefer Wave64 if we can get away with it (Crux2: the choice shared with the background compile).
++	uint32_t subgroup_lo = 0, subgroup_hi = 0;
++	if (ubershader_subgroup_config(inst.sampling_rate_x_log2, inst.sampling_rate_y_log2, subgroup_lo, subgroup_hi))
++		cmd.set_subgroup_size_log2(true, subgroup_lo, subgroup_hi);
+ 
+ 	uint32_t color_psm = inst.fb.frame.desc.PSM;
+ 	uint32_t depth_psm = inst.fb.z.desc.PSM | ZBUFBits::PSM_MSB;
+@@ -2692,6 +2984,18 @@ void GSRenderer::dispatch_shading(Vulkan::CommandBuffer &cmd, const RenderPass &
+ 	assert(inst.sampling_rate_y_log2 <= 3);
+ 
+ 	cmd.set_program(shaders.ubershader[int(rp.feedback_color)][int(rp.feedback_depth)]);
++
++	// Crux2: what this pass draws with, recorded at each dispatch (dispatch_shading_commands sets constants 0 and 1).
++	current_shading_variant.feedback_color = uint8_t(rp.feedback_color);
++	current_shading_variant.feedback_depth = uint8_t(rp.feedback_depth);
++	current_shading_variant.subgroup_min_log2 = uint8_t(subgroup_lo);
++	current_shading_variant.subgroup_max_log2 = uint8_t(subgroup_hi);
++	current_shading_variant.spec[2] = color_psm;
++	current_shading_variant.spec[3] = inst.z_sensitive ? depth_psm : UINT32_MAX;
++	current_shading_variant.spec[4] = vram_size - 1;
++	current_shading_variant.spec[5] = variant_flags;
++	current_shading_variant.spec[6] = rp.feedback_mode != RenderPass::Feedback::None ? rp.feedback_texture_psm : 0;
++	current_shading_variant.spec[7] = rp.feedback_mode != RenderPass::Feedback::None ? rp.feedback_texture_cpsm : 0;
+ 	auto snap_raster_mask = ivec2(-(1 << inst.sampling_rate_y_log2));
+ 	// Snap single-sampled raster to half-texel instead.
+ 	if (inst.sampling_rate_y_log2 && field_aware_super_sampling && render_pass_instance_might_field_render(rp, instance, field_display_fbw))
+@@ -2748,6 +3052,7 @@ void GSRenderer::dispatch_shading(Vulkan::CommandBuffer &cmd, const RenderPass &
+ 			{
+ 				// If no further primitives need to read-depth, treat it as non-depth to speed up things.
+ 				cmd.set_specialization_constant(3, UINT32_MAX);
++				current_shading_variant.spec[3] = UINT32_MAX;
+ 				push.lo_primitive_index = base_primitive + last_primitive_index_single_step + 1;
+ 				push.hi_primitive_index = UINT32_MAX;
+ 				cmd.push_constants(&push, 0, sizeof(push));
 diff --git a/gs/gs_renderer.hpp b/gs/gs_renderer.hpp
-index 938642e..cd21745 100644
+index 938642e..37b0b9c 100644
 --- a/gs/gs_renderer.hpp
 +++ b/gs/gs_renderer.hpp
-@@ -293,13 +293,22 @@ public:
+@@ -17,6 +17,8 @@
+ #include <atomic>
+ #include <condition_variable>
+ #include <thread>
++#include <unordered_set>
++#include <vector>
+ 
+ namespace ParallelGS
+ {
+@@ -241,6 +243,35 @@ enum class SuperSampling
+ struct GSOptions;
+ class PageTracker;
+ 
++// Crux2: one variant of the shading ubershader as a draw used it: the program (the debug feedback switches), the
++// subgroup size range and the eight specialisation constants. The renderer records the variants it draws with
++// (GSInterface::get_shading_variants); handed back at the next start (GSOptions::precompile_variants), the
++// background compile builds exactly those first, before its generic list. Plain data, saved to a file as it is.
++struct ShadingVariant
++{
++	uint8_t feedback_color;
++	uint8_t feedback_depth;
++	uint8_t subgroup_min_log2;
++	uint8_t subgroup_max_log2;
++	uint32_t spec[8];
++};
++static_assert(sizeof(ShadingVariant) == 36, "ShadingVariant is saved as it is");
++
++// Crux2: the background compile kicked at init (GSInterface::get_precompile_progress). Any thread.
++struct PrecompileProgress
++{
++	uint32_t queued = 0;   // pipelines queued in all
++	uint32_t recorded = 0; // of them from GSOptions::precompile_variants (compiled first)
++	uint32_t done = 0;     // compiled so far
++	uint32_t threads = 0;
++	bool finished = false; // every thread has stopped (all done, or the renderer is closing)
++	double seconds = 0.0;  // from the kick to the last thread's end, once finished
++};
++
++// Crux2: a digest of every SPIR-V module the renderer builds pipelines from (slangmosh's bank and the
++// title's own modules). A pipeline cache saved by one set of shaders holds nothing another set can use.
++uint64_t shader_set_fingerprint();
++
+ class GSRenderer
+ {
+ public:
+@@ -293,13 +324,27 @@ public:
  	void flush_readback(const uint32_t *page_indices, uint32_t num_indices);
  
  	// Submit to GPU and signal when done.
@@ -300,10 +1237,15 @@ index 938642e..cd21745 100644
 +	// Crux2: how long wait_timeline() has stood waiting for the GPU since the last call (nanoseconds).
 +	uint64_t consume_host_wait_ns();
 +
++	// Crux2: see GSInterface::get_shading_variants / get_new_shading_variant_count / get_precompile_progress.
++	std::vector<ShadingVariant> get_shading_variants(size_t max_count) const;
++	uint32_t get_new_shading_variant_count() const { return new_shading_variants; }
++	PrecompileProgress get_precompile_progress() const;
++
  	// Cache management mostly on GPUs that need it.
  	void *begin_host_vram_access();
  	void end_host_write_vram_access();
-@@ -341,6 +350,7 @@ private:
+@@ -341,6 +386,7 @@ private:
  	std::thread timeline_thread;
  	uint64_t last_submitted_timeline = 0;
  	std::atomic<uint64_t> timeline_value;
@@ -311,6 +1253,27 @@ index 938642e..cd21745 100644
  	std::condition_variable timeline_cond;
  	std::mutex timeline_lock;
  
+@@ -551,6 +597,20 @@ private:
+ 	std::atomic_bool compilation_tasks_active;
+ 	std::vector<std::future<void>> compilation_tasks;
+ 
++	// Crux2: the background compile's order and progress, and the shading variants drawn with.
++	uint32_t preferred_rate_x_log2 = 0, preferred_rate_y_log2 = 0; // the sampling rate asked for at init
++	std::atomic<uint32_t> precompile_queued{0}, precompile_recorded{0}, precompile_done{0};
++	std::atomic<uint32_t> precompile_threads{0}, precompile_threads_left{0};
++	std::atomic<int64_t> precompile_ns{0}; // 0 until every thread has stopped
++	bool ubershader_subgroup_config(uint32_t rate_x_log2, uint32_t rate_y_log2, uint32_t &lo, uint32_t &hi) const;
++	ShadingVariant current_shading_variant = {}; // the shading dispatch being recorded (dispatch_shading)
++	void record_shading_variant(uint32_t rate_x_log2, uint32_t rate_y_log2);
++	std::vector<ShadingVariant> shading_variants_drawn;   // this session, first drawn first
++	std::vector<ShadingVariant> shading_variants_recorded; // GSOptions::precompile_variants, as usable here
++	std::unordered_set<Util::Hash> shading_variants_drawn_set;
++	std::unordered_set<Util::Hash> shading_variants_recorded_set;
++	uint32_t new_shading_variants = 0;
++
+ 	uint64_t query_timeline(const Vulkan::SemaphoreHolder &sem) const;
+ 
+ 	std::vector<Vulkan::ImageHandle> recycled_image_handles;
 diff --git a/gs/shaders/clut_write.comp b/gs/shaders/clut_write.comp
 index 0290975..914e36b 100644
 --- a/gs/shaders/clut_write.comp

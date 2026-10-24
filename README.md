@@ -468,6 +468,26 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.11 changed
+
+Added:
+- **Record a GS dump** in the quick menu: 5 seconds of what the game sends the GS, to `snaps/`,
+  with either renderer (for reproducing a problem on a PC).
+- **Slow moments in the boot log**: whenever a game stays under full speed for 2 seconds, a
+  `slow:` line with the threads' and the graphics chip's load and what a frame drew.
+- **Keep read render targets uncompressed (experimental, off)**: a render target a glow or flare
+  reads from itself is not decompressed by the graphics chip each time.
+
+Changed:
+- **paraLLEl-GS compiles its shaders ahead**, in the background, the ones the game used last time
+  first, and keeps them between sessions (`pgs-pipeline-cache.bin` in the title folder): far
+  fewer pauses when a game starts or a scene is new.
+
+Fixed:
+- **The GS dump hotkeys** recorded nothing while paraLLEl-GS drew, and their messages were not
+  shown.
+- **The graphics driver's shader cache could switch itself off** on the console since v1.0.8.
+
 ## What v1.0.10 changed
 
 Added:

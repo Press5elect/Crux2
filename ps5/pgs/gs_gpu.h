@@ -70,6 +70,12 @@ struct GSGpuOptions
     // The graphics card's time measured with its timestamps (GSGpuStatus::gpuMsPerFrame): a query per pass.
     bool gpuTimestamps = false;
     std::string gpuSelector;
+    // A file kept between sessions: the driver's compiled pipelines (its VkPipelineCache data) and the shading
+    // variants the games drew with. Read before paraLLEl-GS starts (the recorded variants are compiled first in the
+    // background, the pipelines in the file need no compiling), written at shutdown, and now and then while new
+    // pipelines appear (a session that ends without a shutdown keeps most of them). One saved by another driver
+    // build or another set of shaders gives its variants but not its pipelines. Empty: none. (Crux2)
+    std::string pipelineCachePath;
 
     static GSGpuOptions fromEnvironment();
 };
@@ -172,6 +178,17 @@ struct GSGpuStatus
     float ringWaitMs = 0.0f;
 };
 
+// The GS dumps recorded (GSGpuRenderer::recordDump), for whoever asked for them to say when one is done.
+struct GSGpuDumpStatus
+{
+    uint32_t ended = 0;    // dumps that ended (written whole, cut short or not opened), counted from the start
+    bool ok = false;       // the last one that ended was written whole
+    uint32_t presents = 0; // the presentations it holds
+    uint64_t bytes = 0;    // its size
+    std::string path;      // its file
+    std::string why;       // why it ended ("" when it holds all it was asked for)
+};
+
 // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).
 class GSGpuFrameMailbox
 {
@@ -236,6 +253,19 @@ public:
     virtual bool loadState(const uint8_t *data, size_t bytes) { (void)data; (void)bytes; return false; }
     // The producer: the GIF paths in `mask` (bit 0 = path 1) start over (a GIF reset).
     virtual void softReset(uint32_t mask) { (void)mask; }
+    // The producer: a GS dump of the GS input from here on, in PCSX2's .gs format (uncompressed), into `path`: it
+    // starts right after the next presentation (a frame's start: GS memory, the registers and the GIF paths as they
+    // are then, with the game's `serial` if given), holds every GIF transfer, register write, read of GS memory and
+    // presentation after it, and ends after `presents` presentations. Posted in order, not waited for; a dump being
+    // recorded ends first. A null or empty path (or presents = 0): the dump being recorded, or about to start,
+    // ends here. dumpStatus() says when one ended. False: this renderer records no dumps. (Crux2)
+    virtual bool recordDump(const char *path, uint32_t presents, const char *serial = nullptr)
+    {
+        (void)path; (void)presents; (void)serial;
+        return false;
+    }
+    // Any thread: the dumps that ended.
+    virtual GSGpuDumpStatus dumpStatus() const { return {}; }
 
     // The game thread, holding no lock: wait while more than maxAhead presentations are not yet drawn.
     virtual bool waitPresentBacklog(uint32_t maxAhead, const std::atomic<bool> &stop) = 0;

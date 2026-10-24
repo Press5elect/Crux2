@@ -26,6 +26,7 @@
 #include "../ps5_priority.h"
 
 #include "../ps5_platform.h"
+#include "../ps5_pgs.h"
 #include "../ps5_cards.h"
 #include "../ps5_boot_step.h"
 #include "../ps5_cheats_logic.h"
@@ -1093,6 +1094,32 @@ public:
 		Host::RunOnCPUThread([]() {
 			if (VMManager::HasValidVM())
 				MTGS::ToggleSoftwareRendering();
+		});
+	}
+
+	void recordGsDump() override
+	{
+		// On the GS thread (through the CPU thread, which alone hands it work), in order with the game's GS input.
+		Host::RunOnCPUThread([]() {
+			if (!VMManager::HasValidVM())
+				return;
+			MTGS::RunOnGSThread([]() {
+				constexpr u32 presents = 300; // 5 seconds of vsyncs
+				if (PS5PGS::Active())
+				{
+					// paraLLEl-GS draws: PCSX2's GS is not fed, its dump would be empty. The renderer records it.
+					if (!PS5PGS::RecordDump(PS5PGS::DumpPath(), presents))
+						PS5UI::Toast("A GS dump cannot be recorded with this renderer.");
+					return;
+				}
+				// PCSX2's renderer: its own dump (compressed as Settings say), named its way; it says (a toast) when it
+				// starts and when it is saved.
+				Error error;
+				if (!FileSystem::EnsureDirectoryExists(EmuFolders::Snapshots.c_str(), false, &error))
+					ps5px_log("GS dump: the folder %s could not be made (%s)", EmuFolders::Snapshots.c_str(), error.GetDescription().c_str());
+				PS5Platform::MakePublic(EmuFolders::Snapshots.c_str(), true);
+				GSQueueSnapshot(std::string(), presents);
+			});
 		});
 	}
 

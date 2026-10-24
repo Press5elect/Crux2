@@ -30,6 +30,7 @@
 #include "PerformanceMetrics.h"
 #include "VMManager.h"
 
+#include "common/SmallString.h"
 #include "common/Timer.h"
 
 #include "fmt/format.h"
@@ -72,7 +73,7 @@ namespace PS5AutoQuality
 		constexpr int NO_DOWN_SAMPLES = 60;
 
 		// The session's figures (at normal speed only).
-		uint32_t s_samples = 0, s_slow_samples = 0, s_streak = 0, s_longest = 0;
+		uint32_t s_samples = 0, s_slow_samples = 0, s_streak = 0, s_longest = 0, s_slow_logs = 0;
 		double s_speed_sum = 0.0;
 
 		// paraLLEl-GS: the samples a pixel step instead of the resolution (16, 8, 4, 2, 1). What the
@@ -203,6 +204,22 @@ namespace PS5AutoQuality
 			{
 				s_slow_samples++;
 				s_longest = std::max(s_longest, ++s_streak);
+				// Two seconds under full speed: once per stretch (at most 30 a session), what the emulator was doing,
+				// for the boot log: the threads' and the graphics chip's load, and what a frame drew (the renderer's
+				// counters: PRIM primitives, DRW draws, DRWC draw calls, BAR barriers, RP render passes, RB readbacks,
+				// TC texture copies, TU uploads, XB pass splits, FD decompressions, DP DATE passes, RC copies of the
+				// render target). This runs on the GS thread, where the counters live.
+				if (s_streak == 4 && s_slow_logs < 30)
+				{
+					s_slow_logs++;
+					SmallString stats;
+					GSgetStats(stats);
+					ps5px_log("slow: %.0f%% of full speed for 2 s; EE %.0f%%, GS %.0f%%, VU %.0f%%, GPU %.0f%%; a frame: %s",
+						PerformanceMetrics::GetSpeed(), PerformanceMetrics::GetCPUThreadUsage(), PerformanceMetrics::GetGSThreadUsage(),
+						PerformanceMetrics::GetVUThreadUsage(), PerformanceMetrics::GetGPUUsage(), stats.c_str());
+					if (PS5PGS::Active())
+						ps5px_log("slow: %s", PS5PGS::StatusLine().c_str());
+				}
 			}
 			else
 			{
@@ -316,7 +333,7 @@ namespace PS5AutoQuality
 		s_down = s_up = 0;
 		s_lowest = 0.0f;
 		s_pgs_lowest = 0;
-		s_samples = s_slow_samples = s_streak = s_longest = 0;
+		s_samples = s_slow_samples = s_streak = s_longest = s_slow_logs = 0;
 		s_speed_sum = 0.0;
 	}
 

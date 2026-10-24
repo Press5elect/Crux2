@@ -210,6 +210,15 @@ void quickScreen()
 		items.push_back(std::move(item));
 	}
 	{
+		// For a graphics problem's report: the GS's input of the next 5 seconds as the game plays on, in a file that
+		// replays it (PCSX2's GS dump), with whichever renderer draws.
+		QuickItem item{ICON_FA_BUG, "Record a GS dump", "5 seconds, to snaps/", running.valid, [] {
+						   be->recordGsDump();
+						   resumeGame();
+					   }};
+		items.push_back(std::move(item));
+	}
+	{
 		// This game's own options: in effect at once, and kept for this game only.
 		const GameInfo* listed = libraryGame(running.path);
 		GameInfo game = (listed != nullptr) ? *listed : GameInfo();

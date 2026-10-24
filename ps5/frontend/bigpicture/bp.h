@@ -294,6 +294,9 @@ public:
 	virtual void changeDisc(const std::string& path) = 0;
 	virtual void setFrameLimit(bool on) = 0;
 	virtual void toggleSoftwareRenderer() = 0;
+	/// Records a GS dump of the running game's next 5 seconds (300 vsyncs) into the snaps folder, with the GS renderer
+	/// that draws it (paraLLEl-GS's own, or PCSX2's); the on-screen display says when it starts and when it is saved.
+	virtual void recordGsDump() = 0;
 	/// Whether a memory card is being written to right now (closing the game would spoil it).
 	virtual bool memoryCardBusy() = 0;
 	/// Whether the running game can be put back to where it was before a state was last loaded
