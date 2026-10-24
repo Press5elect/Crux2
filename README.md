@@ -468,6 +468,24 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.8 changed
+
+Added:
+- The boot log's `paraLLEl-GS:` line says how much of the reads' cost is the graphics card
+  finishing what a read needs, and how often work was handed to it early.
+
+Changed:
+- **Built on PCSX2 v2.9.142** (was v2.9.138): Vulkan barriers where a draw samples its own render
+  target, and accuracy fixes in the hardware renderer and its texture cache.
+- **Built on Mesa 26.2.5's RADV** (was 26.2.0): the stable fixes since, among them binning on this
+  graphics chip's generation, sRGB clears, depth/stencil resolves and shader compiler fixes.
+- **paraLLEl-GS hands the graphics card its work as it goes** instead of a frame at a time, so a
+  game that reads its picture back waits for what is left, not for the whole frame; and its thread
+  keeps taking the game's next frame while a finished picture comes back, instead of stopping.
+
+Fixed:
+- Hardware download mode *Off* still made paraLLEl-GS wait for the graphics card at each read.
+
 ## What v1.0.7 changed
 
 Added:

@@ -26,7 +26,7 @@ index 3bee601..2320a3f 100644
  
  #endif // PS2_RUNTIME_H
 diff --git a/ps2xRuntime/include/runtime/gs/gs_gpu.h b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-index e9f8308..10fa6fd 100644
+index e9f8308..aa8b415 100644
 --- a/ps2xRuntime/include/runtime/gs/gs_gpu.h
 +++ b/ps2xRuntime/include/runtime/gs/gs_gpu.h
 @@ -58,11 +58,33 @@ struct GSGpuOptions
@@ -73,7 +73,7 @@ index e9f8308..10fa6fd 100644
      // Shown straight from the graphics card (VENDETTA_PRESENT=vulkan): the picture is in shared image sharedImage
      // (R8G8B8A8, width x height) of the current set (Windows handles sharedHandles, made again when sharedGeneration
      // changes), finished once the shared timeline semaphore (sharedTimeline) reaches seq; rgba stays empty. The
-@@ -101,6 +126,27 @@ struct GSGpuStatus
+@@ -101,6 +126,32 @@ struct GSGpuStatus
      float presentsPerSecond = 0.0f;
      float gifMegabytesPerSecond = 0.0f;
      float renderPassesPerSecond = 0.0f;
@@ -96,12 +96,17 @@ index e9f8308..10fa6fd 100644
 +    // reads every frame serialise the emulator and the graphics card: that time is the cost.
 +    float readbacksPerFrame = 0.0f;
 +    float readbackWaitMs = 0.0f;
++    // Of readbackWaitMs, how long a frame the graphics card thread itself stood waiting for the GPU inside
++    // paraLLEl-GS (its host reads): the rest of readbackWaitMs is the ring being drained to the read.
++    float gpuWaitMs = 0.0f;
++    // Submissions the graphics card thread made on its own (eager submits while it had nothing to do), a frame.
++    float eagerSubmitsPerFrame = 0.0f;
 +    // How long a frame the emulator's thread waited for room in the ring (the renderer thread behind).
 +    float ringWaitMs = 0.0f;
  };
  
  // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).
-@@ -108,6 +154,7 @@ class GSGpuFrameMailbox
+@@ -108,6 +159,7 @@ class GSGpuFrameMailbox
  {
  public:
      GSGpuFrame &writeSlot() noexcept { return m_slot[m_back]; }
@@ -109,7 +114,7 @@ index e9f8308..10fa6fd 100644
      void publish() noexcept
      {
          m_back = m_middle.exchange(m_back | kFresh, std::memory_order_acq_rel) & kIndexMask;
-@@ -155,6 +202,12 @@ public:
+@@ -155,6 +207,12 @@ public:
      // The producer, blocking: answered after everything sent before (GS memory as of this point in the order).
      virtual void snapshotVram(std::vector<uint8_t> &out) = 0;              // all 4 MiB
      virtual uint32_t readTransfer(uint8_t *dst, uint32_t maxBytes) = 0;    // a local -> host transfer's data
@@ -122,7 +127,7 @@ index e9f8308..10fa6fd 100644
  
      // The game thread, holding no lock: wait while more than maxAhead presentations are not yet drawn.
      virtual bool waitPresentBacklog(uint32_t maxAhead, const std::atomic<bool> &stop) = 0;
-@@ -172,6 +225,7 @@ public:
+@@ -172,6 +230,7 @@ public:
      virtual void setHighResolution(bool on) = 0;
      virtual void setFsr(bool on) = 0;
      virtual void setSharpness(float stops) = 0;
@@ -174,7 +179,7 @@ index 8fa3249..f137353 100644
      return converter.PresentFromLocalMemory(request);
  }
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-index 7bb06d3..124064e 100644
+index 7bb06d3..2bbb89d 100644
 --- a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 @@ -18,8 +18,18 @@
@@ -208,7 +213,7 @@ index 7bb06d3..124064e 100644
      static const bool wanted = []
      {
          const char *present = std::getenv("VENDETTA_PRESENT");
-@@ -161,7 +175,9 @@ namespace
+@@ -161,7 +175,19 @@ namespace
      constexpr uint64_t align16(uint64_t bytes) { return (bytes + 15u) & ~uint64_t{15u}; }
      constexpr uint32_t kMaxGifChunk = 256u * 1024u;         // larger GIF transfers go in pieces (paths keep their tag)
      constexpr uint64_t kPublishBytes = 16u * 1024u;         // hand records over at least this often
@@ -216,10 +221,20 @@ index 7bb06d3..124064e 100644
 +    // Before sleeping: about 20 us of pauses, counted rather than timed (a clock read in each turn of the loop cost the
 +    // graphics card thread a sixth of its time on the console).
 +    constexpr uint32_t kSpinPauses = 512u;
++    // Eager submission: recorded GPU work is handed over while this thread has nothing to do (the ring is empty), and
++    // at the latest this long after the previous submission while it is busy. paraLLEl-GS otherwise submits only at
++    // a presentation, a host read, or once 4096 primitives' render passes have been recorded (its pressure flush), so
++    // a game that reads GS memory back waited for a whole frame of GPU work queued at once.
++    constexpr int64_t kEagerSubmitIdleNs = 250'000;   // when idle: not more often than this
++    constexpr int64_t kEagerSubmitBusyNs = 1'000'000; // when busy: at least this often (checked every 64 records)
++    // While a picture is on its way back and the ring is empty, its fence is looked at this often (between naps)
++    // instead of being waited for outright: a blocking wait kept this thread from taking the next frame's GS input
++    // for as long as the GPU took to draw the frame.
++    constexpr int64_t kPendingPollNs = 100'000;
  
      inline void cpuRelax() { _mm_pause(); }
  
-@@ -269,6 +285,32 @@ namespace
+@@ -269,6 +295,32 @@ namespace
              return call.result;
          }
  
@@ -252,7 +267,7 @@ index 7bb06d3..124064e 100644
          void kick() override
          {
              if (m_options.sync)
-@@ -324,6 +366,11 @@ namespace
+@@ -324,6 +376,11 @@ namespace
          {
              m_wantSharpness.store(std::clamp(stops, 0.0f, 2.0f), std::memory_order_relaxed);
          }
@@ -264,7 +279,7 @@ index 7bb06d3..124064e 100644
  
          GSGpuStatus status() const override
          {
-@@ -337,8 +384,7 @@ namespace
+@@ -337,8 +394,7 @@ namespace
                  return;
              m_shutDown = true;
              m_stop.store(true, std::memory_order_seq_cst);
@@ -274,7 +289,7 @@ index 7bb06d3..124064e 100644
              if (m_thread.joinable())
                  m_thread.join();
              m_readPos.store(m_localWrite, std::memory_order_release);
-@@ -355,6 +401,7 @@ namespace
+@@ -355,6 +411,7 @@ namespace
              Reset,
              Present,  // payload = PresentRecord
              Call,     // payload = a CallRecord * (on the waiting producer's stack)
@@ -282,7 +297,7 @@ index 7bb06d3..124064e 100644
          };
          struct alignas(16) Header
          {
-@@ -370,9 +417,13 @@ namespace
+@@ -370,9 +427,13 @@ namespace
              {
                  Snapshot,
                  ReadTransfer,
@@ -296,7 +311,7 @@ index 7bb06d3..124064e 100644
              uint8_t *dst = nullptr;
              uint32_t bytes = 0u;
              uint32_t result = 0u;
-@@ -395,8 +446,12 @@ namespace
+@@ -395,8 +456,12 @@ namespace
              std::memcpy(dst, &pointer, sizeof(pointer));
              commit();
              publish();
@@ -309,7 +324,7 @@ index 7bb06d3..124064e 100644
          }
  
          uint8_t *reserve(Cmd cmd, uint32_t payloadBytes)
-@@ -412,11 +467,14 @@ namespace
+@@ -412,11 +477,14 @@ namespace
                  if (m_size - (m_localWrite - m_cachedRead) < needed)
                  {
                      publish();
@@ -324,7 +339,7 @@ index 7bb06d3..124064e 100644
                  }
              }
              if (wrap)
-@@ -451,10 +509,7 @@ namespace
+@@ -451,10 +519,7 @@ namespace
              m_published = m_localWrite;
              m_writePos.store(m_localWrite, std::memory_order_seq_cst);
              if (m_consumerSleeping.load(std::memory_order_seq_cst) != 0u)
@@ -336,7 +351,7 @@ index 7bb06d3..124064e 100644
          }
  
          void drain()
-@@ -470,13 +525,13 @@ namespace
+@@ -470,13 +535,13 @@ namespace
          template <typename Pred>
          void waitProgress(const char *what, Pred pred)
          {
@@ -352,7 +367,7 @@ index 7bb06d3..124064e 100644
              bool reported = false;
              std::unique_lock<std::mutex> lock(m_progressMutex);
              m_producerWaiting.fetch_add(1u, std::memory_order_seq_cst);
-@@ -496,6 +551,14 @@ namespace
+@@ -496,6 +561,14 @@ namespace
  
          // ---- the graphics card thread -------------------------------------------------------------------------
  
@@ -367,7 +382,7 @@ index 7bb06d3..124064e 100644
          void publishProgress(uint64_t readPos)
          {
              m_readPos.store(readPos, std::memory_order_seq_cst);
-@@ -505,7 +568,15 @@ namespace
+@@ -505,7 +578,15 @@ namespace
  
          void threadMain()
          {
@@ -383,7 +398,7 @@ index 7bb06d3..124064e 100644
              GpuLog logger(m_options.libraryLog);
              Util::set_thread_logging_interface(&logger);
  
-@@ -521,8 +592,13 @@ namespace
+@@ -521,8 +602,13 @@ namespace
  
              try
              {
@@ -397,7 +412,7 @@ index 7bb06d3..124064e 100644
  
                  // Closed in reverse order: the GS interface, the device (both explicitly, below), then the context.
                  Vulkan::Context context;
-@@ -552,6 +628,12 @@ namespace
+@@ -552,6 +638,12 @@ namespace
                      return fail(std::string("paraLLEl-GS could not start on ") + context.get_gpu_props().deviceName +
                                  " (it needs descriptor indexing, timeline semaphores, 8/16-bit storage and subgroup "
                                  "size control)");
@@ -410,7 +425,7 @@ index 7bb06d3..124064e 100644
  
                  {
                      // 2-D detail: VENDETTA_UPSCALE_SPRITES=1 (settings.toml graphics.sharp_2d) super-samples sprites
-@@ -559,9 +641,18 @@ namespace
+@@ -559,9 +651,18 @@ namespace
                      // own pixel; VENDETTA_HIRES4=0: 2x as before). VENDETTA_PROMOTE=1 (a test): show a final blit's
                      // source instead (paraLLEl-GS's backbuffer promotion).
                      auto on = [](const char *name) { const char *v = std::getenv(name); return v && *v && *v != '0'; };
@@ -431,7 +446,7 @@ index 7bb06d3..124064e 100644
                      gs.set_hacks(hacks);
                      const char *hires4 = std::getenv("VENDETTA_HIRES4");
                      m_quadScanout = !(hires4 && *hires4 == '0');
-@@ -612,6 +703,12 @@ namespace
+@@ -612,6 +713,12 @@ namespace
                  m_gs = nullptr;
                  m_device = nullptr;
                  m_lastScanout = {};
@@ -444,7 +459,7 @@ index 7bb06d3..124064e 100644
                  m_readback.reset();
                  m_fsrUpscaled.reset();
                  m_fsrSharpened.reset();
-@@ -620,8 +717,10 @@ namespace
+@@ -620,8 +727,10 @@ namespace
                  m_sharedTimeline.reset();
                  closeSharedHandles(m_sharedHandles);
                  closeSharedHandles(m_sharedOldHandles);
@@ -455,20 +470,41 @@ index 7bb06d3..124064e 100644
                  m_sharedTimelineHandle = nullptr;
                  // The GS interface first: it submits the command buffers it holds (waiting for the device while it
                  // holds one never ends), then the device.
-@@ -652,25 +751,34 @@ namespace
+@@ -652,25 +761,55 @@ namespace
                      publishProgress(read);
                      if (m_stop.load(std::memory_order_acquire))
                          return;
 -                    const auto spinStart = std::chrono::steady_clock::now();
 -                    while (m_writePos.load(std::memory_order_acquire) == read && !m_stop.load(std::memory_order_relaxed) &&
 -                           std::chrono::steady_clock::now() - spinStart < kSpin)
-+                    // Nothing to do: the picture on its way back is published now rather than at the next one.
-+                    finishPendingReadBack();
++                    // Nothing to do: the GPU gets what was recorded so far (eager submit), and the picture on its
++                    // way back is published once its copy is done (polled, not waited for: a wait here held the
++                    // next frame's GS input in the ring for as long as the GPU took to draw this one).
 +                    const auto idleStart = Clock::now();
++                    eagerSubmit(idleStart, kEagerSubmitIdleNs);
++                    finishPendingReadBack(false);
 +                    for (uint32_t i = 0; i < kSpinPauses && m_writePos.load(std::memory_order_acquire) == read &&
 +                                         !m_stop.load(std::memory_order_relaxed);
 +                         ++i)
                          cpuRelax();
++                    if (m_pending.active && m_writePos.load(std::memory_order_acquire) == read &&
++                        !m_stop.load(std::memory_order_relaxed))
++                    {
++                        // The picture's copy is awaited in short naps (woken at once by new GS input), the fence
++                        // only looked at: a timed wait on the fence itself spins on the console (RADV's PS5 winsys
++                        // spins 1.5 ms before it sleeps).
++                        std::unique_lock<std::mutex> lock(m_wakeMutex);
++                        m_consumerSleeping.store(1u, std::memory_order_seq_cst);
++                        while (m_pending.active && m_writePos.load(std::memory_order_seq_cst) == read &&
++                               !m_stop.load(std::memory_order_seq_cst))
++                        {
++                            m_wakeCv.wait_for(lock, std::chrono::nanoseconds(kPendingPollNs), [&]()
++                                              { return m_writePos.load(std::memory_order_seq_cst) != read ||
++                                                       m_stop.load(std::memory_order_seq_cst); });
++                            finishPendingReadBack(false);
++                        }
++                        m_consumerSleeping.store(0u, std::memory_order_relaxed);
++                    }
                      if (m_writePos.load(std::memory_order_acquire) == read && !m_stop.load(std::memory_order_relaxed))
                      {
 -                        const auto sleepStart = Clock::now();
@@ -498,8 +534,12 @@ index 7bb06d3..124064e 100644
                  while (read != write)
                  {
                      if (m_stop.load(std::memory_order_relaxed))
-@@ -699,6 +807,13 @@ namespace
+@@ -697,8 +836,17 @@ namespace
+                     {
+                         sinceProgress = 0u;
                          publishProgress(read);
++                        // busy for a while: the GPU gets what is recorded so far (one clock read per 64 records)
++                        eagerSubmit(Clock::now(), kEagerSubmitBusyNs);
                      }
                  }
 +                {
@@ -512,7 +552,7 @@ index 7bb06d3..124064e 100644
                  publishProgress(read);
                  reportStats();
              }
-@@ -711,26 +826,31 @@ namespace
+@@ -711,26 +859,31 @@ namespace
              case Cmd::Wrap:
                  break;
              case Cmd::Gif:
@@ -548,7 +588,7 @@ index 7bb06d3..124064e 100644
                  }
                  catch (...)
                  {
-@@ -755,9 +875,11 @@ namespace
+@@ -755,9 +908,11 @@ namespace
              }
          }
  
@@ -561,7 +601,7 @@ index 7bb06d3..124064e 100644
              switch (call.kind)
              {
              case CallRecord::Snapshot:
-@@ -770,6 +892,55 @@ namespace
+@@ -770,6 +925,55 @@ namespace
                  m_gs->read_transfer_fifo(call.dst, call.bytes / 16u);
                  call.result = call.bytes & ~15u;
                  break;
@@ -617,7 +657,7 @@ index 7bb06d3..124064e 100644
              }
          }
  
-@@ -796,6 +967,50 @@ namespace
+@@ -796,6 +1000,56 @@ namespace
                  static_cast<float>((m_stats.gifBytes - m_statusBase.gifBytes) / seconds / 1048576.0);
              status.renderPassesPerSecond =
                  static_cast<float>((m_stats.renderPasses - m_statusBase.renderPasses) / seconds);
@@ -632,15 +672,21 @@ index 7bb06d3..124064e 100644
 +                const uint64_t callWait = m_callWaitNs.load(std::memory_order_relaxed);
 +                const uint64_t callCount = m_callCount.load(std::memory_order_relaxed);
 +                const uint64_t ringWait = m_ringWaitNs.load(std::memory_order_relaxed);
++                // (A second with no presents carries its reads over to the next one that has some.)
++                if (m_gs)
++                    m_stats.gpuWaitNs += m_gs->consume_host_wait_ns();
 +                if (presents > 0.0)
 +                {
 +                    status.readbacksPerFrame = static_cast<float>((callCount - m_callCountBase) / presents);
 +                    status.readbackWaitMs = static_cast<float>((callWait - m_callWaitBase) / 1.0e6 / presents);
 +                    status.ringWaitMs = static_cast<float>((ringWait - m_ringWaitBase) / 1.0e6 / presents);
++                    status.gpuWaitMs = static_cast<float>((m_stats.gpuWaitNs - m_statusBase.gpuWaitNs) / 1.0e6 / presents);
++                    status.eagerSubmitsPerFrame =
++                        static_cast<float>((m_stats.eagerSubmits - m_statusBase.eagerSubmits) / presents);
++                    m_callWaitBase = callWait;
++                    m_callCountBase = callCount;
++                    m_ringWaitBase = ringWait;
 +                }
-+                m_callWaitBase = callWait;
-+                m_callCountBase = callCount;
-+                m_ringWaitBase = ringWait;
 +            }
 +            if (m_options.gpuTimestamps && m_gs)
 +            {
@@ -668,7 +714,33 @@ index 7bb06d3..124064e 100644
              {
                  std::lock_guard<std::mutex> lock(m_statusMutex);
                  m_status = status;
-@@ -860,16 +1075,44 @@ namespace
+@@ -824,11 +1078,12 @@ namespace
+             auto pct = [&](Clock::duration d)
+             { return static_cast<int>(100.0 * std::chrono::duration<double>(d).count() / seconds + 0.5); };
+             std::fprintf(stderr,
+-                         "[hostprof-gpu] busy=%d%% gif=%d%% flush=%d%% vsync=%d%% readback=%d%% presents/s=%.0f scanouts/s=%.0f "
+-                         "gif-MB/s=%.1f render-passes/s=%.0f prims/s=%.0f%c",
++                         "[hostprof-gpu] busy=%d%% gif=%d%% flush=%d%% vsync=%d%% readback=%d%% gpu-wait=%d%% presents/s=%.0f scanouts/s=%.0f "
++                         "gif-MB/s=%.1f render-passes/s=%.0f prims/s=%.0f eager-submits/s=%.0f%c",
+                          100 - pct(m_stats.idle), pct(m_stats.gif), pct(m_stats.flush), pct(m_stats.vsync), pct(m_stats.readback),
++                         static_cast<int>(100.0 * static_cast<double>(m_stats.gpuWaitNs) / 1.0e9 / seconds + 0.5),
+                          m_stats.presents / seconds, m_stats.scanouts / seconds, m_stats.gifBytes / seconds / 1048576.0,
+-                         m_stats.renderPasses / seconds, m_stats.primitives / seconds, 10);
++                         m_stats.renderPasses / seconds, m_stats.primitives / seconds, m_stats.eagerSubmits / seconds, 10);
+             m_stats = Stats{};
+             m_stats.since = now;
+             m_statusBase = Stats{};
+@@ -839,7 +1094,8 @@ namespace
+             ParallelGS::GSInterface &gs = *m_gs;
+             const auto flushStart = Clock::now();
+             gs.flush();
+-            m_stats.flush += Clock::now() - flushStart;
++            m_lastSubmit = Clock::now();
++            m_stats.flush += m_lastSubmit - flushStart;
+             ParallelGS::PrivRegisterState &priv = gs.get_priv_register_state();
+             for (uint32_t i = 0; i < kPrivRegCount; ++i)
+                 priv.qwords_lo[2u * i] = record.regs[i];
+@@ -860,16 +1116,43 @@ namespace
                  }
              }
  
@@ -694,8 +766,7 @@ index 7bb06d3..124064e 100644
 +                settingsChanged |= want.forceProgressive != last.forceProgressive || want.antiBlur != last.antiBlur ||
 +                                   want.overscan != last.overscan || want.crtcOffsets != last.crtcOffsets ||
 +                                   want.mipmaps != last.mipmaps || want.sharp2D != last.sharp2D ||
-+                                   want.backbufferPromotion != last.backbufferPromotion ||
-+                                   want.unsyncedReadbacks != last.unsyncedReadbacks;
++                                   want.backbufferPromotion != last.backbufferPromotion; // (not the read-backs: no change to the picture)
 +                m_lastScanoutSettings = want;
 +            }
 +            const GSGpuScanout &scanout = m_lastScanoutSettings;
@@ -719,12 +790,12 @@ index 7bb06d3..124064e 100644
              const uint32_t wantSsaa = m_wantSsaa.load(std::memory_order_relaxed);
              if (wantSsaa != m_currentSsaa)
              {
-@@ -933,12 +1176,16 @@ namespace
+@@ -933,12 +1216,16 @@ namespace
          // fsrOutput != 0: upscaled + sharpened to that size first (packed width << 32 | height).
          void readBack(const ParallelGS::ScanoutResult &scanout, uint64_t fsrOutput)
          {
 +            // The picture before this one, if it is still on its way back, is published first (in order).
-+            finishPendingReadBack();
++            finishPendingReadBack(true);
              GSGpuFrame &frame = m_frames.writeSlot();
              frame.seq = ++m_frameSeq;
              if (!scanout.image)
@@ -736,7 +807,7 @@ index 7bb06d3..124064e 100644
                  m_frames.publish();
                  m_lastFrameWidth = m_lastFrameHeight = 0u;
                  return;
-@@ -996,42 +1243,110 @@ namespace
+@@ -996,42 +1283,129 @@ namespace
                  return;
              }
              frame.shared = false;
@@ -776,18 +847,37 @@ index 7bb06d3..124064e 100644
 +            m_pending.modeWidth = scanout.mode_width;
 +            m_pending.modeHeight = scanout.mode_height;
 +            m_pending.highResolution = scanout.high_resolution_scanout;
++            m_lastSubmit = Clock::now(); // the picture's copy was submitted with everything before it
 +            if (m_options.sync)
-+                finishPendingReadBack();
++                finishPendingReadBack(true);
++        }
++
++        // Hands the GPU the work paraLLEl-GS has recorded since the last submission (its own, or ours), if at least
++        // minSinceLast ns have passed since then. Does not end the render pass being built (paraLLEl-GS's
++        // kick_submit), so a game's long render pass is unaffected; only earlier passes, copies and uploads go.
++        void eagerSubmit(Clock::time_point now, int64_t minSinceLast)
++        {
++            if (!m_gs || std::chrono::duration_cast<std::chrono::nanoseconds>(now - m_lastSubmit).count() < minSinceLast)
++                return;
++            m_lastSubmit = now; // also when nothing was pending: the next look is after the interval again
++            if (m_gs->kick_submit())
++                ++m_stats.eagerSubmits;
 +        }
  
-+        // The picture on its way back, once its copy is done: read into the next slot and published.
-+        void finishPendingReadBack()
++        // The picture on its way back, once its copy is done: read into the next slot and published. wait = false:
++        // only if the copy is already done (a poll), else nothing happens and it stays pending.
++        void finishPendingReadBack(bool wait)
 +        {
 +            if (!m_pending.active)
 +                return;
-+            m_pending.active = false;
 +            if (m_pending.fence)
-+                m_pending.fence->wait();
++            {
++                if (wait)
++                    m_pending.fence->wait();
++                else if (!m_pending.fence->wait_timeout(0))
++                    return;
++            }
++            m_pending.active = false;
 +            const VkDeviceSize bytes = VkDeviceSize{m_pending.width} * m_pending.height * 4u;
 +            GSGpuFrame &frame = m_frames.writeSlot();
 +            frame.seq = ++m_frameSeq;
@@ -869,7 +959,7 @@ index 7bb06d3..124064e 100644
          // shown through Vulkan: the picture copied into one of four images shared with the window's own Vulkan device
          // (no read back): one the window isn't drawing from and that isn't one of the two newest pictures. It is handed
          // over in the sampling layout, released to the "external" queue family; the shared timeline semaphore reaches the
-@@ -1039,6 +1354,10 @@ namespace
+@@ -1039,6 +1413,10 @@ namespace
          bool shareFrame(GSGpuFrame &frame, Vulkan::CommandBufferHandle &cmd, const Vulkan::Image &source,
                          uint32_t width, uint32_t height)
          {
@@ -880,7 +970,7 @@ index 7bb06d3..124064e 100644
              if (!m_sharedTimeline)
              {
                  m_sharedTimeline = m_device->request_semaphore_external(VK_SEMAPHORE_TYPE_TIMELINE,
-@@ -1117,14 +1436,17 @@ namespace
+@@ -1117,14 +1495,17 @@ namespace
              m_sharedNewest[1] = m_sharedNewest[0];
              m_sharedNewest[0] = target;
              return true;
@@ -898,7 +988,7 @@ index 7bb06d3..124064e 100644
                  handle = nullptr;
              }
          }
-@@ -1234,6 +1556,9 @@ namespace
+@@ -1234,6 +1615,9 @@ namespace
          uint64_t m_cachedRead = 0u;
          uint64_t m_pendingRecordBytes = 0u;
          alignas(64) std::atomic<uint64_t> m_presentsIssued{0u};
@@ -908,7 +998,7 @@ index 7bb06d3..124064e 100644
  
          // the graphics card thread only
          alignas(64) Vulkan::Device *m_device = nullptr;
-@@ -1241,13 +1566,24 @@ namespace
+@@ -1241,13 +1625,24 @@ namespace
          bool m_quadScanout = false;
          ParallelGS::ScanoutResult m_lastScanout{};
          Vulkan::BufferHandle m_readback;
@@ -934,16 +1024,23 @@ index 7bb06d3..124064e 100644
          std::atomic<uint32_t> m_producerWaiting{0u};
          std::mutex m_progressMutex;
          std::condition_variable m_progressCv;
-@@ -1259,7 +1595,7 @@ namespace
+@@ -1259,12 +1654,14 @@ namespace
          struct Stats
          {
              Clock::time_point since{};
 -            Clock::duration idle{}, gif{}, flush{}, vsync{}, readback{};
 +            Clock::duration idle{}, gif{}, flush{}, vsync{}, readback{}, calls{};
              uint64_t gifBytes = 0, presents = 0, scanouts = 0, renderPasses = 0, primitives = 0;
++            uint64_t eagerSubmits = 0, gpuWaitNs = 0; // eager submits made; paraLLEl-GS's waits for the GPU
          };
          bool m_profile = false;
-@@ -1273,6 +1609,10 @@ namespace
+         Stats m_stats; // the graphics card thread only
+         Stats m_statusBase;
++        Clock::time_point m_lastSubmit{}; // the graphics card thread only: when the GPU was last handed work
+         Clock::time_point m_statusSince{};
+ 
+         // live settings: written by any thread, taken at a presentation
+@@ -1273,6 +1670,10 @@ namespace
          std::atomic<bool> m_wantFsr{true};
          std::atomic<float> m_wantSharpness{0.5f};
          std::atomic<uint64_t> m_outputSize{0u};
@@ -954,7 +1051,7 @@ index 7bb06d3..124064e 100644
          // the graphics card thread only
          uint32_t m_currentSsaa = 0u;
          bool m_lastHires = false;
-@@ -1301,7 +1641,7 @@ namespace
+@@ -1301,7 +1702,7 @@ namespace
      };
  }
  

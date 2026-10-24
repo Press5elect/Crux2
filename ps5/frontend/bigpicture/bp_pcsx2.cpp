@@ -5174,7 +5174,7 @@ bool FullscreenUI::Initialize()
 	ImGuiFullscreen::SetTheme("Dark");
 	ImGuiFullscreen::UpdateLayoutScale();
 	ImGuiFullscreen::UpdateFontScale();
-	if (!ImGuiFullscreen::Initialize("fullscreenui/placeholder.png"))
+	if (!ImGuiFullscreen::Initialize("fullscreenui/placeholder.svg"))
 	{
 		ImGuiFullscreen::Shutdown(true);
 		s_tried_to_initialize = true;

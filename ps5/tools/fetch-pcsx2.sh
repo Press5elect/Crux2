@@ -18,7 +18,7 @@ ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
 vendor="$root/vendor/pcsx2"
 patch="$ps5/patches/pcsx2/ps5.patch"
-revision=ab0b401f99729ef8da3009f9af28d8ee96e0e7ba
+revision=5675313c6db3390fdc38f75a658ddfc68498103e
 url=https://github.com/PCSX2/pcsx2
 
 if [[ ${1:-} == --export ]]; then

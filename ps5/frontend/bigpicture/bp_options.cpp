@@ -935,8 +935,8 @@ Page graphicsPage(int layer, bool forGame)
 	// ---- Advanced
 	rows.push_back(heading("ADVANCED", ADV));
 	rows.push_back(list("Hardware download mode", "How the emulation waits for pictures a game reads back. With paraLLEl-GS, a read waits for everything "
-		"drawn before it: \"Unsynchronised\" answers zeros where the card has not finished, \"Off\" reads nothing; both faster, both wrong where the "
-		"game uses what it read", GS, "HWDownloadMode", 0,
+		"drawn before it: \"Unsynchronised\" does not wait for the card and answers zeros where it has not finished (a game that reads what it "
+		"has just drawn gets zeros every time), \"Off\" reads nothing; both faster, both wrong where the game uses what it read", GS, "HWDownloadMode", 0,
 		{"Accurate", "Accurate, always whole (fewer readbacks)", "No readbacks (the threads run in step)", "Unsynchronised (not the same twice)",
 			"Off (the game reads nothing back)"},
 		0, ADV));

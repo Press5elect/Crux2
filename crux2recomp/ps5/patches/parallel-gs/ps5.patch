@@ -1,0 +1,128 @@
+Crux2 Recomp's changes to paraLLEl-GS and Granite for the PS5 (https://github.com/Arntzen-Software/parallel-gs.git cc6184af7e0c03da603045ca371ffa5dae9b0655,
+https://github.com/Themaister/Granite.git 16e7395f6a4858c1783dbf6f521f90b9d5f82ac5). Copyright (C) 2026 Press5elect; under the licences of the
+files they change (paraLLEl-GS: LGPL-3.0-or-later, Granite: MIT).
+
+diff --git a/gs/gs_interface.cpp b/gs/gs_interface.cpp
+index db519b3..6b8ee4e 100644
+--- a/gs/gs_interface.cpp
++++ b/gs/gs_interface.cpp
+@@ -3168,6 +3168,16 @@ void GSInterface::flush_pending_transfer(bool keep_alive)
+ 	}
+ }
+ 
++bool GSInterface::kick_submit()
++{
++	return renderer.submit_pending_work();
++}
++
++uint64_t GSInterface::consume_host_wait_ns()
++{
++	return renderer.consume_host_wait_ns();
++}
++
+ void GSInterface::read_transfer_fifo(void *data, uint32_t num_128b_words)
+ {
+ 	uint32_t to_copy = std::min<uint32_t>(num_128b_words, transfer_state.fifo_readback_128b_size - transfer_state.fifo_readback_128b_offset);
+diff --git a/gs/gs_interface.hpp b/gs/gs_interface.hpp
+index 70adbe0..c2ec394 100644
+--- a/gs/gs_interface.hpp
++++ b/gs/gs_interface.hpp
+@@ -312,6 +312,12 @@ public:
+ 
+ 	void read_transfer_fifo(void *data, uint32_t num_128b_words);
+ 
++	// Crux2: submit the work recorded so far to the GPU without ending the current render pass (see
++	// GSRenderer::submit_pending_work). For a renderer thread that has nothing else to do.
++	bool kick_submit();
++	// Crux2: nanoseconds the GS thread stood waiting for the GPU (host reads, pressure) since the last call.
++	uint64_t consume_host_wait_ns();
++
+ private:
+ 	friend class PageTracker;
+ 	void flush(PageTrackerFlushFlags flags, FlushReason reason);
+diff --git a/gs/gs_renderer.cpp b/gs/gs_renderer.cpp
+index b6ebdac..ad43d31 100644
+--- a/gs/gs_renderer.cpp
++++ b/gs/gs_renderer.cpp
+@@ -19,6 +19,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <climits>
++#include <chrono>
+ 
+ #if defined(__clang__)
+ #pragma clang diagnostic ignored "-Wformat-security"
+@@ -1081,10 +1082,17 @@ void GSRenderer::wait_timeline(uint64_t value)
+ 	if (enable_timestamps && device)
+ 		start_ts = device->write_calibrated_timestamp();
+ 
+-	std::unique_lock<std::mutex> holder{timeline_lock};
+-	timeline_cond.wait(holder, [this, value]() {
+-		return timeline_value.load(std::memory_order_relaxed) >= value;
+-	});
++	if (timeline_value.load(std::memory_order_acquire) < value)
++	{
++		// Crux2: only a real wait is timed (a clock read per call would be noise).
++		const auto start = std::chrono::steady_clock::now();
++		std::unique_lock<std::mutex> holder{timeline_lock};
++		timeline_cond.wait(holder, [this, value]() {
++			return timeline_value.load(std::memory_order_relaxed) >= value;
++		});
++		host_wait_ns += uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
++				std::chrono::steady_clock::now() - start).count());
++	}
+ 
+ 	if (enable_timestamps && device)
+ 	{
+@@ -1105,6 +1113,25 @@ uint64_t GSRenderer::query_timeline(const Vulkan::SemaphoreHolder &sem) const
+ 		return value;
+ }
+ 
++uint64_t GSRenderer::consume_host_wait_ns()
++{
++	uint64_t ns = host_wait_ns;
++	host_wait_ns = 0;
++	return ns;
++}
++
++bool GSRenderer::submit_pending_work()
++{
++	if (!device)
++		return false;
++	// Only command buffers count: the render pass being built (vertices in the attribute scratch, pending
++	// texture uploads) is untouched, flush_submit() only flushes what is before the current reservation.
++	if (!direct_cmd && !async_transfer_cmd && !triangle_setup_cmd && !clear_cmd && !heuristic_cmd && !binning_cmd)
++		return false;
++	flush_submit(0);
++	return true;
++}
++
+ uint64_t GSRenderer::query_timeline()
+ {
+ 	// Actually spam-calling vkGetSemaphoreValue a ton of times has serious CPU overhead.
+diff --git a/gs/gs_renderer.hpp b/gs/gs_renderer.hpp
+index 938642e..46f6948 100644
+--- a/gs/gs_renderer.hpp
++++ b/gs/gs_renderer.hpp
+@@ -300,6 +300,13 @@ public:
+ 	// Query current timeline value.
+ 	uint64_t query_timeline();
+ 
++	// Crux2: hands the GPU everything recorded so far (earlier render passes, copies, uploads) without ending
++	// the render pass being built and without signalling the timeline, so that a later host read waits on
++	// less. Returns false when nothing was recorded since the last submission.
++	bool submit_pending_work();
++	// Crux2: how long wait_timeline() has stood waiting for the GPU since the last call (nanoseconds).
++	uint64_t consume_host_wait_ns();
++
+ 	// Cache management mostly on GPUs that need it.
+ 	void *begin_host_vram_access();
+ 	void end_host_write_vram_access();
+@@ -341,6 +348,7 @@ private:
+ 	std::thread timeline_thread;
+ 	uint64_t last_submitted_timeline = 0;
+ 	std::atomic<uint64_t> timeline_value;
++	uint64_t host_wait_ns = 0; // Crux2: see consume_host_wait_ns()
+ 	std::condition_variable timeline_cond;
+ 	std::mutex timeline_lock;
+ 

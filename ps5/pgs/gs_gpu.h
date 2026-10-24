@@ -145,6 +145,11 @@ struct GSGpuStatus
     // reads every frame serialise the emulator and the graphics card: that time is the cost.
     float readbacksPerFrame = 0.0f;
     float readbackWaitMs = 0.0f;
+    // Of readbackWaitMs, how long a frame the graphics card thread itself stood waiting for the GPU inside
+    // paraLLEl-GS (its host reads): the rest of readbackWaitMs is the ring being drained to the read.
+    float gpuWaitMs = 0.0f;
+    // Submissions the graphics card thread made on its own (eager submits while it had nothing to do), a frame.
+    float eagerSubmitsPerFrame = 0.0f;
     // How long a frame the emulator's thread waited for room in the ring (the renderer thread behind).
     float ringWaitMs = 0.0f;
 };

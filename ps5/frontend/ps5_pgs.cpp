@@ -196,9 +196,11 @@ namespace PS5PGS
 			want.sharp2D = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSSharp2D", false);
 			want.backbufferPromotion = false;
 			// Hardware download mode "Unsynchronised": a read of GS memory the graphics card has not finished
-			// drawing answers zeros instead of waiting for it (paraLLEl-GS's unsynced read-backs). "Off" is
-			// answered before the read reaches here (MTGS::InitAndReadFIFO); the other modes wait and are right.
-			want.unsyncedReadbacks = GSConfig.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized;
+			// drawing answers zeros instead of waiting for the card (paraLLEl-GS's unsynced read-backs; the read
+			// still comes in order). "Off": the game's read is answered with zeros before it reaches here
+			// (MTGS::InitAndReadFIFO), and paraLLEl-GS takes the unsynced path too, so the transfer nobody reads
+			// costs it no wait for the card. The other modes wait and are right.
+			want.unsyncedReadbacks = GSConfig.HWDownloadMode >= GSHardwareDownloadMode::Unsynchronized;
 			if (s_scanout_any && std::memcmp(&want, &s_scanout_sent, sizeof(want)) == 0)
 				return;
 			s_gs->setScanout(want);
@@ -390,11 +392,12 @@ namespace PS5PGS
 						   "{:.0f} presents a second, {:.1f} MB/s of GS input, {:.0f} render passes a second, picture {}x{}; the graphics "
 						   "card {:.1f} ms a frame (setup {:.1f}, shading {:.1f}, uploads {:.1f}, scan-out {:.1f}) at {} samples; the GS "
 						   "thread waited {:.1f} ms a frame for it, {:.1f} ms a frame for room in its ring, and {:.2f} reads of GS memory "
-						   "a frame cost {:.1f} ms a frame{}",
+						   "a frame cost {:.1f} ms a frame ({:.1f} of it the card finishing what the read needs; {:.1f} early submissions "
+						   "a frame){}",
 			st.busyPercent, st.gifPercent, st.flushPercent, st.vsyncPercent, st.readbackPercent, st.presentsPerSecond,
 			st.gifMegabytesPerSecond, st.renderPassesPerSecond, st.pictureWidth, st.pictureHeight, st.gpuMsPerFrame, st.gpuSetupMs,
 			st.gpuShadingMs, st.gpuUploadMs, st.gpuScanoutMs, s_samples_now ? s_samples_now : st.superSampling, s_wait_ms, st.ringWaitMs,
-			st.readbacksPerFrame, st.readbackWaitMs,
+			st.readbacksPerFrame, st.readbackWaitMs, st.gpuWaitMs, st.eagerSubmitsPerFrame,
 			st.readbackWaitMs > 2.0f ? " (the game reads its picture back: Hardware download mode decides whether that waits)" : "");
 	}
 } // namespace PS5PGS

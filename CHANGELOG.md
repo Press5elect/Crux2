@@ -1,5 +1,13 @@
 # Crux2 - what changed
 
+## v1.0.8 (2026-10-24)
+
+- Changed: built on PCSX2 v2.9.142 (was v2.9.138) and Mesa 26.2.5's RADV (was 26.2.0).
+- Changed: paraLLEl-GS hands the graphics card its work as it goes, so a game's read of GS memory
+  waits for less; its thread no longer stops while a finished picture comes back.
+- Added: the boot log's paraLLEl-GS line says how much of a read's cost is the graphics card.
+- Fixed: Hardware download mode Off still made paraLLEl-GS wait for the graphics card at each read.
+
 ## v1.0.7 (2026-10-24)
 
 - Added: paraLLEl-GS counts the game's reads of GS memory and what they cost (the on-screen display's

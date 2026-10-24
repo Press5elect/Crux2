@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 ab0b401f99729ef8da3009f9af28d8ee96e0e7ba.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 5675313c6db3390fdc38f75a658ddfc68498103e.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -2671,7 +2671,7 @@ index d944b77..9b8303b 100644
  		if (m_shutdown)
  			m_shutdown();
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 670570a..80dd33d 100644
+index 88fdbb3..ccf0e1f 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
 @@ -1494,6 +1494,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
@@ -2744,7 +2744,7 @@ index 670570a..80dd33d 100644
  	FlushWrite();
  
  	if (m_index->tail > 0)
-@@ -5459,7 +5487,49 @@ __forceinline void GSState::HandleAutoFlush()
+@@ -5460,7 +5488,49 @@ __forceinline void GSState::HandleAutoFlush()
  	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
  	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
  	int tex_layer = 0;
@@ -2817,13 +2817,13 @@ index 3e0b354..a38a94c 100644
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index 710fa2a..beab4c9 100644
+index b3c8d65..1cb9771 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-@@ -1007,6 +1007,11 @@ void GSDevice::ClearCurrent()
- 	delete m_mad;
+@@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
  	delete m_target_tmp;
  	delete m_cas;
+ 	delete m_blur;
 +	delete m_fsr[0];
 +	delete m_fsr[1];
 +	m_fsr[0] = m_fsr[1] = m_fsr_of = nullptr;
@@ -2832,8 +2832,8 @@ index 710fa2a..beab4c9 100644
  
  	m_merge = nullptr;
  	m_weavebob = nullptr;
-@@ -1016,6 +1021,15 @@ void GSDevice::ClearCurrent()
- 	m_cas = nullptr;
+@@ -1022,6 +1027,15 @@ void GSDevice::ClearCurrent()
+ 	m_blur = nullptr;
  }
  
 +#ifdef __PROSPERO__
@@ -2848,8 +2848,8 @@ index 710fa2a..beab4c9 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1388,6 +1402,386 @@ void GSDevice::CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, con
- 	src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+@@ -1431,6 +1445,386 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+ 	return true;
  }
  
 +// PS5: AMD FidelityFX Super Resolution 1.0 (resources/shaders/vulkan/fsr1.glsl has the passes).
@@ -3236,10 +3236,10 @@ index 710fa2a..beab4c9 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 2ace049..a4cb944 100644
+index 421f8ea..564e6c2 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
-@@ -1485,6 +1485,8 @@ protected:
+@@ -1489,6 +1489,8 @@ protected:
  	static constexpr u32 MAX_POOLED_TEXTURES = 300;
  	static constexpr u32 MAX_TEXTURE_AGE = 10;
  	static constexpr u32 NUM_CAS_CONSTANTS = 12; // 8 plus src offset x/y, 16 byte alignment
@@ -3248,10 +3248,10 @@ index 2ace049..a4cb944 100644
  	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
  
  	WindowInfo m_window_info;
-@@ -1499,6 +1501,33 @@ protected:
- 	GSTexture* m_target_tmp = nullptr;
+@@ -1504,6 +1506,33 @@ protected:
  	GSTexture* m_current = nullptr;
  	GSTexture* m_cas = nullptr;
+ 	GSTexture* m_blur = nullptr;
 +	// PS5: FSR 1's two pictures at the size the game is shown at (EASU's, then RCAS's), and the
 +	// picture the second was made of, for a frame that is shown again while the game stands still.
 +	GSTexture* m_fsr[2] = {};
@@ -3282,9 +3282,9 @@ index 2ace049..a4cb944 100644
  	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
  	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
  	GSTexture* m_ds_as_rt_orig = nullptr; ///< Where the depth as color came from
-@@ -1519,6 +1548,28 @@ protected:
- 	/// Applies CAS and writes to the destination texture, which should be a shader writeable texture.
- 	virtual bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) = 0;
+@@ -1529,6 +1558,28 @@ protected:
+ 	/// Applies Gaussian blur and writes to the destination texture.
+ 	void DoGaussianBlur(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, GSTexture* tempTex);
  
 +	/// PS5: puts AMD's two headers in place of the #include lines of the FSR 1 shader.
 +	static bool GetFSRShaderSource(std::string* source);
@@ -3311,9 +3311,9 @@ index 2ace049..a4cb944 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1727,6 +1778,63 @@ public:
- 
+@@ -1738,6 +1789,63 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
+ 	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
 +	/// PS5: FSR 1 for a picture that is shown larger than it was drawn: `tex`, `src_rect` and
 +	/// `src_uv` become those of the enlarged picture. Left as they are when it cannot be done.
@@ -3376,7 +3376,7 @@ index 2ace049..a4cb944 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index b5c7cc6..acb01f8 100644
+index 35ab6fc..f556868 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,11 @@
@@ -3605,14 +3605,22 @@ index b5c7cc6..acb01f8 100644
 +
  	m_last_draw_n = s_n;
  	m_last_transfer_n = s_transfer_n;
- 
-@@ -667,16 +841,27 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+ 	m_background_blurred = false;
+@@ -668,18 +842,35 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  				GetVideoMode() == GSVideoMode::SDTV_480P);
  			s_last_draw_rect = draw_rect;
  
--			if (GSConfig.CASMode != GSCASMode::Disabled)
 +			const GSCASMode cas_mode = GSConfig.CASMode;
-+			if (cas_mode != GSCASMode::Disabled)
++#ifdef __PROSPERO__
++			// PS5: PCSX2's Big Picture menus (ImGui/FullscreenUI.cpp) are not built; the console's own
++			// (ps5/frontend/bigpicture) draws over the game without blurring it.
++			const float blur_scale = 0.0f;
++#else
+ 			const float blur_scale = FullscreenUI::GetBackgroundBlurScale();
++#endif
+ 			m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, true);
+-			if (!m_background_blurred && GSConfig.CASMode != GSCASMode::Disabled)
++			if (!m_background_blurred && cas_mode != GSCASMode::Disabled)
  			{
  				static bool cas_log_once = false;
  				if (g_gs_device->Features().cas_sharpening)
@@ -3637,7 +3645,7 @@ index b5c7cc6..acb01f8 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -688,6 +873,101 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -691,6 +882,102 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			}
  		}
  
@@ -3723,7 +3731,8 @@ index b5c7cc6..acb01f8 100644
 +					else
 +					{
 +						g_gs_device->PresentRect(current, src_uv, nullptr, draw_rect,
-+							s_tv_shader_indices[GSConfig.TVShader], shader_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off));
++							s_tv_shader_indices[GSConfig.TVShader], shader_time,
++							BilnIf(m_background_blurred || GSConfig.LinearPresent != GSPostBilinearMode::Off));
 +					}
 +				}
 +
@@ -3739,7 +3748,7 @@ index b5c7cc6..acb01f8 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -705,8 +985,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +996,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -3753,15 +3762,28 @@ index b5c7cc6..acb01f8 100644
  	}
  
  	// snapshot
-@@ -1000,8 +1285,19 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1292,11 @@ void GSRenderer::PresentCurrentFrame()
+ 			GetVideoMode() == GSVideoMode::SDTV_480P);
+ 		s_last_draw_rect = draw_rect;
+ 		const bool refresh_blur = !m_background_blurred;
++#ifdef __PROSPERO__
++		const float blur_scale = 0.0f; // PS5: no FullscreenUI.cpp (see VSync)
++#else
+ 		const float blur_scale = FullscreenUI::GetBackgroundBlurScale();
++#endif
+ 		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
+ 	}
+ 
+@@ -1011,9 +1307,20 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
 -			g_gs_device->PresentRect(current, src_uv, nullptr, draw_rect,
--				s_tv_shader_indices[GSConfig.TVShader], shader_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off));
+-				s_tv_shader_indices[GSConfig.TVShader], shader_time,
+-				BilnIf(m_background_blurred || GSConfig.LinearPresent != GSPostBilinearMode::Off));
 +			// PS5: a frame that FSR 1 enlarged is shown again as it was shown, not as it was drawn
 +			// (the game stands still under a menu: its picture must not turn soft).
-+			GSTexture* const enlarged = GSCASModeIsFSR(GSConfig.CASMode) ? g_gs_device->LastFSR(current, draw_rect) : nullptr;
++			GSTexture* const enlarged = (!m_background_blurred && GSCASModeIsFSR(GSConfig.CASMode)) ? g_gs_device->LastFSR(current, draw_rect) : nullptr;
 +			if (enlarged)
 +			{
 +				g_gs_device->PresentRect(enlarged, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), nullptr, draw_rect,
@@ -3770,13 +3792,14 @@ index b5c7cc6..acb01f8 100644
 +			else
 +			{
 +				g_gs_device->PresentRect(current, src_uv, nullptr, draw_rect,
-+					s_tv_shader_indices[GSConfig.TVShader], shader_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off));
++					s_tv_shader_indices[GSConfig.TVShader], shader_time,
++					BilnIf(m_background_blurred || GSConfig.LinearPresent != GSPostBilinearMode::Off));
 +			}
  		}
  
  		EndPresentFrame();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.h b/pcsx2/GS/Renderers/Common/GSRenderer.h
-index e4a428d..fee3ba4 100644
+index b9a2cc7..747d0ac 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.h
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.h
 @@ -7,6 +7,10 @@
@@ -3790,7 +3813,7 @@ index e4a428d..fee3ba4 100644
  class GSRenderer : public GSState
  {
  private:
-@@ -25,6 +29,28 @@ private:
+@@ -26,6 +30,28 @@ private:
  	u64 m_last_draw_n = 0;
  	u64 m_last_transfer_n = 0;
  
@@ -3820,10 +3843,10 @@ index e4a428d..fee3ba4 100644
  	GSVector2i m_real_size{0, 0};
  
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 49a31d7..5137af4 100644
+index 8b058e1..0ab87d8 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-@@ -7726,6 +7726,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
+@@ -7722,6 +7722,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
  	}
  }
  
@@ -3845,7 +3868,7 @@ index 49a31d7..5137af4 100644
  void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
  {
  	const GSDevice::FeatureSupport& features = g_gs_device->Features();
-@@ -7802,6 +7817,19 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+@@ -7798,6 +7813,19 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
  	// Heuristic: only activate ROV if we save at least one draw call by doing so.
  	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
  
@@ -3866,7 +3889,7 @@ index 49a31d7..5137af4 100644
  	{
  		// Not enough barriers or no feedback to activate, and ROV is not already active.
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.h b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-index 4ee9d55..960b4a8 100644
+index 6adcc67..975f4cf 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.h
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.h
 @@ -255,6 +255,12 @@ private:
@@ -4071,7 +4094,7 @@ index 77a28df..0b3229c 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index e5bba40..0401f3d 100644
+index 567d2ca..ae2c00a 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -4168,7 +4191,7 @@ index e5bba40..0401f3d 100644
  		DestroySpinResources();
  		DestroyResources();
  	}
-@@ -2887,6 +2919,16 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2889,6 +2921,16 @@ bool GSDeviceVK::CheckFeatures()
  	                 m_device_features.fragmentStoresAndAtomics &&
  	                 has_rov_storage_flags &&
  	                 !m_features.framebuffer_fetch;
@@ -4185,7 +4208,7 @@ index e5bba40..0401f3d 100644
  
  	return true;
  }
-@@ -2982,6 +3024,10 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+@@ -2984,6 +3026,10 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
  		tex = GSTextureVK::Create(usage, format, width, height, levels);
  	}
  
@@ -4196,7 +4219,7 @@ index e5bba40..0401f3d 100644
  	return tex.release();
  }
  
-@@ -4046,6 +4092,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4048,6 +4094,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -4206,7 +4229,7 @@ index e5bba40..0401f3d 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4817,6 +4866,236 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4819,6 +4868,236 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -4443,7 +4466,7 @@ index e5bba40..0401f3d 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4902,6 +5181,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4904,6 +5183,19 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -4463,7 +4486,7 @@ index e5bba40..0401f3d 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -4961,6 +5253,9 @@ void GSDeviceVK::DestroyResources()
+@@ -4963,6 +5255,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -4473,7 +4496,7 @@ index e5bba40..0401f3d 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5084,7 +5379,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5086,7 +5381,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -4520,7 +4543,7 @@ index e5bba40..0401f3d 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5093,38 +5427,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5095,38 +5429,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -4560,7 +4583,7 @@ index e5bba40..0401f3d 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5208,6 +5522,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5210,6 +5524,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	
  	if (p.IsTestingAndSamplingDepth() && UseFeedbackLoopLayout())
  		gpb.AddFlags(VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT);
@@ -4569,7 +4592,7 @@ index e5bba40..0401f3d 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5225,8 +5541,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5227,8 +5543,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -4588,7 +4611,7 @@ index e5bba40..0401f3d 100644
  	return pipeline;
  }
  
-@@ -5652,6 +5978,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5654,6 +5980,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -4598,7 +4621,7 @@ index e5bba40..0401f3d 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5674,6 +6003,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5676,6 +6005,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -4608,7 +4631,7 @@ index e5bba40..0401f3d 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5713,6 +6045,9 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5715,6 +6047,9 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -4618,7 +4641,7 @@ index e5bba40..0401f3d 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5727,6 +6062,9 @@ void GSDeviceVK::EndRenderPass()
+@@ -5729,6 +6064,9 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -4628,7 +4651,7 @@ index e5bba40..0401f3d 100644
  }
  
  void GSDeviceVK::EndPresentRenderPass()
-@@ -5734,6 +6072,9 @@ void GSDeviceVK::EndPresentRenderPass()
+@@ -5736,6 +6074,9 @@ void GSDeviceVK::EndPresentRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -4638,7 +4661,7 @@ index e5bba40..0401f3d 100644
  
  	m_is_presenting = false;
  }
-@@ -5963,6 +6304,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -5965,6 +6306,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -4651,7 +4674,7 @@ index e5bba40..0401f3d 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6698,6 +7045,10 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds)
+@@ -6755,6 +7102,10 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  	bool one_barrier, bool full_barrier)
  {
@@ -4663,7 +4686,7 @@ index e5bba40..0401f3d 100644
  	{
  		Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 3ccaf38..bab849c 100644
+index 4230238..430e0e8 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,7 @@ public:
@@ -4785,7 +4808,7 @@ index 3ccaf38..bab849c 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -773,6 +833,9 @@ private:
+@@ -774,6 +834,9 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -6555,7 +6578,7 @@ index 53abe0f..f42b94f 100644
  	if (negative_key != GenericInputBinding::Unknown)
  	{
 diff --git a/pcsx2/ImGui/ImGuiOverlays.cpp b/pcsx2/ImGui/ImGuiOverlays.cpp
-index ea07c5f..31936e7 100644
+index 03dd7fe..2085e72 100644
 --- a/pcsx2/ImGui/ImGuiOverlays.cpp
 +++ b/pcsx2/ImGui/ImGuiOverlays.cpp
 @@ -1,6 +1,10 @@
