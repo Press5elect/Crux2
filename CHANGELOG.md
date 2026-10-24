@@ -1,5 +1,14 @@
 # Crux2 - what changed
 
+## v1.0.12 (2026-10-24)
+
+- Changed: a draw that reads the picture it draws on waits for the graphics chip only when
+  something was drawn there since the last wait (light sources; a setting).
+- Changed: copies of the picture that glows and blurs read are reused while nothing was drawn
+  into them since (a setting).
+- Added: Render targets without compression (experimental setting, off).
+- Added: barriers skipped and copies reused on the on-screen Statistics and in the `slow:` lines.
+
 ## v1.0.11 (2026-10-24)
 
 - Added: Record a GS dump in the quick menu (5 seconds, to snaps/), with either renderer.

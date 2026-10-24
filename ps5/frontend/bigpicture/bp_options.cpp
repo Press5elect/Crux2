@@ -858,6 +858,19 @@ Page graphicsPage(int layer, bool forGame)
 		"A render target a glow or flare reads from itself stays in the layout that allows it, instead of being decompressed by the "
 		"graphics chip each time a draw reads it again: faster at light sources in some games. Takes effect at the next start",
 		GS, "PS5HoldFeedbackLayout", false, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Render targets without compression (experimental)",
+		"Every render target is made without the graphics chip's colour compression, so it never has to be decompressed when a "
+		"glow, flare or light cone reads it: can be faster where those effects slow a game down, but every other draw moves more "
+		"data, so it can also be slower. Compare a scene's speed with it off and on. Takes effect at the next start",
+		GS, "PS5RTNoCompression", false, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Leave out barriers with nothing to wait for",
+		"A draw that reads the picture it draws on waits for the graphics chip only when something was drawn there since the last "
+		"wait. The picture is the same; off makes every wait, as PCSX2 does. Takes effect at the next start",
+		GS, "PS5SkipRedundantBarriers", true, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Reuse copies of the picture",
+		"A copy of the picture that a glow or blur reads is used again while nothing has been drawn into it since. The picture is "
+		"the same; switch off if an effect ever looks a frame behind. Takes effect at the next start",
+		GS, "PS5ReuseRTCopies", true, Option::NextStart))));
 	rows.push_back(adv(hwAny(list("Dithering", "The fine pattern the PS2 lays over colour gradients. With paraLLEl-GS: Off and Force 32 bit "
 		"draw without it (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end), Scaled and Unscaled "
 		"as the PS2", GS, "dithering_ps2", 2,

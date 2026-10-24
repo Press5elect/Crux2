@@ -468,6 +468,21 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.12 changed
+
+Added:
+- **Render targets without compression (experimental, off; Graphics > Advanced)**: nothing is
+  ever decompressed when a glow reads the picture; every other draw moves more data.
+- **Barriers skipped and copies reused** on the on-screen Statistics and in the boot log's
+  `slow:` lines.
+
+Changed:
+- **Fewer waits at light sources**: a draw that reads the picture it draws on waits for the
+  graphics chip only when something was drawn there since the last wait (*Leave out barriers
+  with nothing to wait for*, on).
+- **Fewer copies at light sources**: a copy of the picture that a glow or blur reads is used
+  again while nothing was drawn into it since (*Reuse copies of the picture*, on).
+
 ## What v1.0.11 changed
 
 Added:

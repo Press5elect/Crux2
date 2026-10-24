@@ -196,13 +196,17 @@ namespace PS5Osd
 					Add("readbacks", count(GSPerfMon::Readbacks), "", GPU_NAME, pm.Get(GSPerfMon::Readbacks) > 0.0 ? HOT_VALUE : COOL_VALUE);
 					// Crux2's own: passes ended for a barrier on sampling the target (0 here unless
 					// framebuffer fetch is on), colour targets moved to the feedback loop layout (DCC
-					// decompressed), primitive ID DATE setups, copies of a target the draw reads.
+					// decompressed), primitive ID DATE setups, copies of a target the draw reads; then the
+					// barriers left out because nothing wrote the target since the last one, and the copies
+					// reused because their source was not written since (neither is in "barriers"/"RT copies").
 					Add("pass splits", count(GSPerfMon::BarriersExternal), "", GPU_NAME,
 						pm.Get(GSPerfMon::BarriersExternal) > 0.0 ? HOT_VALUE : COOL_VALUE);
 					Add("decompress", count(GSPerfMon::FeedbackDecompress), "", GPU_NAME,
 						pm.Get(GSPerfMon::FeedbackDecompress) > 0.0 ? HOT_VALUE : COOL_VALUE);
 					Add("DATE setup", count(GSPerfMon::DatePrimID), "", GPU_NAME, COOL_VALUE);
 					Add("RT copies", count(GSPerfMon::RTCopies), "", GPU_NAME, COOL_VALUE);
+					Add("barriers skipped", count(GSPerfMon::BarriersSkipped), "", GPU_NAME, COOL_VALUE);
+					Add("copies reused", count(GSPerfMon::RTCopiesReused), "", GPU_NAME, COOL_VALUE);
 				}
 			}
 
