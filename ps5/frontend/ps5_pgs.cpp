@@ -11,6 +11,7 @@
 #include "Config.h"
 #include "GS/GS.h"
 #include "GS/Renderers/Common/GSDevice.h"
+#include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "Host.h"
 #include "SaveState.h"
 #include "VMManager.h"
@@ -53,6 +54,24 @@ namespace PS5PGS
 		std::vector<uint32_t> s_opaque; // the picture made opaque, where the texture cannot be mapped
 		float s_picture_scale = 1.0f; // the picture's height over the game's (2 at twice the size)
 		std::vector<uint8_t> s_state; // the blob of the size asked for, kept for the save that follows
+		// Pictures shared with the graphics device ([EmuCore/GS] PS5ParallelGSSharedFrames, taken at start): paraLLEl-GS
+		// reads each picture back into host memory the GS device imports too, and the device's graphics card copies it
+		// into s_host_raw and draws it opaque into s_picture (a render target then): no copy through the processor.
+		bool s_host_frames = false;
+		bool s_host_failed = false;  // an import failed: the processor's path for the rest of the game (said once)
+		bool s_host_reset = false;   // the device was made again: what was pending on the old one is gone
+		GSTexture* s_host_raw = nullptr;
+		struct HostPending
+		{
+			int index;   // the ring buffer (GSGpuFrame::hostIndex)
+			u64 counter; // the device's fence counter of the command buffer that copies from it
+		};
+		std::vector<HostPending> s_host_pending;
+		uint32_t s_host_mask = 0;         // what paraLLEl-GS was last told is being read
+		uint64_t s_host_generation = 0;   // the ring's generation imported from (0: none)
+		bool s_host_release_pending = false;
+		uint64_t s_host_release_generation = 0;
+		u64 s_host_release_counter = 0;   // once completed, nothing of s_host_release_generation is held
 
 		uint32_t ReadSamples()
 		{
@@ -103,6 +122,11 @@ namespace PS5PGS
 			options.mappedFrames = true;
 			options.gpuTimestamps = true; // the graphics card's time a frame, for the on-screen display and automatic quality
 			options.highResolutionScanout = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSHighRes", true);
+			// (Experimental) the pictures in memory the GS device imports as well: copied by its graphics card, not here.
+			options.hostSharedFrames = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSSharedFrames", false);
+			if (options.hostSharedFrames && g_gs_device &&
+				(g_gs_device->GetRenderAPI() != RenderAPI::Vulkan || GSDeviceVK::GetInstance()->PS5HostImportAlignment() == 0))
+				options.hostSharedFrames = false;
 			options.fsr = false; // Crux2's own presentation enlarges the picture
 			options.libraryLog = false;
 			std::string why;
@@ -116,6 +140,15 @@ namespace PS5PGS
 			}
 			s_tick = 0;
 			s_last_seq = 0;
+			s_host_frames = options.hostSharedFrames;
+			s_host_failed = false;
+			s_host_reset = false;
+			s_host_pending.clear();
+			s_host_mask = 0;
+			s_host_generation = 0;
+			s_host_release_pending = false;
+			if (s_host_frames)
+				ps5px_log("paraLLEl-GS: its pictures are shared with the graphics device (copied by the graphics card)");
 			s_scanout_any = false;
 			s_samples_now = options.superSampling;
 			s_wait_seconds = 0.0;
@@ -149,7 +182,14 @@ namespace PS5PGS
 	{
 		// (The device frees its own textures; the pointer is only forgotten.)
 		s_picture = nullptr;
+		s_host_raw = nullptr;
 		s_picture_w = s_picture_h = 0;
+		// (Its imports of paraLLEl-GS's memory go with it, once its work is done; the buffers stay marked read until
+		// the next picture, on the device made again.)
+		s_host_pending.clear();
+		s_host_generation = 0;
+		s_host_release_pending = false;
+		s_host_reset = true;
 	}
 
 	void Close()
@@ -158,11 +198,17 @@ namespace PS5PGS
 			return;
 		s_active.store(false, std::memory_order_release);
 		s_stop.store(true);
+		// The GS device lets go of paraLLEl-GS's memory (its work on it done) before the renderer unmaps it.
+		if (s_host_frames && g_gs_device && g_gs_device->GetRenderAPI() == RenderAPI::Vulkan)
+			GSDeviceVK::GetInstance()->PS5ForgetHostPictures(true);
 		s_gs->wake();
 		s_gs->shutdown();
 		s_gs.reset();
 		if (s_picture && g_gs_device)
 			g_gs_device->Recycle(s_picture);
+		if (s_host_raw && g_gs_device)
+			g_gs_device->Recycle(s_host_raw);
+		s_host_frames = false;
 		DeviceGone();
 		s_state.clear();
 		s_state.shrink_to_fit();
@@ -318,10 +364,102 @@ namespace PS5PGS
 				opaque_row(s_opaque.data() + static_cast<size_t>(y) * w, src + static_cast<size_t>(y) * w);
 			s_picture->Update(GSVector4i(0, 0, static_cast<int>(w), static_cast<int>(h)), s_opaque.data(), static_cast<int>(w * 4));
 		}
+
+		// ---- pictures shared with the graphics device (s_host_frames) ----
+
+		GSDeviceVK* HostDevice()
+		{
+			// (Also after a failed import: what is pending is still polled until done.)
+			if (!s_host_frames || !g_gs_device || g_gs_device->GetRenderAPI() != RenderAPI::Vulkan)
+				return nullptr;
+			return GSDeviceVK::GetInstance();
+		}
+
+		void SendHostMask()
+		{
+			uint32_t mask = 0;
+			for (const HostPending& p : s_host_pending)
+				mask |= 1u << p.index;
+			if (mask != s_host_mask)
+			{
+				s_host_mask = mask;
+				s_gs->setHostReading(mask);
+			}
+		}
+
+		// The copies the graphics card has finished: their buffers free for paraLLEl-GS again, and an old generation
+		// let go of once the command buffer its imports were released in has completed.
+		void HostPoll(GSDeviceVK* vk)
+		{
+			if (s_host_reset)
+			{
+				s_host_reset = false;
+				s_host_pending.clear();
+				s_host_mask = ~0u; // (sent again below)
+			}
+			const u64 done = vk->PS5PollCompletedFenceCounter();
+			s_host_pending.erase(std::remove_if(s_host_pending.begin(), s_host_pending.end(),
+									 [done](const HostPending& p) { return p.counter <= done; }),
+				s_host_pending.end());
+			SendHostMask();
+			if (s_host_release_pending && done >= s_host_release_counter)
+			{
+				s_host_release_pending = false;
+				s_gs->setHostReleased(s_host_release_generation);
+			}
+		}
+
+		// The picture copied from paraLLEl-GS's memory by the graphics card, then drawn into s_picture with alpha
+		// opaque (cleared to opaque black, colour written without alpha). False: nothing recorded, the processor's
+		// path is taken.
+		bool UploadShared(GSDeviceVK* vk, const GSGpuFrame& frame)
+		{
+			if (frame.hostGeneration != s_host_generation)
+			{
+				// a new ring (larger pictures): the old one's imports let go of, and paraLLEl-GS told once that is done
+				if (s_host_generation != 0)
+				{
+					vk->PS5ForgetHostPictures(false);
+					s_host_release_generation = frame.hostGeneration - 1;
+					s_host_release_counter = vk->GetCurrentFenceCounter();
+					s_host_release_pending = true;
+				}
+				else
+					s_gs->setHostReleased(frame.hostGeneration - 1); // (nothing of an older one was imported here)
+				s_host_generation = frame.hostGeneration;
+			}
+			if (!s_host_raw || s_host_raw->GetWidth() != static_cast<int>(frame.width) ||
+				s_host_raw->GetHeight() != static_cast<int>(frame.height))
+			{
+				if (s_host_raw)
+					g_gs_device->Recycle(s_host_raw);
+				s_host_raw = g_gs_device->CreateTexture(static_cast<int>(frame.width), static_cast<int>(frame.height), 1,
+					GSTexture::Format::Color);
+				if (!s_host_raw)
+					return false;
+			}
+			// The buffer marked read before the copy is recorded (and before the next take lets paraLLEl-GS have it).
+			s_host_pending.push_back({frame.hostIndex, vk->GetCurrentFenceCounter()});
+			SendHostMask();
+			if (!vk->PS5CopyHostPicture(frame.hostPointer, frame.hostBytes, frame.hostId, s_host_raw, frame.width, frame.height))
+			{
+				s_host_pending.pop_back();
+				SendHostMask();
+				s_host_failed = true;
+				ps5px_log("paraLLEl-GS: its picture could not be imported into the graphics device; copied by the processor from now on");
+				return false;
+			}
+			g_gs_device->ClearRenderTarget(s_picture, 0xFF000000u);
+			g_gs_device->StretchRectAutoMask(s_host_raw, s_picture, true, true, true, false);
+			return true;
+		}
 	} // namespace
 
 	GSTexture* Picture()
 	{
+		GSDeviceVK* const host_vk = HostDevice();
+		if (host_vk)
+			HostPoll(host_vk);
 		if (const GSGpuFrame* frame = s_gs->takeFrame(s_last_seq); frame && g_gs_device)
 		{
 			if (frame->width == 0 || frame->height == 0 || (!frame->pixels && frame->rgba.empty()))
@@ -330,14 +468,22 @@ namespace PS5PGS
 			{
 				if (s_picture)
 					g_gs_device->Recycle(s_picture);
-				s_picture = g_gs_device->CreateTexture(static_cast<int>(frame->width), static_cast<int>(frame->height), 1,
-					GSTexture::Format::Color);
+				// (Shared pictures are drawn into it opaque: a render target then. Otherwise a texture, as always.)
+				s_picture = s_host_frames ?
+								g_gs_device->CreateRenderTarget(static_cast<int>(frame->width), static_cast<int>(frame->height),
+									GSTexture::Format::Color, false) :
+								g_gs_device->CreateTexture(static_cast<int>(frame->width), static_cast<int>(frame->height), 1,
+									GSTexture::Format::Color);
 				s_picture_w = frame->width;
 				s_picture_h = frame->height;
 				s_picture_scale = frame->modeHeight ? static_cast<float>(frame->height) / static_cast<float>(frame->modeHeight) : 1.0f;
 				ps5px_log("paraLLEl-GS: the picture is %ux%u (the game's %ux%u%s)", frame->width, frame->height, frame->modeWidth,
 					frame->modeHeight, frame->highResolution ? ", at twice the size" : "");
 			}
+			// (Shared: copied by the graphics card; else, or when that fails, by the processor as before.)
+			const bool shared = s_picture && host_vk && !s_host_failed && frame->hostPointer && UploadShared(host_vk, *frame);
+			if (shared)
+				return s_picture;
 			if (s_picture && frame->pixels)
 				Upload(*frame);
 			else if (s_picture)

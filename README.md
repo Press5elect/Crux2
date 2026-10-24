@@ -468,6 +468,30 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.10 changed
+
+Added:
+- **Statistics on the on-screen display**: with Statistics on, draws, barriers, render passes,
+  copies, uploads, read-backs and render-target copies a frame (what a scene at a light source
+  costs); GPU statistics shows the graphics card's time a frame by kind of pass.
+- **paraLLEl-GS pictures shared with the graphics device (experimental)**: its pictures reach
+  PCSX2's graphics device through shared memory instead of a copy by the processor on the GS
+  thread. Off by default; takes effect at the next start.
+
+Changed:
+- **Glow and flare draws keep their render pass** on the PS5: PCSX2 v2.9.142 ends and starts the
+  render pass around every draw that samples the screen; on this graphics chip a barrier inside the
+  pass does the same, as before.
+- **Automatic quality keeps paraLLEl-GS at 4 samples or more** while its picture is at twice the
+  size (below 4 the picture fell to the PS2's own size).
+- **NIS enlarges up to 2x and FSR 1 takes over past that**, instead of the screen's plain filter.
+
+Fixed:
+- **paraLLEl-GS dithered 32-bit frame buffers** (a fine pattern and darker glows); it dithers 16-bit
+  ones only, as the PS2 does.
+- **paraLLEl-GS blended alpha masks at polygon edges** at 4 and 8 samples, giving fringes around
+  shadows and glows; alpha now stays exact while colours stay smooth.
+
 ## What v1.0.9 changed
 
 Added:

@@ -2411,7 +2411,7 @@ index a962a74..0178070 100644
  
  SocketAdapter::~SocketAdapter()
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
-index a0b988f..2b0e8a2 100644
+index a0b988f..f320186 100644
 --- a/pcsx2/GS/GS.cpp
 +++ b/pcsx2/GS/GS.cpp
 @@ -53,6 +53,10 @@
@@ -2574,7 +2574,24 @@ index a0b988f..2b0e8a2 100644
  	if (mode == FreezeAction::Save)
  	{
  		return g_gs_renderer->Freeze(data, false);
-@@ -1027,6 +1104,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
+@@ -772,6 +849,16 @@ void GSgetStats(SmallStringBase& info)
+ 				(int)std::ceil(pm.Get(GSPerfMon::TextureCopiesROV)),
+ 				(int)std::ceil(pm.Get(GSPerfMon::TextureUploads)));
+ 		}
++#ifdef __PROSPERO__
++		// Crux2: XB render passes ended for a barrier when sampling the RT/DS, FD colour targets
++		// moved into the feedback loop layout (on RADV: DCC decompressed), DP primitive ID DATE
++		// setups, RC copies of a target the draw reads.
++		info.append_format(" | {} XB | {} FD | {} DP | {} RC",
++			(int)std::ceil(pm.Get(GSPerfMon::BarriersExternal)),
++			(int)std::ceil(pm.Get(GSPerfMon::FeedbackDecompress)),
++			(int)std::ceil(pm.Get(GSPerfMon::DatePrimID)),
++			(int)std::ceil(pm.Get(GSPerfMon::RTCopies)));
++#endif
+ 	}
+ }
+ 
+@@ -1027,6 +1114,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
  	s_fh = NULL;
  }
  
@@ -2670,6 +2687,21 @@ index d944b77..9b8303b 100644
  
  		if (m_shutdown)
  			m_shutdown();
+diff --git a/pcsx2/GS/GSPerfMon.h b/pcsx2/GS/GSPerfMon.h
+index d4defa8..65fb1d5 100644
+--- a/pcsx2/GS/GSPerfMon.h
++++ b/pcsx2/GS/GSPerfMon.h
+@@ -26,6 +26,10 @@ public:
+ 		TextureCopiesROV, // Overlaps with regular texture copies.
+ 		DrawCallsROV, // Overlaps with regular draw calls.
+ 		BarriersROV, // Overlaps with regular barriers.
++		BarriersExternal, // Render pass ended for a barrier when sampling the RT/DS (overlaps with regular barriers).
++		FeedbackDecompress, // Colour RT moved into the feedback loop layout from a compressed one.
++		DatePrimID, // Primitive ID DATE setups (an extra pass and image each).
++		RTCopies, // Copies of a target taken because the draw reads it (hazard and downscale copies).
+ 		CounterLast,
+ 
+ 		// Reused counters for HW.
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
 index 88fdbb3..ccf0e1f 100644
 --- a/pcsx2/GS/GSState.cpp
@@ -2816,6 +2848,26 @@ index 3e0b354..a38a94c 100644
  	bool m_isPackedUV_HackFlag = false;
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
+diff --git a/pcsx2/GS/GSUtil.cpp b/pcsx2/GS/GSUtil.cpp
+index ef080e6..f2c776a 100644
+--- a/pcsx2/GS/GSUtil.cpp
++++ b/pcsx2/GS/GSUtil.cpp
+@@ -190,7 +190,14 @@ const char* GSUtil::GetPerfMonCounterName(GSPerfMon::counter_t counter, bool hw)
+ 			"TextureCopies",
+ 			"TextureUploads",
+ 			"Barriers",
+-			"RenderPasses"
++			"RenderPasses",
++			"TextureCopiesROV",
++			"DrawCallsROV",
++			"BarriersROV",
++			"BarriersExternal",
++			"FeedbackDecompress",
++			"DatePrimID",
++			"RTCopies"
+ 		};
+ 		return counter < std::size(names_hw) ? names_hw[counter] : "";
+ 	}
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 index b3c8d65..1cb9771 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
@@ -3236,7 +3288,7 @@ index b3c8d65..1cb9771 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8ea..564e6c2 100644
+index 421f8ea..e0f3423 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -3311,7 +3363,7 @@ index 421f8ea..564e6c2 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1738,6 +1789,63 @@ public:
+@@ -1738,6 +1789,73 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -3331,6 +3383,16 @@ index 421f8ea..564e6c2 100644
 +	/// pass, as one line for the boot log's test windows ("" when GPU timing is off or nothing was
 +	/// measured). Read on the GS thread.
 +	virtual std::string PS5TakeGpuWindow() { return {}; }
++
++	/// PS5: the same figures for the overlay, milliseconds a frame averaged over the last window of
++	/// about 30 frames; reading them does not reset PS5TakeGpuWindow's sums. Read on the GS thread.
++	struct PS5GpuSections
++	{
++		bool valid = false;
++		double total_ms = 0, ordered_ms = 0, barrier_ms = 0, draw_ms = 0, conversion_ms = 0, present_ms = 0, outside_ms = 0;
++		double passes = 0; // render passes timed a frame
++	};
++	virtual bool PS5GetGpuSections(PS5GpuSections& out) { return false; }
 +
 +	/// PS5: paraLLEl-GS's picture as the merged picture (copied: the device owns what it shows).
 +	void PS5ShowPicture(GSTexture* picture);
@@ -3376,7 +3438,7 @@ index 421f8ea..564e6c2 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc..f556868 100644
+index 35ab6fc..4af3475 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,11 @@
@@ -3606,7 +3668,7 @@ index 35ab6fc..f556868 100644
  	m_last_draw_n = s_n;
  	m_last_transfer_n = s_transfer_n;
  	m_background_blurred = false;
-@@ -668,18 +842,35 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -668,18 +842,43 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  				GetVideoMode() == GSVideoMode::SDTV_480P);
  			s_last_draw_rect = draw_rect;
  
@@ -3636,7 +3698,15 @@ index 35ab6fc..f556868 100644
  					                           (current->GetWidth() > g_gs_device->GetWindowWidth() &&
  					                            current->GetHeight() > g_gs_device->GetWindowHeight()));
 -					g_gs_device->CAS(current, src_rect, src_uv, draw_rect, sharpen_only);
++#ifdef __PROSPERO__
++					// NIS enlarges up to 2x; further (a paraLLEl-GS picture of 1280x896 to a 4K screen is about 2.4x)
++					// FSR 1 does it, instead of the screen's bilinear filter.
++					const bool nis_too_far = (draw_rect.z - draw_rect.x) > 2.0f * static_cast<float>(src_rect.width()) ||
++											 (draw_rect.w - draw_rect.y) > 2.0f * static_cast<float>(src_rect.height());
++					if ((fsr || (cas_mode == GSCASMode::NIS && nis_too_far)) && enlarged)
++#else
 +					if (fsr && enlarged)
++#endif
 +						g_gs_device->FSR(current, src_rect, src_uv, draw_rect);
 +					else if (cas_mode == GSCASMode::NIS && enlarged)
 +						g_gs_device->NIS(current, src_rect, src_uv, draw_rect);
@@ -3645,7 +3715,7 @@ index 35ab6fc..f556868 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -691,6 +882,102 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -691,6 +890,102 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			}
  		}
  
@@ -3748,7 +3818,7 @@ index 35ab6fc..f556868 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -709,8 +996,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +1004,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -3762,7 +3832,7 @@ index 35ab6fc..f556868 100644
  	}
  
  	// snapshot
-@@ -1000,7 +1292,11 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1300,11 @@ void GSRenderer::PresentCurrentFrame()
  			GetVideoMode() == GSVideoMode::SDTV_480P);
  		s_last_draw_rect = draw_rect;
  		const bool refresh_blur = !m_background_blurred;
@@ -3774,7 +3844,7 @@ index 35ab6fc..f556868 100644
  		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
  	}
  
-@@ -1011,9 +1307,20 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1011,9 +1315,20 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
@@ -3843,7 +3913,7 @@ index b9a2cc7..747d0ac 100644
  	GSVector2i m_real_size{0, 0};
  
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 8b058e1..0ab87d8 100644
+index 8b058e1..4e0e1e4 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -7722,6 +7722,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
@@ -3888,6 +3958,23 @@ index 8b058e1..0ab87d8 100644
  	if (!color_is_rov && !depth_is_rov && !activate)
  	{
  		// Not enough barriers or no feedback to activate, and ROV is not already active.
+@@ -8786,6 +8814,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+ 		return;
+ 	}
+ 
++	g_perfmon.Put(GSPerfMon::RTCopies, 1);
++
+ 	if (m_downscale_source)
+ 	{
+ 		// Can't use box filtering on depth (yet), or fractional scales.
+@@ -11213,6 +11243,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
+ 			const GSVector4i copy_rect = config.drawarea.rintersect(src->GetRect());
+ 			g_gs_device->CopyRect(src, copy, copy_rect - copy_rect.xyxy(), copy_rect.x, copy_rect.y);
+ 			config.tex = copy;
++			g_perfmon.Put(GSPerfMon::RTCopies, 1);
+ 		}
+ 	}
+ 
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.h b/pcsx2/GS/Renderers/HW/GSRendererHW.h
 index 6adcc67..975f4cf 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.h
@@ -4094,7 +4181,7 @@ index 77a28df..0b3229c 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 567d2ca..ae2c00a 100644
+index 567d2ca..0172633 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -4117,20 +4204,25 @@ index 567d2ca..ae2c00a 100644
  	// VK_EXT_debug_utils
  	if (enable_debug_utils && !SupportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false))
  		Console.Warning("VK: Debug report requested, but extension is not available.");
-@@ -474,6 +480,12 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
+@@ -474,6 +480,17 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
  	m_optional_extensions.vk_ext_rasterization_order_attachment_access =
  		SupportsExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false);
  	m_optional_extensions.vk_ext_fragment_shader_interlock = SupportsExtension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, false);
 +#ifdef __PROSPERO__
 +	m_optional_extensions.vk_ext_image_compression_control =
 +		SupportsExtension(VK_EXT_IMAGE_COMPRESSION_CONTROL_EXTENSION_NAME, false);
++	// PS5: paraLLEl-GS's pictures imported from its host memory and copied on the graphics card (the driver's
++	// userptr import: anonymous memory given GPU access). Needs proper testing on a console.
++	m_optional_extensions.vk_ext_external_memory_host =
++		SupportsExtension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME, false);
 +#else
 +	m_optional_extensions.vk_ext_image_compression_control = false;
++	m_optional_extensions.vk_ext_external_memory_host = false;
 +#endif
  	m_optional_extensions.vk_ext_attachment_feedback_loop_layout =
  		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
  	m_optional_extensions.vk_ext_memory_budget = SupportsExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
-@@ -1041,6 +1053,9 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
+@@ -1041,6 +1058,9 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
  			m_gpu_timing_supported = false;
  			return false;
  		}
@@ -4140,7 +4232,7 @@ index 567d2ca..ae2c00a 100644
  	}
  
  	if (m_gpu_pipeline_statistics_supported)
-@@ -1210,12 +1225,18 @@ void GSDeviceVK::StartGPUTiming(u32 index)
+@@ -1210,12 +1230,18 @@ void GSDeviceVK::StartGPUTiming(u32 index)
  			resources.command_buffers[1], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, m_timestamp_query_pool, index * 2);
  		resources.timestamp_query_state = QueryState::Querying;
  	}
@@ -4159,7 +4251,7 @@ index 567d2ca..ae2c00a 100644
  	const bool wants_timestamp = m_gpu_timing_enabled || m_spin_timer;
  
  	if (wants_timestamp && resources.timestamp_query_state == QueryState::Querying)
-@@ -1229,6 +1250,9 @@ void GSDeviceVK::EndGPUTiming(u32 index)
+@@ -1229,6 +1255,9 @@ void GSDeviceVK::EndGPUTiming(u32 index)
  void GSDeviceVK::ReadGPUTiming(u32 index)
  {
  	FrameResources& resources = m_frame_resources[index];
@@ -4169,7 +4261,7 @@ index 567d2ca..ae2c00a 100644
  
  	const bool wants_timestamps = m_gpu_timing_enabled || resources.spin_id >= 0;
  
-@@ -2269,6 +2293,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
+@@ -2269,6 +2298,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
  	if (!CompileCASPipelines())
  		return false;
  
@@ -4180,7 +4272,7 @@ index 567d2ca..ae2c00a 100644
  	if (!CompileImGuiPipeline())
  		return false;
  
-@@ -2293,6 +2321,10 @@ void GSDeviceVK::Destroy()
+@@ -2293,6 +2326,10 @@ void GSDeviceVK::Destroy()
  
  	if (m_device != VK_NULL_HANDLE)
  	{
@@ -4191,7 +4283,7 @@ index 567d2ca..ae2c00a 100644
  		DestroySpinResources();
  		DestroyResources();
  	}
-@@ -2889,6 +2921,16 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2889,6 +2926,20 @@ bool GSDeviceVK::CheckFeatures()
  	                 m_device_features.fragmentStoresAndAtomics &&
  	                 has_rov_storage_flags &&
  	                 !m_features.framebuffer_fetch;
@@ -4203,12 +4295,16 @@ index 567d2ca..ae2c00a 100644
 +			m_features.rov ? "available" : "not available", m_optional_extensions.vk_ext_fragment_shader_interlock ? "yes" : "no",
 +			m_device_features.fragmentStoresAndAtomics ? "yes" : "no", has_rov_storage_flags ? "yes" : "no",
 +			m_features.rov ? (GSConfig.HWROV ? ", switched on" : ", switched off (Settings > Graphics)") : "");
++		ps5px_log("graphics: features: texture_barrier %d, framebuffer_fetch %d, feedback loop layout %d, primitive_id %d, "
++				  "depth_feedback %d, rov %d",
++			m_features.texture_barrier ? 1 : 0, m_features.framebuffer_fetch ? 1 : 0, UseFeedbackLoopLayout() ? 1 : 0,
++			m_features.primitive_id ? 1 : 0, m_features.depth_feedback ? 1 : 0, m_features.rov ? 1 : 0);
 +	}
 +#endif
  
  	return true;
  }
-@@ -2984,6 +3026,10 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+@@ -2984,6 +3035,10 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
  		tex = GSTextureVK::Create(usage, format, width, height, levels);
  	}
  
@@ -4219,7 +4315,7 @@ index 567d2ca..ae2c00a 100644
  	return tex.release();
  }
  
-@@ -4048,6 +4094,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4048,6 +4103,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -4229,7 +4325,7 @@ index 567d2ca..ae2c00a 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4819,6 +4868,236 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4819,6 +4877,236 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -4466,7 +4562,7 @@ index 567d2ca..ae2c00a 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4904,6 +5183,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4904,6 +5192,19 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -4486,7 +4582,7 @@ index 567d2ca..ae2c00a 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -4963,6 +5255,9 @@ void GSDeviceVK::DestroyResources()
+@@ -4963,6 +5264,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -4496,7 +4592,7 @@ index 567d2ca..ae2c00a 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5086,7 +5381,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5086,7 +5390,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -4543,7 +4639,7 @@ index 567d2ca..ae2c00a 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5095,38 +5429,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5095,38 +5438,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -4583,7 +4679,7 @@ index 567d2ca..ae2c00a 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5210,6 +5524,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5210,6 +5533,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	
  	if (p.IsTestingAndSamplingDepth() && UseFeedbackLoopLayout())
  		gpb.AddFlags(VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT);
@@ -4592,7 +4688,7 @@ index 567d2ca..ae2c00a 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5227,8 +5543,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5227,8 +5552,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -4611,7 +4707,7 @@ index 567d2ca..ae2c00a 100644
  	return pipeline;
  }
  
-@@ -5654,6 +5980,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5654,6 +5989,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -4621,7 +4717,7 @@ index 567d2ca..ae2c00a 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5676,6 +6005,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5676,6 +6014,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -4631,7 +4727,7 @@ index 567d2ca..ae2c00a 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5715,6 +6047,9 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5715,6 +6056,9 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -4641,7 +4737,7 @@ index 567d2ca..ae2c00a 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5729,6 +6064,9 @@ void GSDeviceVK::EndRenderPass()
+@@ -5729,6 +6073,9 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -4651,7 +4747,7 @@ index 567d2ca..ae2c00a 100644
  }
  
  void GSDeviceVK::EndPresentRenderPass()
-@@ -5736,6 +6074,9 @@ void GSDeviceVK::EndPresentRenderPass()
+@@ -5736,6 +6083,9 @@ void GSDeviceVK::EndPresentRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -4661,7 +4757,7 @@ index 567d2ca..ae2c00a 100644
  
  	m_is_presenting = false;
  }
-@@ -5965,6 +6306,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -5965,6 +6315,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -4674,7 +4770,65 @@ index 567d2ca..ae2c00a 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6755,6 +7102,10 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6030,6 +6386,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
+ {
+ 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
++	g_perfmon.Put(GSPerfMon::DatePrimID, 1);
+ 
+ 	// How this is done:
+ 	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
+@@ -6128,6 +6485,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+ 	}
+ 
+ 	g_perfmon.Put(GSPerfMon::Barriers, 1);
++	g_perfmon.Put(GSPerfMon::BarriersExternal, 1);
+ 
+ 	// If the current layout is not feedback loop, just do a transition.
+ 	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
+@@ -6149,7 +6507,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+ 
+ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+ {
++#ifdef __PROSPERO__
++	// Crux2: without framebuffer fetch (RADV has no VK_EXT_rasterization_order_attachment_access),
++	// skip upstream's render pass split (0f85823) and do what PCSX2 did before it: the RT/DS stays
++	// bound in the feedback loop layout (OMSetRenderTargets moves it there and marks the texture
++	// descriptor dirty), and the barrier comes inside the pass (SendHWDraw's FeedbackBarrier for
++	// require_one/full_barrier). The split only drops VK_DEPENDENCY_BY_REGION_BIT, which RADV never
++	// reads (it flushes and waits the same either way), so on this driver the in-pass barrier does
++	// the same work without ending and starting a render pass. A read-only depth sample with no
++	// barrier requested gets one depth barrier in the pass (below), which the split also gave.
++	// Needs proper testing on games that sample their RT/DS.
++	const bool ps5_skip_external_barrier = !m_features.framebuffer_fetch;
++	const bool ps5_depth_sample_barrier = ps5_skip_external_barrier && config.tex && config.ds == config.tex &&
++		config.rt != config.tex && !config.ps.tex_is_fb && !config.require_one_barrier && !config.require_full_barrier &&
++		m_features.texture_barrier;
++	if (!ps5_skip_external_barrier && config.tex && ((config.rt == config.tex) || (config.ds == config.tex)) && !config.ps.tex_is_fb)
++#else
+ 	if (config.tex && ((config.rt == config.tex) || (config.ds == config.tex)) && !config.ps.tex_is_fb)
++#endif
+ 	{
+ 		if (config.rt == config.tex)
+ 		{
+@@ -6540,6 +6915,16 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+ 	if (!date_image || colclip_rt)
+ 		UploadHWDrawVerticesAndIndices(config);
+ 
++#ifdef __PROSPERO__
++	// Crux2: the depth barrier for a read-only depth sample (see the top of RenderHW). The pass was
++	// made with the depth feedback self-dependency (IsTestingAndSamplingDepth), so it is allowed here.
++	if (ps5_depth_sample_barrier && draw_ds && draw_ds == config.ds && pipe.IsTestingAndSamplingDepth() && InRenderPass())
++	{
++		g_perfmon.Put(GSPerfMon::Barriers, 1);
++		FeedbackBarrier(nullptr, draw_ds, true);
++	}
++#endif
++
+ 	// now we can do the actual draw
+ 	if (BindDrawPipeline(pipe))
+ 		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
+@@ -6755,6 +7140,10 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  	bool one_barrier, bool full_barrier)
  {
@@ -4686,18 +4840,19 @@ index 567d2ca..ae2c00a 100644
  	{
  		Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 4230238..430e0e8 100644
+index 4230238..dad3804 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-@@ -48,6 +48,7 @@ public:
+@@ -48,6 +48,8 @@ public:
  		bool vk_khr_synchronization2 : 1;
  		bool vk_ext_attachment_feedback_loop_layout : 1;
  		bool vk_ext_fragment_shader_interlock : 1;
 +		bool vk_ext_image_compression_control : 1; // PS5: whether a render target is compressed is asked
++		bool vk_ext_external_memory_host : 1; // PS5: paraLLEl-GS's pictures copied from its host memory (PS5CopyHostPicture)
  	};
  
  	// Global state accessors
-@@ -384,9 +385,13 @@ public:
+@@ -384,9 +386,13 @@ public:
  	{
  		NUM_TFX_DYNAMIC_OFFSETS = 2,
  		NUM_UTILITY_SAMPLERS = 1,
@@ -4711,7 +4866,7 @@ index 4230238..430e0e8 100644
  	};
  	enum TFX_DESCRIPTOR_SET : u32
  	{
-@@ -472,6 +477,40 @@ private:
+@@ -472,6 +478,40 @@ private:
  	VkRenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
  
  	std::array<VkPipeline, NUM_CAS_PIPELINES> m_cas_pipelines = {};
@@ -4752,7 +4907,7 @@ index 4230238..430e0e8 100644
  	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
  
  	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
-@@ -492,6 +531,16 @@ private:
+@@ -492,6 +532,16 @@ private:
  
  	bool DoCAS(
  		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
@@ -4769,7 +4924,7 @@ index 4230238..430e0e8 100644
  
  	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
  	void ClearSamplerCache() final;
-@@ -499,6 +548,9 @@ private:
+@@ -499,6 +549,9 @@ private:
  	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
  	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
  	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
@@ -4779,7 +4934,7 @@ index 4230238..430e0e8 100644
  	VkPipeline GetTFXPipeline(const PipelineSelector& p);
  
  	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
-@@ -517,6 +569,8 @@ private:
+@@ -517,6 +570,8 @@ private:
  	bool CompileMergePipelines();
  	bool CompilePostProcessingPipelines();
  	bool CompileCASPipelines();
@@ -4788,7 +4943,7 @@ index 4230238..430e0e8 100644
  
  	bool CompileImGuiPipeline();
  	void RenderImGui();
-@@ -531,6 +585,9 @@ protected:
+@@ -531,6 +586,9 @@ protected:
  	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
  		PresentShader shader, Filter filter) override;
  public:
@@ -4798,17 +4953,33 @@ index 4230238..430e0e8 100644
  	GSDeviceVK();
  	~GSDeviceVK() override;
  
-@@ -572,6 +629,9 @@ public:
+@@ -572,6 +630,25 @@ public:
  	bool IsPresenting() const;
  
  	bool SetGPUTimingEnabled(bool enabled) override;
 +#ifdef __PROSPERO__
 +	std::string PS5TakeGpuWindow() override;
++	bool PS5GetGpuSections(PS5GpuSections& out) override;
++
++	// PS5: pictures another Vulkan device wrote into host memory (paraLLEl-GS's, ps5/frontend/ps5_pgs.cpp), copied
++	// into a texture on the graphics card instead of through the processor (GSDeviceVK_PS5.cpp). The memory is
++	// imported once (VK_EXT_external_memory_host) and kept by its allocation id until PS5ForgetHostPictures.
++	/// Whether the device can import host memory, and the alignment a pointer and size need (0: it cannot).
++	size_t PS5HostImportAlignment();
++	/// Records the copy of a width x height R8G8B8A8 picture at `host` (`bytes` imported, page aligned) into dst
++	/// (level 0, left in the shader-read layout) in this frame's command buffers; done once the fence counter
++	/// current now has completed. False when the memory cannot be imported (nothing recorded).
++	bool PS5CopyHostPicture(const void* host, size_t bytes, u64 id, GSTexture* dst, u32 width, u32 height);
++	/// Every import let go of: after the current command buffer has completed (deferred), or at once after
++	/// waiting for the graphics card (now).
++	void PS5ForgetHostPictures(bool now);
++	/// The completed fence counter, after looking which command buffers the graphics card has finished.
++	u64 PS5PollCompletedFenceCounter();
 +#endif
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -774,6 +834,9 @@ private:
+@@ -774,6 +851,9 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -4820,10 +4991,10 @@ index 4230238..430e0e8 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..83ff9ad
+index 0000000..c4c8fcd
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,834 @@
+@@ -0,0 +1,1067 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -4878,6 +5049,20 @@ index 0000000..83ff9ad
 +	std::unique_ptr<PS5SlangRunner::Runner> chain;
 +	std::string chain_path; // what is loaded ("" nothing)
 +	std::string chain_failed; // what failed to load, not tried again until the setting changes
++
++	// paraLLEl-GS's pictures in its host memory, imported (PS5CopyHostPicture), by allocation id.
++	struct HostImport
++	{
++		const void* host = nullptr;
++		size_t bytes = 0;
++		u64 id = 0;
++		VkBuffer buffer = VK_NULL_HANDLE;
++		VkDeviceMemory memory = VK_NULL_HANDLE;
++	};
++	std::vector<HostImport> host_imports;
++	bool host_checked = false;
++	size_t host_align = 0; // 0: no import
++	PFN_vkGetMemoryHostPointerPropertiesEXT host_pointer_properties = nullptr;
 +};
 +
 +GSDeviceVK::PS5Tools& GSDeviceVK::Tools()
@@ -4892,6 +5077,11 @@ index 0000000..83ff9ad
 +	if (!m_ps5_tools)
 +		return;
 +	vkDeviceWaitIdle(m_device);
++	for (const PS5Tools::HostImport& imp : m_ps5_tools->host_imports)
++	{
++		vkDestroyBuffer(m_device, imp.buffer, nullptr);
++		vkFreeMemory(m_device, imp.memory, nullptr);
++	}
 +	m_ps5_tools->chain.reset();
 +	m_ps5_tools->flow.Destroy();
 +	m_ps5_tools->nis.Destroy();
@@ -4908,6 +5098,157 @@ index 0000000..83ff9ad
 +	// Three command buffers, each with up to two pictures shown, and slack.
 +	d.framesInFlight = GSDeviceVK::NUM_COMMAND_BUFFERS * 4;
 +	return d;
++}
++
++// ---- paraLLEl-GS's pictures from its host memory --------------------------------------------------------------
++// paraLLEl-GS (ps5/frontend/ps5_pgs.cpp) reads each picture back into anonymous memory it imported into its own
++// device; the same memory is imported here (the driver gives it GPU access at the CPU's address) and the picture
++// copied into a texture by the graphics card: no copy through the processor, and none through the upload buffer.
++// Both devices' work goes through the console's one GPU queue in order. needs proper testing on a console
++
++size_t GSDeviceVK::PS5HostImportAlignment()
++{
++	PS5Tools& t = Tools();
++	if (t.host_checked)
++		return t.host_align;
++	t.host_checked = true;
++	if (!m_optional_extensions.vk_ext_external_memory_host)
++	{
++		ps5px_log("picture: the driver cannot import host memory: paraLLEl-GS's pictures go through the processor");
++		return 0;
++	}
++	t.host_pointer_properties = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(
++		vkGetDeviceProcAddr(m_device, "vkGetMemoryHostPointerPropertiesEXT"));
++	VkPhysicalDeviceExternalMemoryHostPropertiesEXT host = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT};
++	VkPhysicalDeviceProperties2 props = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
++	props.pNext = &host;
++	vkGetPhysicalDeviceProperties2(m_physical_device, &props);
++	if (!t.host_pointer_properties || host.minImportedHostPointerAlignment == 0)
++	{
++		ps5px_log("picture: the driver's host memory import is incomplete: paraLLEl-GS's pictures go through the processor");
++		return 0;
++	}
++	t.host_align = static_cast<size_t>(host.minImportedHostPointerAlignment);
++	ps5px_log("picture: paraLLEl-GS's pictures can be imported from its memory (alignment %zu)", t.host_align);
++	return t.host_align;
++}
++
++bool GSDeviceVK::PS5CopyHostPicture(const void* host, size_t bytes, u64 id, GSTexture* dst, u32 width, u32 height)
++{
++	const size_t align = PS5HostImportAlignment();
++	if (!align || !host || !dst || (reinterpret_cast<uintptr_t>(host) % align) != 0 || (bytes % align) != 0 ||
++		bytes < static_cast<size_t>(width) * height * 4u || dst->GetWidth() < static_cast<int>(width) ||
++		dst->GetHeight() < static_cast<int>(height))
++		return false;
++
++	PS5Tools& t = Tools();
++	VkBuffer buffer = VK_NULL_HANDLE;
++	for (const PS5Tools::HostImport& imp : t.host_imports)
++	{
++		if (imp.id == id && imp.host == host && imp.bytes == bytes)
++		{
++			buffer = imp.buffer;
++			break;
++		}
++	}
++	if (buffer == VK_NULL_HANDLE)
++	{
++		VkMemoryHostPointerPropertiesEXT pointer = {VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
++		VkResult res = t.host_pointer_properties(m_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host, &pointer);
++		if (res != VK_SUCCESS)
++		{
++			ps5px_log("picture: paraLLEl-GS's memory is not importable (vkGetMemoryHostPointerPropertiesEXT: %d)", static_cast<int>(res));
++			return false;
++		}
++		VkExternalMemoryBufferCreateInfo external = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
++		external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++		VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
++		bci.pNext = &external;
++		bci.size = bytes;
++		bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
++		bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++		res = vkCreateBuffer(m_device, &bci, nullptr, &buffer);
++		if (res != VK_SUCCESS)
++		{
++			ps5px_log("picture: no buffer for paraLLEl-GS's memory (vkCreateBuffer: %d)", static_cast<int>(res));
++			return false;
++		}
++		VkMemoryRequirements req;
++		vkGetBufferMemoryRequirements(m_device, buffer, &req);
++		VkPhysicalDeviceMemoryProperties mem;
++		vkGetPhysicalDeviceMemoryProperties(m_physical_device, &mem);
++		// A type the pointer can be imported as, host-visible first (the memory is the CPU's).
++		const u32 bits = req.memoryTypeBits & pointer.memoryTypeBits;
++		u32 type = UINT32_MAX;
++		for (u32 pass = 0; pass < 2 && type == UINT32_MAX; pass++)
++		{
++			for (u32 i = 0; i < mem.memoryTypeCount; i++)
++			{
++				if ((bits & (1u << i)) &&
++					(pass == 1 || (mem.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)))
++				{
++					type = i;
++					break;
++				}
++			}
++		}
++		VkImportMemoryHostPointerInfoEXT import = {VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT};
++		import.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++		import.pHostPointer = const_cast<void*>(host);
++		VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
++		mai.pNext = &import;
++		mai.allocationSize = bytes;
++		mai.memoryTypeIndex = type;
++		VkDeviceMemory memory = VK_NULL_HANDLE;
++		res = (type == UINT32_MAX) ? VK_ERROR_INVALID_EXTERNAL_HANDLE : vkAllocateMemory(m_device, &mai, nullptr, &memory);
++		if (res == VK_SUCCESS)
++			res = vkBindBufferMemory(m_device, buffer, memory, 0);
++		if (res != VK_SUCCESS)
++		{
++			ps5px_log("picture: paraLLEl-GS's memory could not be imported (%d)", static_cast<int>(res));
++			vkDestroyBuffer(m_device, buffer, nullptr);
++			if (memory != VK_NULL_HANDLE)
++				vkFreeMemory(m_device, memory, nullptr);
++			return false;
++		}
++		t.host_imports.push_back({host, bytes, id, buffer, memory});
++	}
++
++	GSTextureVK* const tex = static_cast<GSTextureVK*>(dst);
++	tex->PS5UpdateFromBuffer(buffer, width, height);
++	return true;
++}
++
++void GSDeviceVK::PS5ForgetHostPictures(bool now)
++{
++	if (!m_ps5_tools || m_ps5_tools->host_imports.empty())
++		return;
++	std::vector<PS5Tools::HostImport> imports = std::move(m_ps5_tools->host_imports);
++	m_ps5_tools->host_imports.clear();
++	if (now)
++	{
++		ExecuteCommandBuffer(true, "paraLLEl-GS's pictures let go of");
++		for (const PS5Tools::HostImport& imp : imports)
++		{
++			vkDestroyBuffer(m_device, imp.buffer, nullptr);
++			vkFreeMemory(m_device, imp.memory, nullptr);
++		}
++		return;
++	}
++	FrameResources& resources = m_frame_resources[m_current_frame];
++	resources.cleanup_resources.push_back([this, imports = std::move(imports)]() {
++		for (const PS5Tools::HostImport& imp : imports)
++		{
++			vkDestroyBuffer(m_device, imp.buffer, nullptr);
++			vkFreeMemory(m_device, imp.memory, nullptr);
++		}
++	});
++}
++
++u64 GSDeviceVK::PS5PollCompletedFenceCounter()
++{
++	ScanForCommandBufferCompletion();
++	return m_completed_fence_counter;
 +}
 +
 +bool GSDeviceVK::DoOpticalFlowMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time, u32 quality)
@@ -5434,7 +5775,7 @@ index 0000000..83ff9ad
 +
 +struct GSDeviceVK::PS5Sections
 +{
-+	static constexpr u32 MAX = 160; // passes timed in one command buffer; more are counted, not timed
++	static constexpr u32 MAX = 512; // passes timed in one command buffer; more are counted, not timed
 +	enum Kind : u8
 +	{
 +		Conversion = 0,
@@ -5463,6 +5804,18 @@ index 0000000..83ff9ad
 +	u64 buffers_read = 0;
 +	u64 untimed = 0;
 +	u32 frames = 0;
++
++	// The same sums for the overlay, kept apart so the test log's window above is not reset by it;
++	// latched into `shown` every half second or so of frames (GS thread).
++	double osd_ms[KINDS] = {};
++	u64 osd_passes[KINDS] = {};
++	double osd_total_ms = 0;
++	u64 osd_buffers_read = 0;
++	u32 osd_frames = 0;
++	GSDevice::PS5GpuSections shown;
++
++	// The timestamps of one command buffer, read back (here, not on the stack: MAX * 2 * 8 bytes).
++	std::array<u64, MAX * 2> times = {};
 +
 +	// Surface compression found for render targets, said once per size and kind.
 +	std::vector<u64> said;
@@ -5525,7 +5878,10 @@ index 0000000..83ff9ad
 +	if (!b.on)
 +		return;
 +	if (present)
++	{
 +		s->frames++;
++		s->osd_frames++;
++	}
 +	if (b.open)
 +		return;
 +	if (b.count >= PS5Sections::MAX)
@@ -5583,12 +5939,14 @@ index 0000000..83ff9ad
 +		{
 +			s->total_ms += static_cast<double>(whole[1] - whole[0]) * period;
 +			s->buffers_read++;
++			s->osd_total_ms += static_cast<double>(whole[1] - whole[0]) * period;
++			s->osd_buffers_read++;
 +		}
 +	}
 +	s->untimed += b.untimed;
 +	if (b.count == 0)
 +		return;
-+	std::array<u64, PS5Sections::MAX * 2> t;
++	std::array<u64, PS5Sections::MAX * 2>& t = s->times;
 +	if (vkGetQueryPoolResults(m_device, s->pool, index * PS5Sections::MAX * 2, b.count * 2, sizeof(u64) * b.count * 2, t.data(),
 +			sizeof(u64), VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
 +		return;
@@ -5600,7 +5958,53 @@ index 0000000..83ff9ad
 +		const u8 kind = b.kind[i];
 +		s->ms[kind] += static_cast<double>(end - begin) * period;
 +		s->passes[kind]++;
++		s->osd_ms[kind] += static_cast<double>(end - begin) * period;
++		s->osd_passes[kind]++;
 +	}
++}
++
++bool GSDeviceVK::PS5GetGpuSections(PS5GpuSections& out)
++{
++	PS5Sections* s = m_ps5_sections;
++	if (!s)
++		return false;
++	// Latch a new window once it holds about half a second of frames (the overlay refreshes ten
++	// times a second; a shorter window would jitter).
++	if (s->osd_frames >= 30 && s->osd_buffers_read > 0)
++	{
++		const double frames = static_cast<double>(s->osd_frames);
++		PS5GpuSections& w = s->shown;
++		double passes_ms = 0;
++		for (double v : s->osd_ms)
++			passes_ms += v;
++		w.valid = true;
++		w.total_ms = s->osd_total_ms / frames;
++		w.ordered_ms = s->osd_ms[PS5Sections::Ordered] / frames;
++		w.barrier_ms = s->osd_ms[PS5Sections::Barrier] / frames;
++		w.draw_ms = s->osd_ms[PS5Sections::Draw] / frames;
++		w.conversion_ms = s->osd_ms[PS5Sections::Conversion] / frames;
++		w.present_ms = s->osd_ms[PS5Sections::Present] / frames;
++		w.outside_ms = std::max(0.0, s->osd_total_ms - passes_ms) / frames;
++		u64 passes = 0;
++		for (u64 n : s->osd_passes)
++			passes += n;
++		w.passes = static_cast<double>(passes) / frames;
++		for (double& v : s->osd_ms)
++			v = 0;
++		for (u64& n : s->osd_passes)
++			n = 0;
++		s->osd_total_ms = 0;
++		s->osd_buffers_read = 0;
++		s->osd_frames = 0;
++	}
++	else if (s->osd_frames >= 30)
++	{
++		// Frames but no timed buffer (GPU timing off): nothing to show.
++		s->shown.valid = false;
++		s->osd_frames = 0;
++	}
++	out = s->shown;
++	return out.valid;
 +}
 +
 +std::string GSDeviceVK::PS5TakeGpuWindow()
@@ -5658,6 +6062,78 @@ index 0000000..83ff9ad
 +		depth ? "depth target" : "render target", storage ? " (also written by shaders: the ordered view)" : "",
 +		compressed ? (depth ? "compressed (HTILE)" : "compressed (DCC)") : "not compressed");
 +}
+diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
+index c4abff2..7612106 100644
+--- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
++++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
+@@ -508,6 +508,31 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
+ 	return true;
+ }
+ 
++#ifdef __PROSPERO__
++void GSTextureVK::PS5UpdateFromBuffer(VkBuffer buffer, u32 width, u32 height)
++{
++	g_perfmon.Put(GSPerfMon::TextureUploads, 1);
++	const VkCommandBuffer cmdbuf = GetCommandBufferForUpdate();
++	GL_PUSH("GSTextureVK::PS5UpdateFromBuffer(%ux%u)", width, height);
++
++	if (m_layout == Layout::Undefined)
++		TransitionToLayout(cmdbuf, Layout::CopyDst);
++	if (IsRenderTarget())
++	{
++		if (width != static_cast<u32>(m_size.x) || height != static_cast<u32>(m_size.y))
++			CommitClear(cmdbuf);
++		else
++			m_state = State::Dirty;
++	}
++
++	UpdateFromBuffer(cmdbuf, 0, 0, 0, width, height, height, width, buffer, 0);
++	TransitionToLayout(cmdbuf, Layout::ShaderReadOnly);
++
++	if (IsTexture())
++		m_needs_mipmaps_generated = true;
++}
++#endif
++
+ bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
+ {
+ 	if (layer >= m_mipmap_levels || IsCompressedFormat())
+@@ -751,6 +776,18 @@ void GSTextureVK::TransitionSubresourcesToLayout(
+ 
+ 	vkCmdPipelineBarrier2KHR(command_buffer, &dependency);
+ 
++	// A colour target moved into the feedback loop layout from one where RADV keeps it compressed:
++	// RADV decompresses the image's DCC (all of it) on this transition.
++	if (new_layout == Layout::FeedbackLoop && !IsDepthStencil() &&
++		barrier.newLayout == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT &&
++		(barrier.oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
++			barrier.oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
++			barrier.oldLayout == VK_IMAGE_LAYOUT_GENERAL ||
++			barrier.oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))
++	{
++		g_perfmon.Put(GSPerfMon::FeedbackDecompress, 1);
++	}
++
+ 	// Count as a UAV barrier if we transition to/from UAV.
+ 	if (IsRenderTargetOrDepthStencil() &&
+ 		(old_layout == Layout::ReadWriteImage || new_layout == Layout::ReadWriteImage))
+diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
+index 55ddbb6..baa696b 100644
+--- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
++++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
+@@ -87,6 +87,12 @@ public:
+ 	// Call when the texture is bound to the pipeline, or read from in a copy.
+ 	__fi void SetUseFenceCounter(u64 counter) { m_use_fence_counter = counter; }
+ 
++#ifdef __PROSPERO__
++	/// PS5: the whole of level 0 copied from a buffer of tightly packed rows (width x height), as Update() does from
++	/// its upload buffer (GSDeviceVK::PS5CopyHostPicture: memory another device wrote).
++	void PS5UpdateFromBuffer(VkBuffer buffer, u32 width, u32 height);
++#endif
++
+ private:
+ 	GSTextureVK(Usage usage, Format format, int width, int height, int levels, VkImage image, VmaAllocation allocation,
+ 		VkImageView view, VkFormat vk_format);
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp b/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
 index e094dd9..523d6f8 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp

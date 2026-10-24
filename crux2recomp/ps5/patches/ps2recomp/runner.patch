@@ -26,10 +26,10 @@ index 3bee601..2320a3f 100644
  
  #endif // PS2_RUNTIME_H
 diff --git a/ps2xRuntime/include/runtime/gs/gs_gpu.h b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-index e9f8308..e759c1b 100644
+index e9f8308..643be86 100644
 --- a/ps2xRuntime/include/runtime/gs/gs_gpu.h
 +++ b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-@@ -58,11 +58,35 @@ struct GSGpuOptions
+@@ -58,11 +58,40 @@ struct GSGpuOptions
      bool libraryLog = false;
      bool sync = false;
      size_t ringBytes = size_t{16} << 20u;
@@ -37,6 +37,11 @@ index e9f8308..e759c1b 100644
 +    // copied into GSGpuFrame::rgba with alpha made opaque: one copy fewer on the graphics card thread, for a reader
 +    // that copies the picture on anyway (Crux2).
 +    bool mappedFrames = false;
++    // With mappedFrames: each picture is read back into host memory this renderer allocated itself (anonymous, page
++    // aligned) and imported into its device (VK_EXT_external_memory_host), so a reader with a Vulkan device of its own
++    // can import the same memory and copy the picture on its graphics card (GSGpuFrame::hostPointer): no processor
++    // copy. Off where the device cannot import host memory (said once). Crux2 on the PS5.
++    bool hostSharedFrames = false;
 +    // The graphics card's time measured with its timestamps (GSGpuStatus::gpuMsPerFrame): a query per pass.
 +    bool gpuTimestamps = false;
      std::string gpuSelector;
@@ -65,17 +70,28 @@ index e9f8308..e759c1b 100644
  // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).
  struct GSGpuFrame
  {
-@@ -76,6 +100,9 @@ struct GSGpuFrame
+@@ -76,6 +105,20 @@ struct GSGpuFrame
      uint32_t modeHeight = 0;
      bool highResolution = false;
      std::vector<uint8_t> rgba;
 +    // GSGpuOptions::mappedFrames: the picture (width x height, R8G8B8A8, alpha as the GS left it), valid while the
 +    // reader holds this frame (until its next take); rgba stays empty.
 +    const uint8_t *pixels = nullptr;
++    // GSGpuOptions::hostSharedFrames: the memory pixels is in, for importing into another Vulkan device: hostBytes
++    // bytes from hostPointer (both multiples of the device's minImportedHostPointerAlignment). It is buffer hostIndex
++    // (0-31) of the renderer's ring, allocation hostId (never reused), of generation hostGeneration (raised when the
++    // ring is made again at a larger size). The memory stays mapped until the reader has said, through
++    // setHostReleased(), that it holds nothing of that generation; and buffer hostIndex is not written again while its
++    // bit is set through setHostReading(). Null when this picture is in an ordinary read-back buffer (pixels only).
++    const uint8_t *hostPointer = nullptr;
++    size_t hostBytes = 0;
++    int hostIndex = -1;
++    uint64_t hostId = 0;
++    uint64_t hostGeneration = 0;
      // Shown straight from the graphics card (VENDETTA_PRESENT=vulkan): the picture is in shared image sharedImage
      // (R8G8B8A8, width x height) of the current set (Windows handles sharedHandles, made again when sharedGeneration
      // changes), finished once the shared timeline semaphore (sharedTimeline) reaches seq; rgba stays empty. The
-@@ -101,6 +128,32 @@ struct GSGpuStatus
+@@ -101,6 +144,32 @@ struct GSGpuStatus
      float presentsPerSecond = 0.0f;
      float gifMegabytesPerSecond = 0.0f;
      float renderPassesPerSecond = 0.0f;
@@ -108,7 +124,7 @@ index e9f8308..e759c1b 100644
  };
  
  // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).
-@@ -108,6 +161,7 @@ class GSGpuFrameMailbox
+@@ -108,6 +177,7 @@ class GSGpuFrameMailbox
  {
  public:
      GSGpuFrame &writeSlot() noexcept { return m_slot[m_back]; }
@@ -116,7 +132,19 @@ index e9f8308..e759c1b 100644
      void publish() noexcept
      {
          m_back = m_middle.exchange(m_back | kFresh, std::memory_order_acq_rel) & kIndexMask;
-@@ -155,6 +209,12 @@ public:
+@@ -127,6 +197,11 @@ public:
+     // The shared image the reader is drawing from (-1: none): the writer never draws into it. Set by the reader
+     // before it uses a taken frame's image, cleared once its graphics card work on it is done.
+     std::atomic<int> sharedReading{-1};
++    // Host-shared pictures (GSGpuOptions::hostSharedFrames): the ring's buffers the reader's graphics card may still be
++    // reading (bit n = hostIndex n; set before the reader takes the next frame, cleared once its work on it is done),
++    // and the newest generation of which the reader holds nothing any more (no import, no work pending).
++    std::atomic<uint32_t> hostReading{0u};
++    std::atomic<uint64_t> hostReleasedGeneration{0u};
+ 
+ private:
+     static constexpr uint32_t kFresh = 4u;
+@@ -155,6 +230,12 @@ public:
      // The producer, blocking: answered after everything sent before (GS memory as of this point in the order).
      virtual void snapshotVram(std::vector<uint8_t> &out) = 0;              // all 4 MiB
      virtual uint32_t readTransfer(uint8_t *dst, uint32_t maxBytes) = 0;    // a local -> host transfer's data
@@ -129,7 +157,17 @@ index e9f8308..e759c1b 100644
  
      // The game thread, holding no lock: wait while more than maxAhead presentations are not yet drawn.
      virtual bool waitPresentBacklog(uint32_t maxAhead, const std::atomic<bool> &stop) = 0;
-@@ -172,6 +232,7 @@ public:
+@@ -166,12 +247,17 @@ public:
+     virtual void setOutputSize(uint32_t width, uint32_t height) = 0;
+     // The main thread, with shared pictures: the shared image it is drawing from (-1 when done with it).
+     virtual void setSharedReading(int image) { (void)image; }
++    // The main thread, with host-shared pictures: the buffers its graphics card may still read (bit n = hostIndex n),
++    // and the newest generation it holds nothing of (see GSGpuFrame::hostPointer).
++    virtual void setHostReading(uint32_t mask) { (void)mask; }
++    virtual void setHostReleased(uint64_t generation) { (void)generation; }
+ 
+     // Any thread: live settings, taken at the next presentation.
+     virtual void setSuperSampling(uint32_t rate) = 0; // 1, 2, 4, 8 or 16
      virtual void setHighResolution(bool on) = 0;
      virtual void setFsr(bool on) = 0;
      virtual void setSharpness(float stops) = 0;
@@ -181,16 +219,19 @@ index 8fa3249..f137353 100644
      return converter.PresentFromLocalMemory(request);
  }
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-index 7bb06d3..3eacd82 100644
+index 7bb06d3..568d7ce 100644
 --- a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-@@ -18,8 +18,18 @@
+@@ -18,8 +18,21 @@
  #include "gs_vulkan_shared.h"
  #include "gs_vulkan_present.h"
  
 +#if defined(_WIN32)
  #include <windows.h>
 -
++#else
++#include <sys/mman.h> // host-shared pictures' memory (GSGpuOptions::hostSharedFrames)
++#include <unistd.h>
 +#endif
 +#if defined(__PROSPERO__)
 +// The console has no Vulkan loader: RADV is linked into the title, and Granite's volk is given its
@@ -204,7 +245,7 @@ index 7bb06d3..3eacd82 100644
  #include <algorithm>
  #include <atomic>
  #include <cctype>
-@@ -46,6 +56,10 @@ void stopSharedPictures() { g_sharedStopped.store(true, std::memory_order_releas
+@@ -46,6 +59,10 @@ void stopSharedPictures() { g_sharedStopped.store(true, std::memory_order_releas
  
  bool vulkanPresentWanted()
  {
@@ -215,7 +256,7 @@ index 7bb06d3..3eacd82 100644
      static const bool wanted = []
      {
          const char *present = std::getenv("VENDETTA_PRESENT");
-@@ -161,7 +175,19 @@ namespace
+@@ -161,7 +178,19 @@ namespace
      constexpr uint64_t align16(uint64_t bytes) { return (bytes + 15u) & ~uint64_t{15u}; }
      constexpr uint32_t kMaxGifChunk = 256u * 1024u;         // larger GIF transfers go in pieces (paths keep their tag)
      constexpr uint64_t kPublishBytes = 16u * 1024u;         // hand records over at least this often
@@ -236,7 +277,7 @@ index 7bb06d3..3eacd82 100644
  
      inline void cpuRelax() { _mm_pause(); }
  
-@@ -269,6 +295,32 @@ namespace
+@@ -269,6 +298,32 @@ namespace
              return call.result;
          }
  
@@ -269,7 +310,19 @@ index 7bb06d3..3eacd82 100644
          void kick() override
          {
              if (m_options.sync)
-@@ -324,6 +376,11 @@ namespace
+@@ -312,6 +367,11 @@ namespace
+         }
+ 
+         void setSharedReading(int image) override { m_frames.sharedReading.store(image, std::memory_order_release); }
++        void setHostReading(uint32_t mask) override { m_frames.hostReading.store(mask, std::memory_order_release); }
++        void setHostReleased(uint64_t generation) override
++        {
++            m_frames.hostReleasedGeneration.store(generation, std::memory_order_release);
++        }
+ 
+         void setSuperSampling(uint32_t rate) override
+         {
+@@ -324,6 +384,11 @@ namespace
          {
              m_wantSharpness.store(std::clamp(stops, 0.0f, 2.0f), std::memory_order_relaxed);
          }
@@ -281,7 +334,7 @@ index 7bb06d3..3eacd82 100644
  
          GSGpuStatus status() const override
          {
-@@ -337,8 +394,7 @@ namespace
+@@ -337,8 +402,7 @@ namespace
                  return;
              m_shutDown = true;
              m_stop.store(true, std::memory_order_seq_cst);
@@ -291,7 +344,7 @@ index 7bb06d3..3eacd82 100644
              if (m_thread.joinable())
                  m_thread.join();
              m_readPos.store(m_localWrite, std::memory_order_release);
-@@ -355,6 +411,7 @@ namespace
+@@ -355,6 +419,7 @@ namespace
              Reset,
              Present,  // payload = PresentRecord
              Call,     // payload = a CallRecord * (on the waiting producer's stack)
@@ -299,7 +352,7 @@ index 7bb06d3..3eacd82 100644
          };
          struct alignas(16) Header
          {
-@@ -370,9 +427,13 @@ namespace
+@@ -370,9 +435,13 @@ namespace
              {
                  Snapshot,
                  ReadTransfer,
@@ -313,7 +366,7 @@ index 7bb06d3..3eacd82 100644
              uint8_t *dst = nullptr;
              uint32_t bytes = 0u;
              uint32_t result = 0u;
-@@ -395,8 +456,12 @@ namespace
+@@ -395,8 +464,12 @@ namespace
              std::memcpy(dst, &pointer, sizeof(pointer));
              commit();
              publish();
@@ -326,7 +379,7 @@ index 7bb06d3..3eacd82 100644
          }
  
          uint8_t *reserve(Cmd cmd, uint32_t payloadBytes)
-@@ -412,11 +477,14 @@ namespace
+@@ -412,11 +485,14 @@ namespace
                  if (m_size - (m_localWrite - m_cachedRead) < needed)
                  {
                      publish();
@@ -341,7 +394,7 @@ index 7bb06d3..3eacd82 100644
                  }
              }
              if (wrap)
-@@ -451,10 +519,7 @@ namespace
+@@ -451,10 +527,7 @@ namespace
              m_published = m_localWrite;
              m_writePos.store(m_localWrite, std::memory_order_seq_cst);
              if (m_consumerSleeping.load(std::memory_order_seq_cst) != 0u)
@@ -353,7 +406,7 @@ index 7bb06d3..3eacd82 100644
          }
  
          void drain()
-@@ -470,13 +535,13 @@ namespace
+@@ -470,13 +543,13 @@ namespace
          template <typename Pred>
          void waitProgress(const char *what, Pred pred)
          {
@@ -369,7 +422,7 @@ index 7bb06d3..3eacd82 100644
              bool reported = false;
              std::unique_lock<std::mutex> lock(m_progressMutex);
              m_producerWaiting.fetch_add(1u, std::memory_order_seq_cst);
-@@ -496,6 +561,14 @@ namespace
+@@ -496,6 +569,14 @@ namespace
  
          // ---- the graphics card thread -------------------------------------------------------------------------
  
@@ -384,7 +437,7 @@ index 7bb06d3..3eacd82 100644
          void publishProgress(uint64_t readPos)
          {
              m_readPos.store(readPos, std::memory_order_seq_cst);
-@@ -505,7 +578,15 @@ namespace
+@@ -505,7 +586,15 @@ namespace
  
          void threadMain()
          {
@@ -400,7 +453,7 @@ index 7bb06d3..3eacd82 100644
              GpuLog logger(m_options.libraryLog);
              Util::set_thread_logging_interface(&logger);
  
-@@ -521,8 +602,13 @@ namespace
+@@ -521,8 +610,13 @@ namespace
  
              try
              {
@@ -414,7 +467,7 @@ index 7bb06d3..3eacd82 100644
  
                  // Closed in reverse order: the GS interface, the device (both explicitly, below), then the context.
                  Vulkan::Context context;
-@@ -552,6 +638,12 @@ namespace
+@@ -552,6 +646,12 @@ namespace
                      return fail(std::string("paraLLEl-GS could not start on ") + context.get_gpu_props().deviceName +
                                  " (it needs descriptor indexing, timeline semaphores, 8/16-bit storage and subgroup "
                                  "size control)");
@@ -427,7 +480,7 @@ index 7bb06d3..3eacd82 100644
  
                  {
                      // 2-D detail: VENDETTA_UPSCALE_SPRITES=1 (settings.toml graphics.sharp_2d) super-samples sprites
-@@ -559,9 +651,19 @@ namespace
+@@ -559,9 +659,19 @@ namespace
                      // own pixel; VENDETTA_HIRES4=0: 2x as before). VENDETTA_PROMOTE=1 (a test): show a final blit's
                      // source instead (paraLLEl-GS's backbuffer promotion).
                      auto on = [](const char *name) { const char *v = std::getenv(name); return v && *v && *v != '0'; };
@@ -449,7 +502,35 @@ index 7bb06d3..3eacd82 100644
                      gs.set_hacks(hacks);
                      const char *hires4 = std::getenv("VENDETTA_HIRES4");
                      m_quadScanout = !(hires4 && *hires4 == '0');
-@@ -612,6 +714,12 @@ namespace
+@@ -603,6 +713,27 @@ namespace
+                     }
+                 }
+ 
++                {
++                    // host-shared pictures (Crux2 on the PS5): read back into memory the reader's device imports too
++#if !defined(_WIN32)
++                    const Vulkan::DeviceFeatures &features = device.get_device_features();
++                    m_hostShared = m_options.hostSharedFrames && m_options.mappedFrames &&
++                                   features.supports_external_memory_host;
++                    if (m_hostShared)
++                    {
++                        const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
++                        m_hostAlign = std::max<size_t>(
++                            page ? page : 4096u, static_cast<size_t>(features.host_memory_properties.minImportedHostPointerAlignment));
++                        std::cerr << "[gpu-gs] pictures read back into host memory shared with the reader's device (alignment "
++                                  << m_hostAlign << ")" << std::endl;
++                    }
++                    else if (m_options.hostSharedFrames)
++                        std::cerr << "[gpu-gs] host-shared pictures asked for, but "
++                                  << (m_options.mappedFrames ? "the device cannot import host memory" : "mappedFrames is off")
++                                  << ": read back as before" << std::endl;
++#endif
++                }
++
+                 m_device = &device;
+                 m_gs = &gs;
+                 consume();
+@@ -612,7 +743,16 @@ namespace
                  m_gs = nullptr;
                  m_device = nullptr;
                  m_lastScanout = {};
@@ -460,9 +541,13 @@ index 7bb06d3..3eacd82 100644
 +                    buffer.reset();
 +                m_freeBuffers.clear();
                  m_readback.reset();
++                // (The host memory itself is unmapped once the device is gone, below.)
++                for (HostBuffer &host : m_hostBuffers)
++                    host.buffer.reset();
                  m_fsrUpscaled.reset();
                  m_fsrSharpened.reset();
-@@ -620,8 +728,10 @@ namespace
+                 for (auto &image : m_sharedImages)
+@@ -620,14 +760,23 @@ namespace
                  m_sharedTimeline.reset();
                  closeSharedHandles(m_sharedHandles);
                  closeSharedHandles(m_sharedOldHandles);
@@ -473,7 +558,20 @@ index 7bb06d3..3eacd82 100644
                  m_sharedTimelineHandle = nullptr;
                  // The GS interface first: it submits the command buffers it holds (waiting for the device while it
                  // holds one never ends), then the device.
-@@ -652,25 +762,55 @@ namespace
+                 gsHolder.reset();
+                 device.wait_idle();
+                 deviceHolder.reset();
++                // The reader has let go of the memory before shutdown() (its contract): nothing imports it now.
++                for (HostBuffer &host : m_hostBuffers)
++                    unmapHost(host.pointer, host.bytes);
++                m_hostBuffers.clear();
++                for (RetiredHost &retired : m_hostRetired)
++                    unmapHost(retired.pointer, retired.bytes);
++                m_hostRetired.clear();
+                 if (m_profile)
+                     std::fprintf(stderr, "[gpu-gs] closed in %.1f ms%c", stepMs(), 10);
+             }
+@@ -652,25 +801,55 @@ namespace
                      publishProgress(read);
                      if (m_stop.load(std::memory_order_acquire))
                          return;
@@ -537,7 +635,7 @@ index 7bb06d3..3eacd82 100644
                  while (read != write)
                  {
                      if (m_stop.load(std::memory_order_relaxed))
-@@ -697,8 +837,17 @@ namespace
+@@ -697,8 +876,17 @@ namespace
                      {
                          sinceProgress = 0u;
                          publishProgress(read);
@@ -555,7 +653,7 @@ index 7bb06d3..3eacd82 100644
                  publishProgress(read);
                  reportStats();
              }
-@@ -711,26 +860,31 @@ namespace
+@@ -711,26 +899,31 @@ namespace
              case Cmd::Wrap:
                  break;
              case Cmd::Gif:
@@ -591,7 +689,7 @@ index 7bb06d3..3eacd82 100644
                  }
                  catch (...)
                  {
-@@ -755,9 +909,11 @@ namespace
+@@ -755,9 +948,11 @@ namespace
              }
          }
  
@@ -604,7 +702,7 @@ index 7bb06d3..3eacd82 100644
              switch (call.kind)
              {
              case CallRecord::Snapshot:
-@@ -770,6 +926,55 @@ namespace
+@@ -770,6 +965,55 @@ namespace
                  m_gs->read_transfer_fifo(call.dst, call.bytes / 16u);
                  call.result = call.bytes & ~15u;
                  break;
@@ -660,7 +758,7 @@ index 7bb06d3..3eacd82 100644
              }
          }
  
-@@ -796,6 +1001,56 @@ namespace
+@@ -796,6 +1040,56 @@ namespace
                  static_cast<float>((m_stats.gifBytes - m_statusBase.gifBytes) / seconds / 1048576.0);
              status.renderPassesPerSecond =
                  static_cast<float>((m_stats.renderPasses - m_statusBase.renderPasses) / seconds);
@@ -717,7 +815,7 @@ index 7bb06d3..3eacd82 100644
              {
                  std::lock_guard<std::mutex> lock(m_statusMutex);
                  m_status = status;
-@@ -824,11 +1079,12 @@ namespace
+@@ -824,11 +1118,12 @@ namespace
              auto pct = [&](Clock::duration d)
              { return static_cast<int>(100.0 * std::chrono::duration<double>(d).count() / seconds + 0.5); };
              std::fprintf(stderr,
@@ -733,8 +831,11 @@ index 7bb06d3..3eacd82 100644
              m_stats = Stats{};
              m_stats.since = now;
              m_statusBase = Stats{};
-@@ -839,7 +1095,8 @@ namespace
+@@ -837,9 +1132,11 @@ namespace
+         void doPresent(const PresentRecord &record)
+         {
              ParallelGS::GSInterface &gs = *m_gs;
++            ++m_presentCount;
              const auto flushStart = Clock::now();
              gs.flush();
 -            m_stats.flush += Clock::now() - flushStart;
@@ -743,7 +844,7 @@ index 7bb06d3..3eacd82 100644
              ParallelGS::PrivRegisterState &priv = gs.get_priv_register_state();
              for (uint32_t i = 0; i < kPrivRegCount; ++i)
                  priv.qwords_lo[2u * i] = record.regs[i];
-@@ -860,16 +1117,46 @@ namespace
+@@ -860,16 +1157,46 @@ namespace
                  }
              }
  
@@ -796,7 +897,7 @@ index 7bb06d3..3eacd82 100644
              const uint32_t wantSsaa = m_wantSsaa.load(std::memory_order_relaxed);
              if (wantSsaa != m_currentSsaa)
              {
-@@ -933,12 +1220,16 @@ namespace
+@@ -933,12 +1260,18 @@ namespace
          // fsrOutput != 0: upscaled + sharpened to that size first (packed width << 32 | height).
          void readBack(const ParallelGS::ScanoutResult &scanout, uint64_t fsrOutput)
          {
@@ -809,11 +910,13 @@ index 7bb06d3..3eacd82 100644
                  frame.width = frame.height = 0u;
                  frame.rgba.clear();
 +                frame.pixels = nullptr;
++                clearHostFields(frame);
 +                releaseSlotBuffer(m_frames.writeIndex());
++                m_slotHost[m_frames.writeIndex()] = 0u;
                  m_frames.publish();
                  m_lastFrameWidth = m_lastFrameHeight = 0u;
                  return;
-@@ -996,42 +1287,130 @@ namespace
+@@ -996,42 +1329,303 @@ namespace
                  return;
              }
              frame.shared = false;
@@ -828,10 +931,15 @@ index 7bb06d3..3eacd82 100644
 -                info.domain = Vulkan::BufferDomain::CachedHost;
 -                m_readback = m_device->create_buffer(info);
 -            }
-+            // A buffer no frame is shown from: the copy of this picture goes to it while others may still be read.
-+            Vulkan::BufferHandle buffer = takeFreeBuffer(bytes);
- 
+-
 -            cmd->copy_image_to_buffer(*m_readback, *source, 0, {0, 0, 0}, {width, height, 1}, 0, 0,
++            // A buffer no frame is shown from: the copy of this picture goes to it while others may still be read.
++            // (Host-shared: one of the ring's that no frame shows and the reader's graphics card is not reading; an
++            // ordinary one when there is none.)
++            m_pending.hostIndex = m_hostShared ? takeHostBuffer(static_cast<size_t>(bytes)) : -1;
++            Vulkan::BufferHandle buffer =
++                m_pending.hostIndex >= 0 ? m_hostBuffers[m_pending.hostIndex].buffer : takeFreeBuffer(bytes);
++
 +            cmd->copy_image_to_buffer(*buffer, *source, 0, {0, 0, 0}, {width, height, 1}, 0, 0,
                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1});
              cmd->barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -899,6 +1007,37 @@ index 7bb06d3..3eacd82 100644
 -            frame.modeHeight = scanout.mode_height;
 -            frame.highResolution = scanout.high_resolution_scanout;
 +                m_device->map_host_buffer(*m_pending.buffer, Vulkan::MEMORY_ACCESS_READ_BIT, 0, bytes));
++            if (m_pending.hostIndex >= 0)
++            {
++                // Host-shared: handed over as it is, like mappedFrames below; the ring keeps the buffer, and it is not
++                // written again while the slot shows it or the reader's graphics card reads it (hostReading).
++                const uint32_t slot = m_frames.writeIndex();
++                releaseSlotBuffer(slot);
++                const HostBuffer &host = m_hostBuffers[m_pending.hostIndex];
++                m_slotHost[slot] = host.id;
++                frame.width = m_pending.width;
++                frame.height = m_pending.height;
++                frame.internalWidth = m_pending.internalWidth;
++                frame.internalHeight = m_pending.internalHeight;
++                frame.modeWidth = m_pending.modeWidth;
++                frame.modeHeight = m_pending.modeHeight;
++                frame.highResolution = m_pending.highResolution;
++                frame.rgba.clear();
++                frame.pixels = reinterpret_cast<const uint8_t *>(src);
++                frame.hostPointer = static_cast<const uint8_t *>(host.pointer);
++                frame.hostBytes = host.bytes;
++                frame.hostIndex = m_pending.hostIndex;
++                frame.hostId = host.id;
++                frame.hostGeneration = m_hostGeneration;
++                m_pending.hostIndex = -1;
++                m_pending.buffer.reset();
++                m_pending.fence.reset();
++                m_frames.publish();
++                reapRetiredHost();
++                return;
++            }
++            clearHostFields(frame);
++            m_slotHost[m_frames.writeIndex()] = 0u;
 +            if (m_options.mappedFrames)
 +            {
 +                // Handed over as it is: the buffer belongs to this slot until the slot is written again (the reader
@@ -963,10 +1102,148 @@ index 7bb06d3..3eacd82 100644
 +                m_freeBuffers.push_back(std::move(m_slotBuffers[slot]));
 +        }
 +
++        static void clearHostFields(GSGpuFrame &frame)
++        {
++            frame.hostPointer = nullptr;
++            frame.hostBytes = 0u;
++            frame.hostIndex = -1;
++            frame.hostId = 0u;
++            frame.hostGeneration = 0u;
++        }
++
++        // ---- host-shared pictures (GSGpuOptions::hostSharedFrames) ----
++        // A ring of up to kMaxHostBuffers read-back buffers in anonymous memory this thread maps itself, imported into
++        // the device; the reader imports the same memory into its own device and copies the picture on its graphics
++        // card. A buffer is free when no frame slot shows it (m_slotHost), no picture is on its way back into it
++        // (m_pending) and the reader's graphics card is not reading it (GSGpuFrameMailbox::hostReading). A picture
++        // larger than the ring's buffers makes the ring again (a new generation): the old memory stays mapped until
++        // the reader says it holds nothing of that generation any more (hostReleasedGeneration) and Granite has
++        // surely freed its own import of it (kRetireFrames presentations: its frame contexts go round by then).
++        static constexpr int kMaxHostBuffers = 16;
++        static constexpr uint64_t kRetireFrames = 64u;
++
++        struct HostBuffer
++        {
++            void *pointer = nullptr;
++            size_t bytes = 0u;
++            uint64_t id = 0u;
++            Vulkan::BufferHandle buffer;
++        };
++        struct RetiredHost
++        {
++            void *pointer = nullptr;
++            size_t bytes = 0u;
++            uint64_t generation = 0u;
++            uint64_t retiredAt = 0u; // m_presentCount then
++        };
++
++        void *mapHost(size_t bytes) const
++        {
++#if defined(_WIN32)
++            (void)bytes;
++            return nullptr;
++#else
++            // Page aligned; a larger import alignment: mapped larger and trimmed to an aligned start.
++            const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
++            const size_t extra = m_hostAlign > page ? m_hostAlign : 0u;
++            void *raw = mmap(nullptr, bytes + extra, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++            if (raw == MAP_FAILED)
++                return nullptr;
++            if (!extra)
++                return raw;
++            const uintptr_t base = reinterpret_cast<uintptr_t>(raw);
++            const uintptr_t aligned = (base + m_hostAlign - 1u) & ~(uintptr_t(m_hostAlign) - 1u);
++            if (aligned > base)
++                munmap(raw, aligned - base);
++            const uintptr_t end = base + bytes + extra;
++            if (end > aligned + bytes)
++                munmap(reinterpret_cast<void *>(aligned + bytes), end - (aligned + bytes));
++            return reinterpret_cast<void *>(aligned);
++#endif
++        }
++
++        static void unmapHost(void *pointer, size_t bytes)
++        {
++#if !defined(_WIN32)
++            if (pointer)
++                munmap(pointer, bytes);
++#else
++            (void)pointer;
++            (void)bytes;
++#endif
++        }
++
++        // The ring's buffer for the next picture (its index), or -1 (an ordinary read-back buffer is used then).
++        int takeHostBuffer(size_t bytes)
++        {
++            const size_t rounded = (bytes + m_hostAlign - 1u) & ~(m_hostAlign - 1u);
++            if (rounded > m_hostBytes)
++            {
++                // larger pictures: the ring made again at the new size; the old memory waits for the reader
++                for (HostBuffer &host : m_hostBuffers)
++                    m_hostRetired.push_back({host.pointer, host.bytes, m_hostGeneration, m_presentCount});
++                m_hostBuffers.clear();
++                for (uint64_t &id : m_slotHost)
++                    id = 0u; // (the slots' frames keep their pointers: the memory is still mapped)
++                ++m_hostGeneration;
++                m_hostBytes = rounded;
++                std::cerr << "[gpu-gs] host-shared pictures: buffers of " << rounded << " bytes (generation "
++                          << m_hostGeneration << ")" << std::endl;
++            }
++            const uint32_t reading = m_frames.hostReading.load(std::memory_order_acquire);
++            for (int i = 0; i < static_cast<int>(m_hostBuffers.size()); ++i)
++            {
++                const uint64_t id = m_hostBuffers[i].id;
++                const bool shown = m_slotHost[0] == id || m_slotHost[1] == id || m_slotHost[2] == id;
++                if (!shown && (reading & (1u << i)) == 0u)
++                    return i;
++            }
++            if (m_hostFailed || static_cast<int>(m_hostBuffers.size()) >= kMaxHostBuffers)
++                return -1;
++            HostBuffer host;
++            host.bytes = m_hostBytes;
++            host.pointer = mapHost(host.bytes);
++            if (host.pointer)
++            {
++                Vulkan::BufferCreateInfo info{};
++                info.size = host.bytes;
++                info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++                info.domain = Vulkan::BufferDomain::CachedHost;
++                host.buffer = m_device->create_imported_host_buffer(info, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
++                                                                    host.pointer);
++            }
++            if (!host.buffer)
++            {
++                std::cerr << "[gpu-gs] host memory could not be " << (host.pointer ? "imported" : "mapped")
++                          << ": pictures read back as before" << std::endl;
++                unmapHost(host.pointer, host.bytes);
++                m_hostFailed = true;
++                return -1;
++            }
++            host.id = ++m_hostNextId;
++            m_hostBuffers.push_back(std::move(host));
++            return static_cast<int>(m_hostBuffers.size()) - 1;
++        }
++
++        // Old generations' memory unmapped once the reader holds nothing of them and Granite has freed its imports.
++        void reapRetiredHost()
++        {
++            if (m_hostRetired.empty())
++                return;
++            const uint64_t released = m_frames.hostReleasedGeneration.load(std::memory_order_acquire);
++            auto it = std::remove_if(m_hostRetired.begin(), m_hostRetired.end(), [&](const RetiredHost &retired)
++                                     {
++                                         if (retired.generation > released || m_presentCount < retired.retiredAt + kRetireFrames)
++                                             return false;
++                                         unmapHost(retired.pointer, retired.bytes);
++                                         return true; });
++            m_hostRetired.erase(it, m_hostRetired.end());
++        }
++
          // shown through Vulkan: the picture copied into one of four images shared with the window's own Vulkan device
          // (no read back): one the window isn't drawing from and that isn't one of the two newest pictures. It is handed
          // over in the sampling layout, released to the "external" queue family; the shared timeline semaphore reaches the
-@@ -1039,6 +1418,10 @@ namespace
+@@ -1039,6 +1633,10 @@ namespace
          bool shareFrame(GSGpuFrame &frame, Vulkan::CommandBufferHandle &cmd, const Vulkan::Image &source,
                          uint32_t width, uint32_t height)
          {
@@ -977,7 +1254,7 @@ index 7bb06d3..3eacd82 100644
              if (!m_sharedTimeline)
              {
                  m_sharedTimeline = m_device->request_semaphore_external(VK_SEMAPHORE_TYPE_TIMELINE,
-@@ -1117,14 +1500,17 @@ namespace
+@@ -1117,14 +1715,17 @@ namespace
              m_sharedNewest[1] = m_sharedNewest[0];
              m_sharedNewest[0] = target;
              return true;
@@ -995,7 +1272,7 @@ index 7bb06d3..3eacd82 100644
                  handle = nullptr;
              }
          }
-@@ -1234,6 +1620,9 @@ namespace
+@@ -1234,6 +1835,9 @@ namespace
          uint64_t m_cachedRead = 0u;
          uint64_t m_pendingRecordBytes = 0u;
          alignas(64) std::atomic<uint64_t> m_presentsIssued{0u};
@@ -1005,7 +1282,7 @@ index 7bb06d3..3eacd82 100644
  
          // the graphics card thread only
          alignas(64) Vulkan::Device *m_device = nullptr;
-@@ -1241,13 +1630,24 @@ namespace
+@@ -1241,13 +1845,36 @@ namespace
          bool m_quadScanout = false;
          ParallelGS::ScanoutResult m_lastScanout{};
          Vulkan::BufferHandle m_readback;
@@ -1018,7 +1295,19 @@ index 7bb06d3..3eacd82 100644
 +            Vulkan::BufferHandle buffer;
 +            uint32_t width = 0u, height = 0u, internalWidth = 0u, internalHeight = 0u, modeWidth = 0u, modeHeight = 0u;
 +            bool highResolution = false;
++            int hostIndex = -1; // the ring's buffer (host-shared), or -1
 +        } m_pending;
++        // host-shared pictures (the graphics card thread only)
++        bool m_hostShared = false;
++        bool m_hostFailed = false;
++        size_t m_hostAlign = 4096u;
++        size_t m_hostBytes = 0u;
++        uint64_t m_hostGeneration = 0u;
++        uint64_t m_hostNextId = 0u;
++        uint64_t m_presentCount = 0u;
++        uint64_t m_slotHost[3] = {}; // the ring buffer (its id) each frame slot shows, 0 none
++        std::vector<HostBuffer> m_hostBuffers;
++        std::vector<RetiredHost> m_hostRetired;
          uint64_t m_frameSeq = 0u;
          bool m_reportedException = false;
          alignas(64) std::atomic<uint64_t> m_presentsDone{0u};
@@ -1031,7 +1320,7 @@ index 7bb06d3..3eacd82 100644
          std::atomic<uint32_t> m_producerWaiting{0u};
          std::mutex m_progressMutex;
          std::condition_variable m_progressCv;
-@@ -1259,12 +1659,14 @@ namespace
+@@ -1259,12 +1886,14 @@ namespace
          struct Stats
          {
              Clock::time_point since{};
@@ -1047,7 +1336,7 @@ index 7bb06d3..3eacd82 100644
          Clock::time_point m_statusSince{};
  
          // live settings: written by any thread, taken at a presentation
-@@ -1273,6 +1675,10 @@ namespace
+@@ -1273,6 +1902,10 @@ namespace
          std::atomic<bool> m_wantFsr{true};
          std::atomic<float> m_wantSharpness{0.5f};
          std::atomic<uint64_t> m_outputSize{0u};
@@ -1058,7 +1347,7 @@ index 7bb06d3..3eacd82 100644
          // the graphics card thread only
          uint32_t m_currentSsaa = 0u;
          bool m_lastHires = false;
-@@ -1301,7 +1707,7 @@ namespace
+@@ -1301,7 +1934,7 @@ namespace
      };
  }
  

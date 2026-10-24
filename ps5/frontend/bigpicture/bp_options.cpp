@@ -755,7 +755,7 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(adv(when(listOf("paraLLEl-GS samples",
-		"Samples for each pixel: more is a smoother, sharper picture and more work for the graphics chip. Its picture is enlarged "
+		"Samples for each pixel: more is a smoother, sharper picture and more work for the graphics chip. With the picture at twice the size, 4 and 8 give the same size (8 smooths a little more, at about twice the work); 16 with it is the sharpest. Its picture is enlarged "
 		"to the screen as Upscaling and sharpening says (an FSR 1 choice enlarges it with FSR)",
 		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS at twice the size",
@@ -774,6 +774,11 @@ Page graphicsPage(int layer, bool forGame)
 		"without them such effects bring the picture back to the PS2's resolution, as the PS2 showed them. More work for the "
 		"graphics chip",
 		GS, "PS5ParallelGSTextures", false, Option::NextStart), GS, "PS5ParallelGS", false)));
+	rows.push_back(adv(when(toggle("paraLLEl-GS pictures shared with the graphics device (experimental)",
+		"Each picture goes from paraLLEl-GS to the rest of the picture's way (FSR, frame generation, the on-screen display) "
+		"by the graphics chip, from memory both share, instead of being copied by the processor: less work for the GS "
+		"thread, most at twice the size. Off: copied by the processor, as before",
+		GS, "PS5ParallelGSSharedFrames", false, Option::NextStart), GS, "PS5ParallelGS", false)));
 	rows.push_back(strings("Aspect ratio", "The shape of the picture", GS, "AspectRatio", "Auto 4:3/3:2",
 		{"Stretch to fill the screen", "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"}, {"Stretch", "Auto 4:3/3:2", "4:3", "16:9", "10:7"}));
 	rows.push_back(adv(strings("FMV aspect ratio override", "A different shape while the game plays a video", GS, "FMVAspectRatioSwitch", "Off",

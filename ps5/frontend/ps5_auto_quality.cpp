@@ -83,7 +83,13 @@ namespace PS5AutoQuality
 		constexpr float PGS_BUSY = 0.85f; // of the frame's period
 		constexpr float PGS_ROOM = 0.55f;
 
-		uint32_t PgsStepDown(uint32_t s) { return s > 1 ? s / 2 : 1; }
+		// Not below 4 samples while the picture at twice the size is on: it needs 4 or more, and below them the
+		// picture falls to the PS2's own size, far softer than the few samples saved are worth.
+		uint32_t PgsStepDown(uint32_t s)
+		{
+			const uint32_t floor = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSHighRes", true) ? 4u : 1u;
+			return s / 2 >= floor ? s / 2 : s;
+		}
 		uint32_t PgsStepUp(uint32_t s) { return s < 16 ? s * 2 : 16; }
 
 		void PgsSet(uint32_t samples, bool down)
@@ -139,7 +145,7 @@ namespace PS5AutoQuality
 			if (speed < target * SLOW && load > PGS_BUSY)
 			{
 				s_pgs_room = 0;
-				if (++s_pgs_slow >= DOWN_SAMPLES && now > 1)
+				if (++s_pgs_slow >= DOWN_SAMPLES && PgsStepDown(now) < now)
 					PgsSet(PgsStepDown(now), true);
 				return;
 			}

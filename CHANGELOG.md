@@ -1,5 +1,18 @@
 # Crux2 - what changed
 
+## v1.0.10 (2026-10-24)
+
+- Added: with Statistics on, the on-screen display shows draws, barriers, render passes, copies,
+  read-backs and render-target copies a frame; GPU statistics shows the graphics card's time by kind.
+- Added: paraLLEl-GS pictures shared with the graphics device (experimental setting, off).
+- Changed: glow and flare draws that sample the screen keep their render pass (one barrier inside
+  it, as before v1.0.8's PCSX2 update), on the PS5 only.
+- Changed: automatic quality keeps paraLLEl-GS at 4 samples or more while its picture is at twice
+  the size; NIS hands enlargements past 2x to FSR instead of the screen's filter.
+- Fixed: paraLLEl-GS dithered 32-bit frame buffers; it dithers 16-bit ones only, as the PS2.
+- Fixed: paraLLEl-GS blended alpha masks at polygon edges at 4 and 8 samples (fringes around
+  shadows and glows); alpha stays exact, colours stay smooth.
+
 ## v1.0.9 (2026-10-24)
 
 - Fixed: paraLLEl-GS drew a picture of dots or froze in some games (since v1.0.8).

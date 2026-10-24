@@ -62,6 +62,11 @@ struct GSGpuOptions
     // copied into GSGpuFrame::rgba with alpha made opaque: one copy fewer on the graphics card thread, for a reader
     // that copies the picture on anyway (Crux2).
     bool mappedFrames = false;
+    // With mappedFrames: each picture is read back into host memory this renderer allocated itself (anonymous, page
+    // aligned) and imported into its device (VK_EXT_external_memory_host), so a reader with a Vulkan device of its own
+    // can import the same memory and copy the picture on its graphics card (GSGpuFrame::hostPointer): no processor
+    // copy. Off where the device cannot import host memory (said once). Crux2 on the PS5.
+    bool hostSharedFrames = false;
     // The graphics card's time measured with its timestamps (GSGpuStatus::gpuMsPerFrame): a query per pass.
     bool gpuTimestamps = false;
     std::string gpuSelector;
@@ -103,6 +108,17 @@ struct GSGpuFrame
     // GSGpuOptions::mappedFrames: the picture (width x height, R8G8B8A8, alpha as the GS left it), valid while the
     // reader holds this frame (until its next take); rgba stays empty.
     const uint8_t *pixels = nullptr;
+    // GSGpuOptions::hostSharedFrames: the memory pixels is in, for importing into another Vulkan device: hostBytes
+    // bytes from hostPointer (both multiples of the device's minImportedHostPointerAlignment). It is buffer hostIndex
+    // (0-31) of the renderer's ring, allocation hostId (never reused), of generation hostGeneration (raised when the
+    // ring is made again at a larger size). The memory stays mapped until the reader has said, through
+    // setHostReleased(), that it holds nothing of that generation; and buffer hostIndex is not written again while its
+    // bit is set through setHostReading(). Null when this picture is in an ordinary read-back buffer (pixels only).
+    const uint8_t *hostPointer = nullptr;
+    size_t hostBytes = 0;
+    int hostIndex = -1;
+    uint64_t hostId = 0;
+    uint64_t hostGeneration = 0;
     // Shown straight from the graphics card (VENDETTA_PRESENT=vulkan): the picture is in shared image sharedImage
     // (R8G8B8A8, width x height) of the current set (Windows handles sharedHandles, made again when sharedGeneration
     // changes), finished once the shared timeline semaphore (sharedTimeline) reaches seq; rgba stays empty. The
@@ -181,6 +197,11 @@ public:
     // The shared image the reader is drawing from (-1: none): the writer never draws into it. Set by the reader
     // before it uses a taken frame's image, cleared once its graphics card work on it is done.
     std::atomic<int> sharedReading{-1};
+    // Host-shared pictures (GSGpuOptions::hostSharedFrames): the ring's buffers the reader's graphics card may still be
+    // reading (bit n = hostIndex n; set before the reader takes the next frame, cleared once its work on it is done),
+    // and the newest generation of which the reader holds nothing any more (no import, no work pending).
+    std::atomic<uint32_t> hostReading{0u};
+    std::atomic<uint64_t> hostReleasedGeneration{0u};
 
 private:
     static constexpr uint32_t kFresh = 4u;
@@ -226,6 +247,10 @@ public:
     virtual void setOutputSize(uint32_t width, uint32_t height) = 0;
     // The main thread, with shared pictures: the shared image it is drawing from (-1 when done with it).
     virtual void setSharedReading(int image) { (void)image; }
+    // The main thread, with host-shared pictures: the buffers its graphics card may still read (bit n = hostIndex n),
+    // and the newest generation it holds nothing of (see GSGpuFrame::hostPointer).
+    virtual void setHostReading(uint32_t mask) { (void)mask; }
+    virtual void setHostReleased(uint64_t generation) { (void)generation; }
 
     // Any thread: live settings, taken at the next presentation.
     virtual void setSuperSampling(uint32_t rate) = 0; // 1, 2, 4, 8 or 16

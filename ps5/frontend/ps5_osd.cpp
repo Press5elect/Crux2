@@ -17,6 +17,8 @@
 
 #include "Config.h"
 #include "GS/GS.h"
+#include "GS/GSPerfMon.h"
+#include "GS/Renderers/Common/GSDevice.h"
 #include "Host.h"
 #include "ImGui/ImGuiManager.h"
 #include "PerformanceMetrics.h"
@@ -165,6 +167,68 @@ namespace PS5Osd
 					Add("GPU", Number(std::min(100.0f, PerformanceMetrics::GetGPUUsage()), 0), "%", GPU_NAME, HOT_VALUE);
 					Add("time", Number(PerformanceMetrics::GetGPUAverageTime(), 1), "ms", GPU_NAME, HOT_VALUE);
 				}
+			}
+
+			// ---- what the renderer did in a frame (Settings > On-screen display > Statistics): PCSX2's
+			// own counters, averaged over its windows of 32 frames (GSRenderer::VSync). Refresh runs on
+			// the GS thread (ImGuiManager::RenderOSD from GSRenderer::EndPresentFrame), whose state
+			// g_perfmon is.
+			if (GSConfig.OsdShowGSStats && GSGetCurrentRenderer() != GSRendererType::Null)
+			{
+				Section();
+				GSPerfMon& pm = g_perfmon;
+				const auto count = [](GSPerfMon::counter_t c) { return Number(std::ceil(g_perfmon.Get(c)), 0); };
+				if (GSGetCurrentRenderer() == GSRendererType::SW)
+				{
+					Add("prims", Number(pm.Get(GSPerfMon::Prim), 0), "", GPU_NAME, COOL_VALUE);
+					Add("draws", Number(pm.Get(GSPerfMon::Draw), 0), "", GPU_NAME, COOL_VALUE);
+					Add("syncs", count(GSPerfMon::SyncPoint), "", GPU_NAME, COOL_VALUE);
+				}
+				else
+				{
+					Add("prims", Number(pm.Get(GSPerfMon::Prim), 0), "", GPU_NAME, COOL_VALUE);
+					Add("draws", Number(pm.Get(GSPerfMon::Draw), 0), "", GPU_NAME, COOL_VALUE);
+					Add("calls", count(GSPerfMon::DrawCalls), "", GPU_NAME, COOL_VALUE);
+					Add("barriers", count(GSPerfMon::Barriers), "", GPU_NAME, COOL_VALUE);
+					Add("passes", count(GSPerfMon::RenderPasses), "", GPU_NAME, COOL_VALUE);
+					Add("copies", count(GSPerfMon::TextureCopies), "", GPU_NAME, COOL_VALUE);
+					Add("uploads", count(GSPerfMon::TextureUploads), "", GPU_NAME, COOL_VALUE);
+					Add("readbacks", count(GSPerfMon::Readbacks), "", GPU_NAME, pm.Get(GSPerfMon::Readbacks) > 0.0 ? HOT_VALUE : COOL_VALUE);
+					// Crux2's own: passes ended for a barrier on sampling the target (0 here unless
+					// framebuffer fetch is on), colour targets moved to the feedback loop layout (DCC
+					// decompressed), primitive ID DATE setups, copies of a target the draw reads.
+					Add("pass splits", count(GSPerfMon::BarriersExternal), "", GPU_NAME,
+						pm.Get(GSPerfMon::BarriersExternal) > 0.0 ? HOT_VALUE : COOL_VALUE);
+					Add("decompress", count(GSPerfMon::FeedbackDecompress), "", GPU_NAME,
+						pm.Get(GSPerfMon::FeedbackDecompress) > 0.0 ? HOT_VALUE : COOL_VALUE);
+					Add("DATE setup", count(GSPerfMon::DatePrimID), "", GPU_NAME, COOL_VALUE);
+					Add("RT copies", count(GSPerfMon::RTCopies), "", GPU_NAME, COOL_VALUE);
+				}
+			}
+
+			// ---- the graphics chip's work (Settings > On-screen display > GPU statistics): its time a
+			// frame by the kind of render pass (the latest window; the test log's sums are kept apart),
+			// and the shader invocations PCSX2 counts.
+			if (GSConfig.OsdShowGPUStats && g_gs_device && !pgs)
+			{
+				Section();
+				GSDevice::PS5GpuSections w;
+				if (g_gs_device->PS5GetGpuSections(w))
+				{
+					Add("GPU", Number(w.total_ms, 2), "ms", GPU_NAME, HOT_VALUE);
+					Add("ordered", Number(w.ordered_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("barrier", Number(w.barrier_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("draw", Number(w.draw_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("convert", Number(w.conversion_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("present", Number(w.present_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("outside", Number(w.outside_ms, 2), "ms", GPU_NAME, COOL_VALUE);
+					Add("timed", Number(w.passes, 0), "passes", GPU_NAME, COOL_VALUE);
+				}
+				const auto units = [](double v) {
+					return v >= 1e6 ? fmt::format("{:.1f}M", v / 1e6) : v >= 1e3 ? fmt::format("{:.1f}K", v / 1e3) : Number(v, 0);
+				};
+				Add("VS", units(PerformanceMetrics::GetGPUAverageVSInvocations()), "", GPU_NAME, COOL_VALUE);
+				Add("PS", units(PerformanceMetrics::GetGPUAveragePSInvocations()), "", GPU_NAME, COOL_VALUE);
 			}
 
 			// ---- the processor
