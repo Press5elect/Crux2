@@ -207,6 +207,8 @@ namespace PS5Osd
 					Add("RT copies", count(GSPerfMon::RTCopies), "", GPU_NAME, COOL_VALUE);
 					Add("barriers skipped", count(GSPerfMon::BarriersSkipped), "", GPU_NAME, COOL_VALUE);
 					Add("copies reused", count(GSPerfMon::RTCopiesReused), "", GPU_NAME, COOL_VALUE);
+					// Render passes the ordered view's draws kept (PS5ROVKeepPass): not in "passes".
+					Add("passes kept", count(GSPerfMon::ROVPassesKept), "", GPU_NAME, COOL_VALUE);
 				}
 			}
 

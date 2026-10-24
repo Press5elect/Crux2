@@ -91,11 +91,19 @@ def pins() -> dict:
         certifi_version = "unknown"
     pcsx2 = subprocess.run(["git", "-C", str(ROOT / "vendor/pcsx2"), "rev-parse", "HEAD"], capture_output=True,
                            text=True).stdout.strip() or "unknown"
+    # The patch folder the linked RADV archive was built from (build-radv-crux2.sh writes it into PROVENANCE.txt).
+    mesa_patches = "ps5/patches/mesa"
+    provenance = ROOT.parent / "PS5_Vulkan/.deps/native/radv-crux2/PROVENANCE.txt"
+    if provenance.exists():
+        import re as _re
+        m = _re.search(r"with (ps5/patches/[\w.-]+)", provenance.read_text(errors="replace"))
+        if m:
+            mesa_patches = m.group(1)
     return {
         "@pcsx2": pcsx2 + " + ps5/patches/pcsx2/ps5.patch",
         "@sdk": read(ROOT / ".deps/native/ps5-payload-sdk/.ps5-sdk-revision"),
         "@vulkan": git_revision(vulkan),
-        "@mesa": mesa + " + ps5/patches/mesa/ (" + ", ".join(sorted(p.stem for p in (ROOT / "ps5/patches/mesa").glob("*.patch"))) +
+        "@mesa": mesa + " + " + mesa_patches + "/ (" + ", ".join(sorted(p.stem for p in (ROOT / mesa_patches).glob("*.patch"))) +
                  "; 0007 and 0009 from PS5CEMU-HAR, GPL-3.0)",
         "@template": git_revision(ROOT.parent / "PS5_VulkanTemplate"),
         "@boilerplate": git_revision(ROOT.parent / "ps5-native-app-boilerplate"),

@@ -468,6 +468,23 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.13 changed
+
+Changed:
+- **Draws through the rasterizer ordered view keep their render pass** (accurate blending at
+  light sources): a scene that started a render pass for nearly every draw starts a few hundred,
+  far less work for the GS thread (*Keep the ordered view's render passes*, on).
+- **Built on Mesa 27.0-devel's RADV** (Mesa's main branch; was 26.2.5): less work for the
+  processor at each draw, fewer cache flushes, fixes to compressed depth and colour buffers.
+
+Fixed:
+- **The graphics chip's own hardware bugs** are worked around as for its real generation: the
+  shader compiler's hazard workarounds and two geometry hang guards were off.
+- **Graphics switches that take effect at the next start** took effect only when Crux2 started;
+  they are read at each game's start now.
+- **The boot log's settings line** showed the settings from before a game's database fixes were
+  applied; a `game fixes:` line now lists them.
+
 ## What v1.0.12 changed
 
 Added:

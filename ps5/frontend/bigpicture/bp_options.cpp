@@ -854,23 +854,6 @@ Page graphicsPage(int layer, bool forGame)
 		{"Automatic", "Off", "As the PS2", "Always"}, -1))));
 	rows.push_back(hw(listOf("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle. Costs little", GS, "MaxAnisotropy", 0,
 		{"Off", "2x", "4x", "8x", "16x"}, {0, 2, 4, 8, 16})));
-	rows.push_back(adv(hw(toggle("Keep read render targets uncompressed (experimental)",
-		"A render target a glow or flare reads from itself stays in the layout that allows it, instead of being decompressed by the "
-		"graphics chip each time a draw reads it again: faster at light sources in some games. Takes effect at the next start",
-		GS, "PS5HoldFeedbackLayout", false, Option::NextStart))));
-	rows.push_back(adv(hw(toggle("Render targets without compression (experimental)",
-		"Every render target is made without the graphics chip's colour compression, so it never has to be decompressed when a "
-		"glow, flare or light cone reads it: can be faster where those effects slow a game down, but every other draw moves more "
-		"data, so it can also be slower. Compare a scene's speed with it off and on. Takes effect at the next start",
-		GS, "PS5RTNoCompression", false, Option::NextStart))));
-	rows.push_back(adv(hw(toggle("Leave out barriers with nothing to wait for",
-		"A draw that reads the picture it draws on waits for the graphics chip only when something was drawn there since the last "
-		"wait. The picture is the same; off makes every wait, as PCSX2 does. Takes effect at the next start",
-		GS, "PS5SkipRedundantBarriers", true, Option::NextStart))));
-	rows.push_back(adv(hw(toggle("Reuse copies of the picture",
-		"A copy of the picture that a glow or blur reads is used again while nothing has been drawn into it since. The picture is "
-		"the same; switch off if an effect ever looks a frame behind. Takes effect at the next start",
-		GS, "PS5ReuseRTCopies", true, Option::NextStart))));
 	rows.push_back(adv(hwAny(list("Dithering", "The fine pattern the PS2 lays over colour gradients. With paraLLEl-GS: Off and Force 32 bit "
 		"draw without it (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end), Scaled and Unscaled "
 		"as the PS2", GS, "dithering_ps2", 2,
@@ -962,6 +945,28 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Advanced
 	rows.push_back(heading("ADVANCED", ADV));
+	rows.push_back(adv(hw(toggle("Keep read render targets uncompressed (experimental)",
+		"A render target a glow or flare reads from itself stays in the layout that allows it, instead of being decompressed by the "
+		"graphics chip each time a draw reads it again: faster at light sources in some games. Takes effect at the next start",
+		GS, "PS5HoldFeedbackLayout", false, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Render targets without compression (experimental)",
+		"Every render target is made without the graphics chip's colour compression, so it never has to be decompressed when a "
+		"glow, flare or light cone reads it: can be faster where those effects slow a game down, but every other draw moves more "
+		"data, so it can also be slower. Compare a scene's speed with it off and on. Takes effect at the next start",
+		GS, "PS5RTNoCompression", false, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Leave out barriers with nothing to wait for",
+		"A draw that reads the picture it draws on waits for the graphics chip only when something was drawn there since the last "
+		"wait. The picture is the same; off makes every wait, as PCSX2 does. Takes effect at the next start",
+		GS, "PS5SkipRedundantBarriers", true, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Reuse copies of the picture",
+		"A copy of the picture that a glow or blur reads is used again while nothing has been drawn into it since. The picture is "
+		"the same; switch off if an effect ever looks a frame behind. Takes effect at the next start",
+		GS, "PS5ReuseRTCopies", true, Option::NextStart))));
+	rows.push_back(adv(hw(toggle("Keep the ordered view's render passes",
+		"With Rasterizer ordered view, draws that blend and draws that do not stay in one render pass instead of each "
+		"starting its own: far less work for the processor at lit scenes. The picture is the same; off ends the pass as "
+		"PCSX2 does. Takes effect at the next start",
+		GS, "PS5ROVKeepPass", true, Option::NextStart))));
 	rows.push_back(list("Hardware download mode", "How the emulation waits for pictures a game reads back. With paraLLEl-GS, a read waits for everything "
 		"drawn before it: \"Unsynchronised\" does not wait for the card and answers zeros where it has not finished (a game that reads what it "
 		"has just drawn gets zeros every time), \"Off\" reads nothing; both faster, both wrong where the game uses what it read", GS, "HWDownloadMode", 0,

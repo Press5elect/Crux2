@@ -1,5 +1,17 @@
 # Crux2 - what changed
 
+## v1.0.13 (2026-10-24)
+
+- Changed: built on Mesa 27.0-devel's RADV (Mesa's main branch; was 26.2.5).
+- Changed: draws through the rasterizer ordered view (accurate blending) keep their render pass:
+  a scene that started one for nearly every draw (light sources) starts a few hundred.
+- Fixed: the graphics chip's own hardware bugs are worked around as for its real generation
+  (shader compiler hazards, two geometry hang guards).
+- Fixed: the graphics switches that take effect at the next start only took effect when Crux2
+  started.
+- Fixed: the boot log showed the settings from before a game's database fixes were applied; it
+  now lists those fixes.
+
 ## v1.0.12 (2026-10-24)
 
 - Changed: a draw that reads the picture it draws on waits for the graphics chip only when

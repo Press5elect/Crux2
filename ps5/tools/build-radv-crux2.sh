@@ -6,6 +6,11 @@
 # patch of ps5/patches/mesa applied in order, built by PS5_Vulkan's tools/build-radv.sh release.
 #
 #   ps5/tools/build-radv-crux2.sh
+#   CRUX2_MESA_PATCHES=ps5/patches/mesa ps5/tools/build-radv-crux2.sh   (Mesa 26.2.5 instead)
+#
+# CRUX2_MESA_PATCHES names the folder of patches applied to the pin (ps5/patches/mesa-27 unless set;
+# a relative path is taken from the repository's root): ps5/patches/mesa-27 carries the merge of
+# Mesa main (27.0-devel) in place of the 26.2.x one. Either way the result is radv-crux2.
 #
 # Makes branch crux2-radv in ../PS5_Mesa (the pin plus one commit a patch; nothing is pushed),
 # builds it, and puts the archive in PS5_Vulkan's .deps/native/radv-crux2, which ps5/tools/build.sh
@@ -15,7 +20,11 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 vulkan=${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}
 mesa=${PS5_MESA_FORK:-$root/../PS5_Mesa}
-patches="$root/ps5/patches/mesa"
+patches=${CRUX2_MESA_PATCHES:-ps5/patches/mesa-27}
+[[ $patches == /* ]] || patches="$root/$patches"
+[[ -d $patches ]] && compgen -G "$patches/*.patch" > /dev/null ||
+	{ echo "build-radv-crux2: no patches in $patches" >&2; exit 1; }
+patches_name=${patches#"$root"/}
 
 pin=$(sed -n 's/^mesa_revision=\${PS5_MESA_REVISION:-\([0-9a-f]*\)}$/\1/p' "$vulkan/tools/build-radv.sh")
 [[ -n "$pin" ]] || { echo "build-radv-crux2: PS5_Vulkan's tools/build-radv.sh names no Mesa revision" >&2; exit 1; }
@@ -49,7 +58,7 @@ rm -rf "$native/radv-crux2"
 mv "$native/radv-release" "$native/radv-crux2"
 {
 	echo
-	echo "Crux2: PS5 Mesa $pin with ps5/patches/mesa:"
+	echo "Crux2: PS5 Mesa $pin with $patches_name:"
 	for patch in "$patches"/*.patch; do echo "  $(basename "$patch")"; done
 } >> "$native/radv-crux2/PROVENANCE.txt"
 echo "==> $native/radv-crux2 (Mesa crux2-radv ${revision:0:11}); ps5/tools/build.sh links it"
