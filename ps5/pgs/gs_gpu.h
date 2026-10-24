@@ -79,6 +79,10 @@ struct GSGpuScanout
     bool mipmaps = true;          // the game's mipmaps read (off: always the full texture, more detail, can break games)
     bool sharp2D = false;         // sprites and flat UI super-sampled like the 3-D
     bool backbufferPromotion = false; // a final blit's source shown instead of its blurred/dithered copy (a hack)
+    // A read of GS memory the graphics card has not finished drawing answers zeros instead of waiting for it
+    // (paraLLEl-GS's unsynced read-backs): faster where a game reads its picture back every frame, wrong where
+    // it uses what it read. Off: every read waits and is right.
+    bool unsyncedReadbacks = false;
 };
 
 // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).
@@ -135,6 +139,14 @@ struct GSGpuStatus
     float gpuShadingMs = 0.0f;  // the shading (the super-samples' work)
     float gpuUploadMs = 0.0f;   // uploads into GS memory, copies, palettes, textures
     float gpuScanoutMs = 0.0f;  // scan-out and read-back
+    // Reads of GS memory by the emulator (readTransfer, snapshotVram) over the last second: how many a presented
+    // frame, and how long a frame the emulator's thread stood waiting for them (the ring drained to the read,
+    // and the graphics card caught up to what it reads). A read waits for everything queued before it, so
+    // reads every frame serialise the emulator and the graphics card: that time is the cost.
+    float readbacksPerFrame = 0.0f;
+    float readbackWaitMs = 0.0f;
+    // How long a frame the emulator's thread waited for room in the ring (the renderer thread behind).
+    float ringWaitMs = 0.0f;
 };
 
 // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).

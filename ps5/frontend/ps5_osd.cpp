@@ -181,6 +181,8 @@ namespace PS5Osd
 					{
 						Add("PGS", Number(std::min(100.0f, pf.thread_percent), 0), "%", CPU_NAME, HOT_VALUE);
 						Add("wait", Number(pf.wait_ms, 1), "ms", CPU_NAME, HOT_VALUE); // the GS thread's, for the graphics card
+						if (pf.readbacks > 0.0f) // the game reads its picture back: what that stall costs a frame
+							Add("reads", Number(pf.readback_wait_ms, 1), "ms", CPU_NAME, HOT_VALUE);
 					}
 					const u32 sw = PerformanceMetrics::GetGSSWThreadCount();
 					for (u32 t = 0; t < sw; t++)

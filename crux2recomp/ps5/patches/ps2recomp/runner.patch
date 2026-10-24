@@ -26,10 +26,10 @@ index 3bee601..2320a3f 100644
  
  #endif // PS2_RUNTIME_H
 diff --git a/ps2xRuntime/include/runtime/gs/gs_gpu.h b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-index e9f8308..1e509f0 100644
+index e9f8308..10fa6fd 100644
 --- a/ps2xRuntime/include/runtime/gs/gs_gpu.h
 +++ b/ps2xRuntime/include/runtime/gs/gs_gpu.h
-@@ -58,11 +58,29 @@ struct GSGpuOptions
+@@ -58,11 +58,33 @@ struct GSGpuOptions
      bool libraryLog = false;
      bool sync = false;
      size_t ringBytes = size_t{16} << 20u;
@@ -54,12 +54,16 @@ index e9f8308..1e509f0 100644
 +    bool mipmaps = true;          // the game's mipmaps read (off: always the full texture, more detail, can break games)
 +    bool sharp2D = false;         // sprites and flat UI super-sampled like the 3-D
 +    bool backbufferPromotion = false; // a final blit's source shown instead of its blurred/dithered copy (a hack)
++    // A read of GS memory the graphics card has not finished drawing answers zeros instead of waiting for it
++    // (paraLLEl-GS's unsynced read-backs): faster where a game reads its picture back every frame, wrong where
++    // it uses what it read. Off: every read waits and is right.
++    bool unsyncedReadbacks = false;
 +};
 +
  // One finished picture, read back from the graphics card. 0 × 0 = nothing displayed (black).
  struct GSGpuFrame
  {
-@@ -76,6 +94,9 @@ struct GSGpuFrame
+@@ -76,6 +98,9 @@ struct GSGpuFrame
      uint32_t modeHeight = 0;
      bool highResolution = false;
      std::vector<uint8_t> rgba;
@@ -69,7 +73,7 @@ index e9f8308..1e509f0 100644
      // Shown straight from the graphics card (VENDETTA_PRESENT=vulkan): the picture is in shared image sharedImage
      // (R8G8B8A8, width x height) of the current set (Windows handles sharedHandles, made again when sharedGeneration
      // changes), finished once the shared timeline semaphore (sharedTimeline) reaches seq; rgba stays empty. The
-@@ -101,6 +122,19 @@ struct GSGpuStatus
+@@ -101,6 +126,27 @@ struct GSGpuStatus
      float presentsPerSecond = 0.0f;
      float gifMegabytesPerSecond = 0.0f;
      float renderPassesPerSecond = 0.0f;
@@ -86,10 +90,18 @@ index e9f8308..1e509f0 100644
 +    float gpuShadingMs = 0.0f;  // the shading (the super-samples' work)
 +    float gpuUploadMs = 0.0f;   // uploads into GS memory, copies, palettes, textures
 +    float gpuScanoutMs = 0.0f;  // scan-out and read-back
++    // Reads of GS memory by the emulator (readTransfer, snapshotVram) over the last second: how many a presented
++    // frame, and how long a frame the emulator's thread stood waiting for them (the ring drained to the read,
++    // and the graphics card caught up to what it reads). A read waits for everything queued before it, so
++    // reads every frame serialise the emulator and the graphics card: that time is the cost.
++    float readbacksPerFrame = 0.0f;
++    float readbackWaitMs = 0.0f;
++    // How long a frame the emulator's thread waited for room in the ring (the renderer thread behind).
++    float ringWaitMs = 0.0f;
  };
  
  // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).
-@@ -108,6 +142,7 @@ class GSGpuFrameMailbox
+@@ -108,6 +154,7 @@ class GSGpuFrameMailbox
  {
  public:
      GSGpuFrame &writeSlot() noexcept { return m_slot[m_back]; }
@@ -97,7 +109,7 @@ index e9f8308..1e509f0 100644
      void publish() noexcept
      {
          m_back = m_middle.exchange(m_back | kFresh, std::memory_order_acq_rel) & kIndexMask;
-@@ -155,6 +190,12 @@ public:
+@@ -155,6 +202,12 @@ public:
      // The producer, blocking: answered after everything sent before (GS memory as of this point in the order).
      virtual void snapshotVram(std::vector<uint8_t> &out) = 0;              // all 4 MiB
      virtual uint32_t readTransfer(uint8_t *dst, uint32_t maxBytes) = 0;    // a local -> host transfer's data
@@ -110,7 +122,7 @@ index e9f8308..1e509f0 100644
  
      // The game thread, holding no lock: wait while more than maxAhead presentations are not yet drawn.
      virtual bool waitPresentBacklog(uint32_t maxAhead, const std::atomic<bool> &stop) = 0;
-@@ -172,6 +213,7 @@ public:
+@@ -172,6 +225,7 @@ public:
      virtual void setHighResolution(bool on) = 0;
      virtual void setFsr(bool on) = 0;
      virtual void setSharpness(float stops) = 0;
@@ -162,7 +174,7 @@ index 8fa3249..f137353 100644
      return converter.PresentFromLocalMemory(request);
  }
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
-index 7bb06d3..9088f6f 100644
+index 7bb06d3..124064e 100644
 --- a/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu_parallel.cpp
 @@ -18,8 +18,18 @@
@@ -284,7 +296,35 @@ index 7bb06d3..9088f6f 100644
              uint8_t *dst = nullptr;
              uint32_t bytes = 0u;
              uint32_t result = 0u;
-@@ -451,10 +502,7 @@ namespace
+@@ -395,8 +446,12 @@ namespace
+             std::memcpy(dst, &pointer, sizeof(pointer));
+             commit();
+             publish();
++            const auto start = Clock::now();
+             waitProgress("the graphics card to read GS memory back", [&]()
+                          { return m_stop.load(std::memory_order_relaxed) || call.done.load(std::memory_order_acquire); });
++            m_callWaitNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()),
++                                   std::memory_order_relaxed);
++            m_callCount.fetch_add(1u, std::memory_order_relaxed);
+         }
+ 
+         uint8_t *reserve(Cmd cmd, uint32_t payloadBytes)
+@@ -412,11 +467,14 @@ namespace
+                 if (m_size - (m_localWrite - m_cachedRead) < needed)
+                 {
+                     publish();
++                    const auto start = Clock::now();
+                     waitProgress("room in the graphics card's ring", [&]()
+                                  {
+                                      m_cachedRead = m_readPos.load(std::memory_order_acquire);
+                                      return m_stop.load(std::memory_order_relaxed) ||
+                                             m_size - (m_localWrite - m_cachedRead) >= needed; });
++                    m_ringWaitNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()),
++                                           std::memory_order_relaxed);
+                 }
+             }
+             if (wrap)
+@@ -451,10 +509,7 @@ namespace
              m_published = m_localWrite;
              m_writePos.store(m_localWrite, std::memory_order_seq_cst);
              if (m_consumerSleeping.load(std::memory_order_seq_cst) != 0u)
@@ -296,7 +336,7 @@ index 7bb06d3..9088f6f 100644
          }
  
          void drain()
-@@ -470,13 +518,13 @@ namespace
+@@ -470,13 +525,13 @@ namespace
          template <typename Pred>
          void waitProgress(const char *what, Pred pred)
          {
@@ -312,7 +352,7 @@ index 7bb06d3..9088f6f 100644
              bool reported = false;
              std::unique_lock<std::mutex> lock(m_progressMutex);
              m_producerWaiting.fetch_add(1u, std::memory_order_seq_cst);
-@@ -496,6 +544,14 @@ namespace
+@@ -496,6 +551,14 @@ namespace
  
          // ---- the graphics card thread -------------------------------------------------------------------------
  
@@ -327,7 +367,7 @@ index 7bb06d3..9088f6f 100644
          void publishProgress(uint64_t readPos)
          {
              m_readPos.store(readPos, std::memory_order_seq_cst);
-@@ -505,7 +561,15 @@ namespace
+@@ -505,7 +568,15 @@ namespace
  
          void threadMain()
          {
@@ -343,7 +383,7 @@ index 7bb06d3..9088f6f 100644
              GpuLog logger(m_options.libraryLog);
              Util::set_thread_logging_interface(&logger);
  
-@@ -521,8 +585,13 @@ namespace
+@@ -521,8 +592,13 @@ namespace
  
              try
              {
@@ -357,7 +397,7 @@ index 7bb06d3..9088f6f 100644
  
                  // Closed in reverse order: the GS interface, the device (both explicitly, below), then the context.
                  Vulkan::Context context;
-@@ -552,6 +621,12 @@ namespace
+@@ -552,6 +628,12 @@ namespace
                      return fail(std::string("paraLLEl-GS could not start on ") + context.get_gpu_props().deviceName +
                                  " (it needs descriptor indexing, timeline semaphores, 8/16-bit storage and subgroup "
                                  "size control)");
@@ -370,7 +410,7 @@ index 7bb06d3..9088f6f 100644
  
                  {
                      // 2-D detail: VENDETTA_UPSCALE_SPRITES=1 (settings.toml graphics.sharp_2d) super-samples sprites
-@@ -559,9 +634,17 @@ namespace
+@@ -559,9 +641,18 @@ namespace
                      // own pixel; VENDETTA_HIRES4=0: 2x as before). VENDETTA_PROMOTE=1 (a test): show a final blit's
                      // source instead (paraLLEl-GS's backbuffer promotion).
                      auto on = [](const char *name) { const char *v = std::getenv(name); return v && *v && *v != '0'; };
@@ -387,10 +427,11 @@ index 7bb06d3..9088f6f 100644
 +                    hacks.upscale_sprites = m_lastScanoutSettings.sharp2D;
 +                    hacks.backbuffer_promotion = m_lastScanoutSettings.backbufferPromotion;
 +                    hacks.disable_mipmaps = !m_lastScanoutSettings.mipmaps;
++                    hacks.unsynced_readbacks = m_lastScanoutSettings.unsyncedReadbacks;
                      gs.set_hacks(hacks);
                      const char *hires4 = std::getenv("VENDETTA_HIRES4");
                      m_quadScanout = !(hires4 && *hires4 == '0');
-@@ -612,6 +695,12 @@ namespace
+@@ -612,6 +703,12 @@ namespace
                  m_gs = nullptr;
                  m_device = nullptr;
                  m_lastScanout = {};
@@ -403,7 +444,7 @@ index 7bb06d3..9088f6f 100644
                  m_readback.reset();
                  m_fsrUpscaled.reset();
                  m_fsrSharpened.reset();
-@@ -620,8 +709,10 @@ namespace
+@@ -620,8 +717,10 @@ namespace
                  m_sharedTimeline.reset();
                  closeSharedHandles(m_sharedHandles);
                  closeSharedHandles(m_sharedOldHandles);
@@ -414,7 +455,7 @@ index 7bb06d3..9088f6f 100644
                  m_sharedTimelineHandle = nullptr;
                  // The GS interface first: it submits the command buffers it holds (waiting for the device while it
                  // holds one never ends), then the device.
-@@ -652,25 +743,34 @@ namespace
+@@ -652,25 +751,34 @@ namespace
                      publishProgress(read);
                      if (m_stop.load(std::memory_order_acquire))
                          return;
@@ -457,7 +498,7 @@ index 7bb06d3..9088f6f 100644
                  while (read != write)
                  {
                      if (m_stop.load(std::memory_order_relaxed))
-@@ -699,6 +799,13 @@ namespace
+@@ -699,6 +807,13 @@ namespace
                          publishProgress(read);
                      }
                  }
@@ -471,7 +512,7 @@ index 7bb06d3..9088f6f 100644
                  publishProgress(read);
                  reportStats();
              }
-@@ -711,26 +818,31 @@ namespace
+@@ -711,26 +826,31 @@ namespace
              case Cmd::Wrap:
                  break;
              case Cmd::Gif:
@@ -507,7 +548,7 @@ index 7bb06d3..9088f6f 100644
                  }
                  catch (...)
                  {
-@@ -755,9 +867,11 @@ namespace
+@@ -755,9 +875,11 @@ namespace
              }
          }
  
@@ -520,7 +561,7 @@ index 7bb06d3..9088f6f 100644
              switch (call.kind)
              {
              case CallRecord::Snapshot:
-@@ -770,6 +884,55 @@ namespace
+@@ -770,6 +892,55 @@ namespace
                  m_gs->read_transfer_fifo(call.dst, call.bytes / 16u);
                  call.result = call.bytes & ~15u;
                  break;
@@ -576,7 +617,7 @@ index 7bb06d3..9088f6f 100644
              }
          }
  
-@@ -796,6 +959,35 @@ namespace
+@@ -796,6 +967,50 @@ namespace
                  static_cast<float>((m_stats.gifBytes - m_statusBase.gifBytes) / seconds / 1048576.0);
              status.renderPassesPerSecond =
                  static_cast<float>((m_stats.renderPasses - m_statusBase.renderPasses) / seconds);
@@ -586,6 +627,21 @@ index 7bb06d3..9088f6f 100644
 +            status.flushPercent = share(m_stats.flush, m_statusBase.flush);
 +            status.vsyncPercent = share(m_stats.vsync, m_statusBase.vsync);
 +            status.readbackPercent = share(m_stats.readback, m_statusBase.readback);
++            {
++                const double presents = static_cast<double>(m_stats.presents - m_statusBase.presents);
++                const uint64_t callWait = m_callWaitNs.load(std::memory_order_relaxed);
++                const uint64_t callCount = m_callCount.load(std::memory_order_relaxed);
++                const uint64_t ringWait = m_ringWaitNs.load(std::memory_order_relaxed);
++                if (presents > 0.0)
++                {
++                    status.readbacksPerFrame = static_cast<float>((callCount - m_callCountBase) / presents);
++                    status.readbackWaitMs = static_cast<float>((callWait - m_callWaitBase) / 1.0e6 / presents);
++                    status.ringWaitMs = static_cast<float>((ringWait - m_ringWaitBase) / 1.0e6 / presents);
++                }
++                m_callWaitBase = callWait;
++                m_callCountBase = callCount;
++                m_ringWaitBase = ringWait;
++            }
 +            if (m_options.gpuTimestamps && m_gs)
 +            {
 +                // The accumulated GPU time by kind since the last status (seconds), as ms a presented frame.
@@ -612,7 +668,7 @@ index 7bb06d3..9088f6f 100644
              {
                  std::lock_guard<std::mutex> lock(m_statusMutex);
                  m_status = status;
-@@ -860,16 +1052,42 @@ namespace
+@@ -860,16 +1075,44 @@ namespace
                  }
              }
  
@@ -626,18 +682,20 @@ index 7bb06d3..9088f6f 100644
 +                }
 +                const GSGpuScanout &last = m_lastScanoutSettings;
 +                if (want.mipmaps != last.mipmaps || want.sharp2D != last.sharp2D ||
-+                    want.backbufferPromotion != last.backbufferPromotion)
++                    want.backbufferPromotion != last.backbufferPromotion || want.unsyncedReadbacks != last.unsyncedReadbacks)
 +                {
 +                    ParallelGS::Hacks hacks{};
 +                    hacks.upscale_sprites = want.sharp2D;
 +                    hacks.backbuffer_promotion = want.backbufferPromotion;
 +                    hacks.disable_mipmaps = !want.mipmaps;
++                    hacks.unsynced_readbacks = want.unsyncedReadbacks;
 +                    gs.set_hacks(hacks);
 +                }
 +                settingsChanged |= want.forceProgressive != last.forceProgressive || want.antiBlur != last.antiBlur ||
 +                                   want.overscan != last.overscan || want.crtcOffsets != last.crtcOffsets ||
 +                                   want.mipmaps != last.mipmaps || want.sharp2D != last.sharp2D ||
-+                                   want.backbufferPromotion != last.backbufferPromotion;
++                                   want.backbufferPromotion != last.backbufferPromotion ||
++                                   want.unsyncedReadbacks != last.unsyncedReadbacks;
 +                m_lastScanoutSettings = want;
 +            }
 +            const GSGpuScanout &scanout = m_lastScanoutSettings;
@@ -661,7 +719,7 @@ index 7bb06d3..9088f6f 100644
              const uint32_t wantSsaa = m_wantSsaa.load(std::memory_order_relaxed);
              if (wantSsaa != m_currentSsaa)
              {
-@@ -933,12 +1151,16 @@ namespace
+@@ -933,12 +1176,16 @@ namespace
          // fsrOutput != 0: upscaled + sharpened to that size first (packed width << 32 | height).
          void readBack(const ParallelGS::ScanoutResult &scanout, uint64_t fsrOutput)
          {
@@ -678,7 +736,7 @@ index 7bb06d3..9088f6f 100644
                  m_frames.publish();
                  m_lastFrameWidth = m_lastFrameHeight = 0u;
                  return;
-@@ -996,42 +1218,110 @@ namespace
+@@ -996,42 +1243,110 @@ namespace
                  return;
              }
              frame.shared = false;
@@ -811,7 +869,7 @@ index 7bb06d3..9088f6f 100644
          // shown through Vulkan: the picture copied into one of four images shared with the window's own Vulkan device
          // (no read back): one the window isn't drawing from and that isn't one of the two newest pictures. It is handed
          // over in the sampling layout, released to the "external" queue family; the shared timeline semaphore reaches the
-@@ -1039,6 +1329,10 @@ namespace
+@@ -1039,6 +1354,10 @@ namespace
          bool shareFrame(GSGpuFrame &frame, Vulkan::CommandBufferHandle &cmd, const Vulkan::Image &source,
                          uint32_t width, uint32_t height)
          {
@@ -822,7 +880,7 @@ index 7bb06d3..9088f6f 100644
              if (!m_sharedTimeline)
              {
                  m_sharedTimeline = m_device->request_semaphore_external(VK_SEMAPHORE_TYPE_TIMELINE,
-@@ -1117,14 +1411,17 @@ namespace
+@@ -1117,14 +1436,17 @@ namespace
              m_sharedNewest[1] = m_sharedNewest[0];
              m_sharedNewest[0] = target;
              return true;
@@ -840,7 +898,17 @@ index 7bb06d3..9088f6f 100644
                  handle = nullptr;
              }
          }
-@@ -1241,13 +1538,24 @@ namespace
+@@ -1234,6 +1556,9 @@ namespace
+         uint64_t m_cachedRead = 0u;
+         uint64_t m_pendingRecordBytes = 0u;
+         alignas(64) std::atomic<uint64_t> m_presentsIssued{0u};
++        // The emulator's thread's waits (written there, read at a status): on reads of GS memory, and for room.
++        std::atomic<uint64_t> m_callWaitNs{0u}, m_callCount{0u}, m_ringWaitNs{0u};
++        uint64_t m_callWaitBase = 0u, m_callCountBase = 0u, m_ringWaitBase = 0u; // the graphics card thread only
+ 
+         // the graphics card thread only
+         alignas(64) Vulkan::Device *m_device = nullptr;
+@@ -1241,13 +1566,24 @@ namespace
          bool m_quadScanout = false;
          ParallelGS::ScanoutResult m_lastScanout{};
          Vulkan::BufferHandle m_readback;
@@ -866,7 +934,7 @@ index 7bb06d3..9088f6f 100644
          std::atomic<uint32_t> m_producerWaiting{0u};
          std::mutex m_progressMutex;
          std::condition_variable m_progressCv;
-@@ -1259,7 +1567,7 @@ namespace
+@@ -1259,7 +1595,7 @@ namespace
          struct Stats
          {
              Clock::time_point since{};
@@ -875,7 +943,7 @@ index 7bb06d3..9088f6f 100644
              uint64_t gifBytes = 0, presents = 0, scanouts = 0, renderPasses = 0, primitives = 0;
          };
          bool m_profile = false;
-@@ -1273,6 +1581,10 @@ namespace
+@@ -1273,6 +1609,10 @@ namespace
          std::atomic<bool> m_wantFsr{true};
          std::atomic<float> m_wantSharpness{0.5f};
          std::atomic<uint64_t> m_outputSize{0u};
@@ -886,7 +954,7 @@ index 7bb06d3..9088f6f 100644
          // the graphics card thread only
          uint32_t m_currentSsaa = 0u;
          bool m_lastHires = false;
-@@ -1301,7 +1613,7 @@ namespace
+@@ -1301,7 +1641,7 @@ namespace
      };
  }
  

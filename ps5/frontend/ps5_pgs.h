@@ -76,6 +76,9 @@ namespace PS5PGS
 		float gpu_setup_ms = 0.0f, gpu_shading_ms = 0.0f, gpu_upload_ms = 0.0f, gpu_scanout_ms = 0.0f;
 		float thread_percent = 0.0f; // paraLLEl-GS's own thread, busy
 		float wait_ms = 0.0f;      // what the GS thread waited a frame for the graphics card to catch up
+		float readbacks = 0.0f;    // reads of GS memory by the game a frame (its picture read back)
+		float readback_wait_ms = 0.0f; // what those reads cost the GS thread a frame (everything queued drained first)
+		float ring_wait_ms = 0.0f; // what the GS thread waited a frame for room (paraLLEl-GS's thread behind)
 		float presents = 0.0f;     // presents a second
 		uint32_t samples = 0;      // samples a pixel now
 	};

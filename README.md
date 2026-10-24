@@ -468,6 +468,21 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.7 changed
+
+Added:
+- **paraLLEl-GS counts the game's reads of GS memory** and what they cost. A read waits for
+  everything drawn before it, so a game that reads its picture back every frame runs the
+  emulator and the graphics card in turn, with nothing at 100%: the on-screen display's processor
+  section gets a *reads* row (the GS thread's time a frame in those waits) while a game reads, and
+  the boot log's paraLLEl-GS status line says how many reads a frame and what they cost.
+
+Changed:
+- **Hardware download mode works with paraLLEl-GS**: *Unsynchronised* answers a read of what the
+  graphics card has not finished with zeros instead of waiting for it, *Off* reads nothing; both
+  faster, both wrong where the game uses what it read. The other modes wait and are right, as
+  before.
+
 ## What v1.0.6 changed
 
 Added:

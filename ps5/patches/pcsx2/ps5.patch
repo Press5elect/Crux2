@@ -6796,7 +6796,7 @@ index 4faad6c..d1cb291 100644
 +}
 +#endif
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa0..02bd134 100644
+index 59f5aa0..556bf31 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
 @@ -1,6 +1,9 @@
@@ -6820,21 +6820,22 @@ index 59f5aa0..02bd134 100644
  	s_thread.Start(&MTGS::ThreadEntryPoint);
  }
  
-@@ -282,7 +289,13 @@ void MTGS::PostVsyncStart(bool registers_written)
+@@ -282,7 +289,14 @@ void MTGS::PostVsyncStart(bool registers_written)
  
  void MTGS::InitAndReadFIFO(u8* mem, u32 qwc)
  {
 +#ifdef __PROSPERO__
-+	// (PS5: paraLLEl-GS answers every read in order: the readback settings are PCSX2's renderer's.)
++	// (PS5: paraLLEl-GS answers every read in order, and "Unsynchronised" is its own: a read of what the graphics
++	// card has not finished answers zeros instead of waiting (PS5PGS::SendScanout). "Off" reads nothing, as here.)
 +	if (EmuConfig.GS.HWDownloadMode >= GSHardwareDownloadMode::Unsynchronized && GSIsHardwareRenderer() &&
-+		!PS5PGS::Active())
++		(!PS5PGS::Active() || EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Disabled))
 +#else
  	if (EmuConfig.GS.HWDownloadMode >= GSHardwareDownloadMode::Unsynchronized && GSIsHardwareRenderer())
 +#endif
  	{
  		if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
  			GSReadLocalMemoryUnsync(mem, qwc, vif1.BITBLTBUF._u64, vif1.TRXPOS._u64, vif1.TRXREG._u64);
-@@ -335,7 +348,16 @@ void MTGS::MainLoop()
+@@ -335,7 +349,16 @@ void MTGS::MainLoop()
  		else
  		{
  			mtvu_lock.unlock();

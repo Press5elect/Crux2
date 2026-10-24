@@ -1,5 +1,12 @@
 # Crux2 - what changed
 
+## v1.0.7 (2026-10-24)
+
+- Added: paraLLEl-GS counts the game's reads of GS memory and what they cost (the on-screen display's
+  *reads* row, the boot log's status line).
+- Changed: Hardware download mode works with paraLLEl-GS: Unsynchronised answers a read of what the
+  graphics card has not finished with zeros instead of waiting; Off reads nothing.
+
 ## v1.0.6 (2026-10-24)
 
 - Added: paraLLEl-GS's graphics card time, thread and wait on the on-screen display and in the boot

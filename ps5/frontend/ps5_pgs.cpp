@@ -195,14 +195,18 @@ namespace PS5PGS
 			want.mipmaps = GSConfig.HWMipmap;
 			want.sharp2D = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSSharp2D", false);
 			want.backbufferPromotion = false;
+			// Hardware download mode "Unsynchronised": a read of GS memory the graphics card has not finished
+			// drawing answers zeros instead of waiting for it (paraLLEl-GS's unsynced read-backs). "Off" is
+			// answered before the read reaches here (MTGS::InitAndReadFIFO); the other modes wait and are right.
+			want.unsyncedReadbacks = GSConfig.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized;
 			if (s_scanout_any && std::memcmp(&want, &s_scanout_sent, sizeof(want)) == 0)
 				return;
 			s_gs->setScanout(want);
 			s_scanout_sent = want;
 			if (s_scanout_any)
-				ps5px_log("paraLLEl-GS: scan-out now %s%s%s%s%s%s", want.forceProgressive ? "progressive where possible" : "the PS2's own fields",
+				ps5px_log("paraLLEl-GS: scan-out now %s%s%s%s%s%s%s", want.forceProgressive ? "progressive where possible" : "the PS2's own fields",
 					want.antiBlur ? ", anti-blur" : "", want.overscan ? ", overscan shown" : "", want.crtcOffsets ? ", screen offsets" : "",
-					want.mipmaps ? "" : ", no mipmaps", want.sharp2D ? ", sharp 2-D" : "");
+					want.mipmaps ? "" : ", no mipmaps", want.sharp2D ? ", sharp 2-D" : "", want.unsyncedReadbacks ? ", unsynchronised read-backs" : "");
 			s_scanout_any = true;
 		}
 	} // namespace
@@ -248,6 +252,9 @@ namespace PS5PGS
 		f.gpu_scanout_ms = st.gpuScanoutMs;
 		f.thread_percent = st.busyPercent;
 		f.wait_ms = s_wait_ms;
+		f.readbacks = st.readbacksPerFrame;
+		f.readback_wait_ms = st.readbackWaitMs;
+		f.ring_wait_ms = st.ringWaitMs;
 		f.presents = st.presentsPerSecond;
 		f.samples = s_samples_now ? s_samples_now : st.superSampling;
 		return f;
@@ -382,9 +389,12 @@ namespace PS5PGS
 		return fmt::format("paraLLEl-GS: its thread {:.0f}% busy (GS input {:.0f}%, flushes {:.0f}%, scanout {:.0f}%, read back {:.0f}%), "
 						   "{:.0f} presents a second, {:.1f} MB/s of GS input, {:.0f} render passes a second, picture {}x{}; the graphics "
 						   "card {:.1f} ms a frame (setup {:.1f}, shading {:.1f}, uploads {:.1f}, scan-out {:.1f}) at {} samples; the GS "
-						   "thread waited {:.1f} ms a frame for it",
+						   "thread waited {:.1f} ms a frame for it, {:.1f} ms a frame for room in its ring, and {:.2f} reads of GS memory "
+						   "a frame cost {:.1f} ms a frame{}",
 			st.busyPercent, st.gifPercent, st.flushPercent, st.vsyncPercent, st.readbackPercent, st.presentsPerSecond,
 			st.gifMegabytesPerSecond, st.renderPassesPerSecond, st.pictureWidth, st.pictureHeight, st.gpuMsPerFrame, st.gpuSetupMs,
-			st.gpuShadingMs, st.gpuUploadMs, st.gpuScanoutMs, s_samples_now ? s_samples_now : st.superSampling, s_wait_ms);
+			st.gpuShadingMs, st.gpuUploadMs, st.gpuScanoutMs, s_samples_now ? s_samples_now : st.superSampling, s_wait_ms, st.ringWaitMs,
+			st.readbacksPerFrame, st.readbackWaitMs,
+			st.readbackWaitMs > 2.0f ? " (the game reads its picture back: Hardware download mode decides whether that waits)" : "");
 	}
 } // namespace PS5PGS
