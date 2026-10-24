@@ -62,6 +62,8 @@ struct GSGpuOptions
     // copied into GSGpuFrame::rgba with alpha made opaque: one copy fewer on the graphics card thread, for a reader
     // that copies the picture on anyway (Crux2).
     bool mappedFrames = false;
+    // The graphics card's time measured with its timestamps (GSGpuStatus::gpuMsPerFrame): a query per pass.
+    bool gpuTimestamps = false;
     std::string gpuSelector;
 
     static GSGpuOptions fromEnvironment();
@@ -126,6 +128,13 @@ struct GSGpuStatus
     float flushPercent = 0.0f;
     float vsyncPercent = 0.0f;
     float readbackPercent = 0.0f;
+    // The graphics card's own time, from its timestamps (GSGpuOptions::gpuTimestamps), as milliseconds a presented
+    // frame over the last second: all of it, and by kind. 0 while there are no timestamps.
+    float gpuMsPerFrame = 0.0f;
+    float gpuSetupMs = 0.0f;    // triangle setup and binning
+    float gpuShadingMs = 0.0f;  // the shading (the super-samples' work)
+    float gpuUploadMs = 0.0f;   // uploads into GS memory, copies, palettes, textures
+    float gpuScanoutMs = 0.0f;  // scan-out and read-back
 };
 
 // A lock-free triple buffer: one writer (the graphics card thread), one reader (the main thread).

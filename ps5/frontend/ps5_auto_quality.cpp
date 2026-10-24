@@ -21,6 +21,7 @@
 // Needs proper testing on a console: the thresholds are a first choice.
 
 #include "ps5_auto_quality.h"
+#include "ps5_pgs.h"
 
 #include "Config.h"
 #include "GS/GS.h"
@@ -73,6 +74,84 @@ namespace PS5AutoQuality
 		// The session's figures (at normal speed only).
 		uint32_t s_samples = 0, s_slow_samples = 0, s_streak = 0, s_longest = 0;
 		double s_speed_sum = 0.0;
+
+		// paraLLEl-GS: the samples a pixel step instead of the resolution (16, 8, 4, 2, 1). What the
+		// graphics card is doing is its own time a frame (its timestamps), against the frame's period;
+		// the GS thread waiting for it says the same when the timestamps are not there.
+		uint32_t s_pgs_chosen = 0, s_pgs_ours = 0, s_pgs_lowest = 0;
+		int s_pgs_slow = 0, s_pgs_room = 0, s_pgs_settle = 0, s_pgs_hold = 0;
+		constexpr float PGS_BUSY = 0.85f; // of the frame's period
+		constexpr float PGS_ROOM = 0.55f;
+
+		uint32_t PgsStepDown(uint32_t s) { return s > 1 ? s / 2 : 1; }
+		uint32_t PgsStepUp(uint32_t s) { return s < 16 ? s * 2 : 16; }
+
+		void PgsSet(uint32_t samples, bool down)
+		{
+			PS5PGS::SetSamples(samples);
+			s_pgs_ours = samples;
+			s_pgs_settle = SETTLE_SAMPLES;
+			s_pgs_slow = s_pgs_room = 0;
+			s_pgs_hold = down ? HOLD_AFTER_DOWN_SAMPLES : 0;
+			if (down)
+			{
+				s_down++;
+				s_pgs_lowest = s_pgs_lowest ? std::min(s_pgs_lowest, samples) : samples;
+			}
+			else
+			{
+				s_up++;
+			}
+			const std::string text = (samples >= s_pgs_chosen) ?
+				fmt::format("Automatic quality: back to {} samples a pixel", samples) :
+				fmt::format("Automatic quality: {} samples a pixel for now, to keep full speed (yours: {})", samples, s_pgs_chosen);
+			Host::AddIconOSDMessage("PS5AutoQuality", down ? ICON_FA_GAUGE_SIMPLE_HIGH : ICON_FA_GAUGE_HIGH, text, Host::OSD_QUICK_DURATION);
+			const PS5PGS::Figures f = PS5PGS::GetFigures();
+			ps5px_log("auto quality: paraLLEl-GS at %u samples (%s; yours %u; speed %.0f%%, the graphics card %.1f ms a frame, the GS "
+					  "thread waited %.1f ms a frame for it)",
+				samples, down ? "down" : "up", s_pgs_chosen, PerformanceMetrics::GetSpeed(), f.gpu_ms, f.wait_ms);
+		}
+
+		// paraLLEl-GS's own stepping (the resolution is left alone).
+		void PgsVSync(float target, float speed)
+		{
+			const PS5PGS::Figures f = PS5PGS::GetFigures();
+			if (f.samples == 0)
+				return;
+			if (s_pgs_ours == 0 || (f.samples != s_pgs_ours && f.samples != s_pgs_chosen))
+			{
+				// The first look, or the settings applied again: what is in effect is yours.
+				s_pgs_chosen = f.samples;
+				s_pgs_ours = f.samples;
+				s_pgs_slow = s_pgs_room = s_pgs_hold = 0;
+			}
+			if (s_pgs_settle > 0)
+			{
+				s_pgs_settle--;
+				return;
+			}
+			if (s_pgs_hold > 0)
+				s_pgs_hold--;
+			const float period_ms = 1000.0f / std::max(1.0f, target * 0.6f); // 60 Hz at 100%: 16.7 ms
+			// The graphics card's load: its own time a frame, or, without timestamps, the wait for it.
+			const float load = (f.gpu_ms > 0.0f) ? f.gpu_ms / period_ms : (f.wait_ms > 0.5f ? 1.0f : 0.0f);
+			const uint32_t now = s_pgs_ours;
+			if (speed < target * SLOW && load > PGS_BUSY)
+			{
+				s_pgs_room = 0;
+				if (++s_pgs_slow >= DOWN_SAMPLES && now > 1)
+					PgsSet(PgsStepDown(now), true);
+				return;
+			}
+			s_pgs_slow = 0;
+			if (now < s_pgs_chosen && speed >= target * FULL && load < PGS_ROOM && s_pgs_hold == 0)
+			{
+				if (++s_pgs_room >= UP_SAMPLES)
+					PgsSet(std::min(s_pgs_chosen, PgsStepUp(now)), false);
+				return;
+			}
+			s_pgs_room = 0;
+		}
 
 		void Set(float scale, bool down)
 		{
@@ -154,6 +233,13 @@ namespace PS5AutoQuality
 			s_slow = s_room = 0;
 			return;
 		}
+		if (PS5PGS::Active())
+		{
+			const float pgs_target = VMManager::GetTargetSpeed() * 100.0f;
+			if (pgs_target > 0.0f)
+				PgsVSync(pgs_target, PerformanceMetrics::GetSpeed());
+			return;
+		}
 		if (s_settle > 0)
 		{
 			s_settle--;
@@ -212,6 +298,8 @@ namespace PS5AutoQuality
 		s_on = false;
 		s_chosen = s_ours = 0.0f;
 		s_slow = s_room = s_settle = s_hold = 0;
+		s_pgs_chosen = s_pgs_ours = 0;
+		s_pgs_slow = s_pgs_room = s_pgs_settle = s_pgs_hold = 0;
 		s_judge = s_no_down = 0;
 		s_speed_before = 0.0f;
 	}
@@ -221,6 +309,7 @@ namespace PS5AutoQuality
 		Reset();
 		s_down = s_up = 0;
 		s_lowest = 0.0f;
+		s_pgs_lowest = 0;
 		s_samples = s_slow_samples = s_streak = s_longest = 0;
 		s_speed_sum = 0.0;
 	}

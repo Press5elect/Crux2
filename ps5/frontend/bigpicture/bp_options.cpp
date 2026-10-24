@@ -708,6 +708,7 @@ Page graphicsPage(int layer, bool forGame)
 	{
 		Option o = action(p.name, p.desc, [layer, p] {
 			be->setInt(layer, GS, "Renderer", 14);
+			be->setBool(layer, GS, "PS5ParallelGS", false);
 			be->setFloat(layer, GS, "upscale_multiplier", p.scale);
 			be->setInt(layer, GS, "CASMode", p.cas);
 			be->setInt(layer, GS, "MaxAnisotropy", p.aniso);
@@ -715,41 +716,60 @@ Page graphicsPage(int layer, bool forGame)
 		});
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(hw(toggle("Automatic quality",
+	rows.push_back(hwAny(toggle("Automatic quality",
 		"When the graphics chip cannot keep the game at full speed, the internal resolution goes down a step for as long as it needs to "
-		"(said on the screen), and back up when there is room again. The resolution chosen stays what you chose. No help where the "
-		"processor is the limit",
+		"(said on the screen), and back up when there is room again; with paraLLEl-GS, the samples a pixel instead. What you chose stays "
+		"what you chose. No help where the processor is the limit",
 		GS, "PS5AutoQuality", true)));
 
 	// ---- Display
 	rows.push_back(heading("DISPLAY"));
-	rows.push_back(listOf("Renderer",
-		"Hardware: the console's graphics chip draws, at any resolution. Software: the processor draws, like the PS2 did. Slow, always at "
-		"the PS2's resolution, but right in the few games the hardware renderer gets wrong",
-		GS, "Renderer", 14, {"Hardware (Vulkan)", "Software"}, {14, 13}));
-	rows.push_back(toggle("paraLLEl-GS",
-		"The whole GS drawn on the graphics chip in compute shaders (paraLLEl-GS): far less work for the processor, no texture "
-		"cache. The picture is the PS2's own resolution made sharp by super-sampling; the resolution setting does not apply. It takes "
-		"Deinterlacing, Anti-blur, Screen offsets, Show overscan, Mipmapping and everything after the picture is made (FSR, looks, FXAA, "
-		"shade boost); what it has no equivalent of (texture filtering, dithering, the hardware fixes, texture packs) is greyed out. Its "
-		"save states are its own. Turn it on in a heavy game's own options",
-		GS, "PS5ParallelGS", false, Option::NextStart));
-	rows.push_back(adv(listOf("paraLLEl-GS samples",
+	{
+		// One choice for PCSX2's two renderers and paraLLEl-GS (which is PCSX2's hardware renderer with
+		// [EmuCore/GS] PS5ParallelGS on: the picture goes on through PCSX2's presentation).
+		Option o;
+		o.kind = Option::Combo;
+		o.label = "Renderer";
+		o.desc = "Hardware: the console's graphics chip draws, at any resolution. Software: the processor draws, like the PS2 did; slow, always "
+				 "at the PS2's resolution, but right in the few games the hardware renderer gets wrong. paraLLEl-GS: the whole GS drawn on "
+				 "the graphics chip in compute shaders: far less work for the processor, no texture cache; the picture is the PS2's own "
+				 "resolution made sharp by super-sampling (the rows below), so the resolution setting does not apply. It takes Deinterlacing, "
+				 "Anti-blur, Screen offsets, Show overscan, Mipmapping and everything after the picture is made (FSR, looks, FXAA, shade "
+				 "boost); what it has no equivalent of (texture filtering, dithering, the hardware fixes, texture packs) is greyed out. Its "
+				 "save states are its own. Takes effect when a game starts";
+		o.section = GS;
+		o.key = "Renderer";
+		o.names = {"Hardware (Vulkan)", "Software", "paraLLEl-GS"};
+		Option::Part renderer;
+		renderer.section = GS;
+		renderer.key = "Renderer";
+		renderer.isInt = true;
+		renderer.defInt = 14;
+		Option::Part pgs_part;
+		pgs_part.section = GS;
+		pgs_part.key = "PS5ParallelGS";
+		pgs_part.def = false;
+		o.parts = {renderer, pgs_part};
+		o.combos = {{14, 0}, {13, 0}, {14, 1}};
+		o.flags = Option::NextStart;
+		rows.push_back(std::move(o));
+	}
+	rows.push_back(adv(when(listOf("paraLLEl-GS samples",
 		"Samples for each pixel: more is a smoother, sharper picture and more work for the graphics chip. Its picture is enlarged "
 		"to the screen as Upscaling and sharpening says (an FSR 1 choice enlarges it with FSR)",
-		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, Option::NextStart)));
-	rows.push_back(adv(toggle("paraLLEl-GS at twice the size",
+		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, Option::NextStart), GS, "PS5ParallelGS", false)));
+	rows.push_back(adv(when(toggle("paraLLEl-GS at twice the size",
 		"With 4 samples or more, the picture is made at twice the PS2's size from the samples: sharper, where the game draws its "
 		"3-D straight to the screen",
-		GS, "PS5ParallelGSHighRes", true, Option::NextStart)));
-	rows.push_back(adv(toggle("paraLLEl-GS sharp 2-D",
+		GS, "PS5ParallelGSHighRes", true, Option::NextStart), GS, "PS5ParallelGS", false)));
+	rows.push_back(adv(when(toggle("paraLLEl-GS sharp 2-D",
 		"Text, menus and other 2-D super-sampled like the 3-D. Sharper, at the risk of seams where pieces of 2-D meet",
-		GS, "PS5ParallelGSSharp2D", false, Option::NextStart)));
-	rows.push_back(adv(toggle("paraLLEl-GS full-detail effects",
+		GS, "PS5ParallelGSSharp2D", false, Option::NextStart), GS, "PS5ParallelGS", false)));
+	rows.push_back(adv(when(toggle("paraLLEl-GS full-detail effects",
 		"Keeps the samples where a game draws its picture into a texture and over the screen again (blur, glow, depth of field): "
 		"without them such effects bring the picture back to the PS2's resolution, as the PS2 showed them. More work for the "
 		"graphics chip",
-		GS, "PS5ParallelGSTextures", false, Option::NextStart)));
+		GS, "PS5ParallelGSTextures", false, Option::NextStart), GS, "PS5ParallelGS", false)));
 	rows.push_back(strings("Aspect ratio", "The shape of the picture", GS, "AspectRatio", "Auto 4:3/3:2",
 		{"Stretch to fill the screen", "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"}, {"Stretch", "Auto 4:3/3:2", "4:3", "16:9", "10:7"}));
 	rows.push_back(adv(strings("FMV aspect ratio override", "A different shape while the game plays a video", GS, "FMVAspectRatioSwitch", "Off",

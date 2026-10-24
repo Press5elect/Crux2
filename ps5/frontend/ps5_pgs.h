@@ -68,4 +68,19 @@ namespace PS5PGS
 
 	/// One line for the test windows of the boot log ("" when not active).
 	std::string StatusLine();
+
+	/// The figures of the last second: for the on-screen display and automatic quality.
+	struct Figures
+	{
+		float gpu_ms = 0.0f;       // the graphics card's time a frame, from its timestamps (0: none yet)
+		float gpu_setup_ms = 0.0f, gpu_shading_ms = 0.0f, gpu_upload_ms = 0.0f, gpu_scanout_ms = 0.0f;
+		float thread_percent = 0.0f; // paraLLEl-GS's own thread, busy
+		float wait_ms = 0.0f;      // what the GS thread waited a frame for the graphics card to catch up
+		float presents = 0.0f;     // presents a second
+		uint32_t samples = 0;      // samples a pixel now
+	};
+	Figures GetFigures();
+	/// Automatic quality: the samples a pixel while the game runs (1, 2, 4, 8, 16); the picture at twice
+	/// the size needs 4 or more. The setting is not changed.
+	void SetSamples(uint32_t samples);
 } // namespace PS5PGS

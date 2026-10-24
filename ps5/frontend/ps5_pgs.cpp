@@ -14,6 +14,7 @@
 #include "Host.h"
 #include "SaveState.h"
 #include "VMManager.h"
+#include "common/Timer.h"
 
 #include "fmt/format.h"
 
@@ -34,6 +35,13 @@ namespace PS5PGS
 		std::atomic<bool> s_active{false}; // (read on the EE thread too: MTGS's readbacks)
 		GSGpuScanout s_scanout_sent;       // the display settings paraLLEl-GS has (SendScanout)
 		bool s_scanout_any = false;
+		// The GS thread's waits for the graphics card (VSync's waitPresentBacklog), summed over the last second.
+		Common::Timer s_wait_window;
+		double s_wait_seconds = 0.0;
+		uint32_t s_wait_frames = 0;
+		float s_wait_ms = 0.0f;
+		uint32_t s_samples_now = 0;
+		uint32_t s_status_seconds = 0;
 		const uint8_t* s_regs = nullptr; // the PS2's GS privileged registers (PMODE at 0, 16 bytes apart)
 		uint64_t s_tick = 0;
 		uint64_t s_last_seq = 0;
@@ -91,6 +99,7 @@ namespace PS5PGS
 			// Each picture is handed over in the buffer it was read back into and made opaque here, on its way
 			// into the texture: one copy fewer on paraLLEl-GS's thread.
 			options.mappedFrames = true;
+			options.gpuTimestamps = true; // the graphics card's time a frame, for the on-screen display and automatic quality
 			options.highResolutionScanout = Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSHighRes", true);
 			options.fsr = false; // Crux2's own presentation enlarges the picture
 			options.libraryLog = false;
@@ -106,6 +115,12 @@ namespace PS5PGS
 			s_tick = 0;
 			s_last_seq = 0;
 			s_scanout_any = false;
+			s_samples_now = options.superSampling;
+			s_wait_seconds = 0.0;
+			s_wait_frames = 0;
+			s_wait_ms = 0.0f;
+			s_status_seconds = 0;
+			s_wait_window.Reset();
 			s_active.store(true, std::memory_order_release);
 			ps5px_log("paraLLEl-GS: draws this game on %s: %u samples a pixel%s, 2-D %s, pictures drawn into textures %s",
 				s_gs->deviceName(), options.superSampling,
@@ -203,7 +218,48 @@ namespace PS5PGS
 		s_gs->present(regs, s_tick, registers_written);
 		s_gs->kick();
 		// No more than two frames ahead of the pictures made: what is shown stays close to the controls.
+		// (The wait is measured: it is where the game's time goes when the graphics card is the limit.)
+		const u64 wait_start = Common::Timer::GetCurrentValue();
 		s_gs->waitPresentBacklog(2, s_stop);
+		s_wait_seconds += Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - wait_start);
+		s_wait_frames++;
+		if (s_wait_window.GetTimeSeconds() >= 1.0)
+		{
+			s_wait_ms = s_wait_frames ? static_cast<float>(s_wait_seconds * 1000.0 / s_wait_frames) : 0.0f;
+			s_wait_seconds = 0.0;
+			s_wait_frames = 0;
+			s_wait_window.Reset();
+			// The figures in the boot log now and then (a profiled run has them every window as well).
+			if (++s_status_seconds % 30 == 15)
+				ps5px_log("%s", StatusLine().c_str());
+		}
+	}
+
+	Figures GetFigures()
+	{
+		Figures f;
+		if (!s_gs)
+			return f;
+		const GSGpuStatus st = s_gs->status();
+		f.gpu_ms = st.gpuMsPerFrame;
+		f.gpu_setup_ms = st.gpuSetupMs;
+		f.gpu_shading_ms = st.gpuShadingMs;
+		f.gpu_upload_ms = st.gpuUploadMs;
+		f.gpu_scanout_ms = st.gpuScanoutMs;
+		f.thread_percent = st.busyPercent;
+		f.wait_ms = s_wait_ms;
+		f.presents = st.presentsPerSecond;
+		f.samples = s_samples_now ? s_samples_now : st.superSampling;
+		return f;
+	}
+
+	void SetSamples(uint32_t samples)
+	{
+		if (!s_gs || samples == s_samples_now)
+			return;
+		s_samples_now = samples;
+		s_gs->setSuperSampling(samples);
+		s_gs->setHighResolution(Host::GetBoolSettingValue("EmuCore/GS", "PS5ParallelGSHighRes", true) && samples >= 4);
 	}
 
 	namespace
@@ -324,8 +380,11 @@ namespace PS5PGS
 			return std::string();
 		const GSGpuStatus st = s_gs->status();
 		return fmt::format("paraLLEl-GS: its thread {:.0f}% busy (GS input {:.0f}%, flushes {:.0f}%, scanout {:.0f}%, read back {:.0f}%), "
-						   "{:.0f} presents a second, {:.1f} MB/s of GS input, {:.0f} render passes a second, picture {}x{}",
+						   "{:.0f} presents a second, {:.1f} MB/s of GS input, {:.0f} render passes a second, picture {}x{}; the graphics "
+						   "card {:.1f} ms a frame (setup {:.1f}, shading {:.1f}, uploads {:.1f}, scan-out {:.1f}) at {} samples; the GS "
+						   "thread waited {:.1f} ms a frame for it",
 			st.busyPercent, st.gifPercent, st.flushPercent, st.vsyncPercent, st.readbackPercent, st.presentsPerSecond,
-			st.gifMegabytesPerSecond, st.renderPassesPerSecond, st.pictureWidth, st.pictureHeight);
+			st.gifMegabytesPerSecond, st.renderPassesPerSecond, st.pictureWidth, st.pictureHeight, st.gpuMsPerFrame, st.gpuSetupMs,
+			st.gpuShadingMs, st.gpuUploadMs, st.gpuScanoutMs, s_samples_now ? s_samples_now : st.superSampling, s_wait_ms);
 	}
 } // namespace PS5PGS

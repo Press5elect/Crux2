@@ -1,5 +1,12 @@
 # Crux2 - what changed
 
+## v1.0.6 (2026-10-24)
+
+- Added: paraLLEl-GS's graphics card time, thread and wait on the on-screen display and in the boot
+  log every 30 s.
+- Added: automatic quality with paraLLEl-GS steps the samples a pixel.
+- Changed: Renderer is one choice: Hardware (Vulkan), Software, paraLLEl-GS.
+
 ## v1.0.5 (2026-10-23)
 
 - Changed: paraLLEl-GS takes the display settings (deinterlacing, anti-blur, screen offsets,

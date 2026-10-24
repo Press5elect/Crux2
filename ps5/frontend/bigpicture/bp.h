@@ -172,6 +172,9 @@ struct Option
 	{
 		std::string section, key;
 		bool def = false;
+		// A whole-number switch (the Renderer): the choice's value for it is the number itself.
+		bool isInt = false;
+		int defInt = 0;
 	};
 	std::vector<Part> parts;
 	std::vector<std::vector<int>> combos;

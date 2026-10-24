@@ -12,6 +12,7 @@
 #include "ps5_osd.h"
 #include "ps5_osd_draw.h"
 #include "ps5_pacing.h"
+#include "ps5_pgs.h"
 #include "ps5_keyboard.h" // PS5SystemModules
 
 #include "Config.h"
@@ -141,12 +142,29 @@ namespace PS5Osd
 			LookUpKernel();
 			const float speed = PerformanceMetrics::GetSpeed();
 
-			// ---- the graphics chip
+			// ---- the graphics chip (paraLLEl-GS drawing: its own device's time, from its timestamps,
+			// against the frame's period; PCSX2's GPU figures see only PCSX2's device, which then does
+			// little)
+			const bool pgs = PS5PGS::Active();
+			const PS5PGS::Figures pf = pgs ? PS5PGS::GetFigures() : PS5PGS::Figures{};
 			if (GSConfig.OsdShowGPU)
 			{
 				Section();
-				Add("GPU", Number(std::min(100.0f, PerformanceMetrics::GetGPUUsage()), 0), "%", GPU_NAME, HOT_VALUE);
-				Add("time", Number(PerformanceMetrics::GetGPUAverageTime(), 1), "ms", GPU_NAME, HOT_VALUE);
+				if (pgs)
+				{
+					const float target = VMManager::GetTargetSpeed();
+					const float period_ms = target > 0.0f ? 1000.0f / (target * 60.0f) : 16.7f;
+					const float percent = pf.gpu_ms > 0.0f ? std::min(100.0f, 100.0f * pf.gpu_ms / period_ms) : 0.0f;
+					Add("GPU", Number(percent, 0), "%", GPU_NAME, HOT_VALUE);
+					Add("time", Number(pf.gpu_ms, 1), "ms", GPU_NAME, HOT_VALUE);
+					Add("shading", Number(pf.gpu_shading_ms, 1), "ms", GPU_NAME, HOT_VALUE);
+					Add("samples", Number(pf.samples, 0), "", GPU_NAME, HOT_VALUE);
+				}
+				else
+				{
+					Add("GPU", Number(std::min(100.0f, PerformanceMetrics::GetGPUUsage()), 0), "%", GPU_NAME, HOT_VALUE);
+					Add("time", Number(PerformanceMetrics::GetGPUAverageTime(), 1), "ms", GPU_NAME, HOT_VALUE);
+				}
 			}
 
 			// ---- the processor
@@ -159,6 +177,11 @@ namespace PS5Osd
 					Add("GS", Number(std::min(100.0f, PerformanceMetrics::GetGSThreadUsage()), 0), "%", CPU_NAME, HOT_VALUE);
 					if (THREAD_VU1)
 						Add("VU", Number(std::min(100.0f, PerformanceMetrics::GetVUThreadUsage()), 0), "%", CPU_NAME, HOT_VALUE);
+					if (pgs)
+					{
+						Add("PGS", Number(std::min(100.0f, pf.thread_percent), 0), "%", CPU_NAME, HOT_VALUE);
+						Add("wait", Number(pf.wait_ms, 1), "ms", CPU_NAME, HOT_VALUE); // the GS thread's, for the graphics card
+					}
 					const u32 sw = PerformanceMetrics::GetGSSWThreadCount();
 					for (u32 t = 0; t < sw; t++)
 					{

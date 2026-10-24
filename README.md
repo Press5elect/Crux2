@@ -468,6 +468,22 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.6 changed
+
+Added:
+- **paraLLEl-GS's figures**: the on-screen display's GPU section shows paraLLEl-GS's own graphics
+  card time a frame (from its timestamps; PCSX2's GPU figure sees only PCSX2's device, which then
+  does little), its shading part and the samples a pixel; the processor section its thread and how
+  long the GS thread waited for it. The boot log has the same line every 30 seconds while a game
+  runs.
+- **Automatic quality with paraLLEl-GS**: when the graphics card cannot keep the game at full speed,
+  the samples a pixel go down a step (16, 8, 4, 2, 1) for as long as it needs to, and back up when
+  there is room again, said on the screen as the resolution steps are.
+
+Changed:
+- **Renderer** is one choice: Hardware (Vulkan), Software, paraLLEl-GS; paraLLEl-GS's own rows
+  follow it.
+
 ## What v1.0.5 changed
 
 Changed:

@@ -89,7 +89,8 @@ bool hasOwn(const Option& o)
 		case Option::Combo:
 			for (const Option::Part& part : o.parts)
 			{
-				if (be->getBool(Own, part.section.c_str(), part.key.c_str()).has_value())
+				if (part.isInt ? be->getInt(Own, part.section.c_str(), part.key.c_str()).has_value() :
+								 be->getBool(Own, part.section.c_str(), part.key.c_str()).has_value())
 					return true;
 			}
 			return false;
@@ -108,6 +109,16 @@ bool boolNow(const Option& o, const char* section, const char* name, bool def)
 			return *own;
 	}
 	return be->getBool(Shared, section, name).value_or(def);
+}
+
+int intNow(const Option& o, const char* section, const char* name, int def)
+{
+	if (layer(o) == Own)
+	{
+		if (const std::optional<int> own = be->getInt(Own, section, name))
+			return *own;
+	}
+	return be->getInt(Shared, section, name).value_or(def);
 }
 
 int intNow(const Option& o)
@@ -199,7 +210,13 @@ int choiceNow(const Option& o)
 			{
 				bool same = true;
 				for (size_t p = 0; p < o.parts.size() && same; p++)
-					same = (o.combos[c][p] != 0) == boolNow(o, o.parts[p].section.c_str(), o.parts[p].key.c_str(), o.parts[p].def);
+				{
+					const Option::Part& part = o.parts[p];
+					if (part.isInt)
+						same = o.combos[c][p] == intNow(o, part.section.c_str(), part.key.c_str(), part.defInt);
+					else
+						same = (o.combos[c][p] != 0) == boolNow(o, part.section.c_str(), part.key.c_str(), part.def);
+				}
 				if (same)
 					return static_cast<int>(c);
 			}
@@ -229,7 +246,12 @@ void setChoice(const Option& o, int index)
 			break;
 		case Option::Combo:
 			for (size_t p = 0; p < o.parts.size(); p++)
-				be->setBool(to, o.parts[p].section.c_str(), o.parts[p].key.c_str(), o.combos[i][p] != 0);
+			{
+				if (o.parts[p].isInt)
+					be->setInt(to, o.parts[p].section.c_str(), o.parts[p].key.c_str(), o.combos[i][p]);
+				else
+					be->setBool(to, o.parts[p].section.c_str(), o.parts[p].key.c_str(), o.combos[i][p] != 0);
+			}
 			break;
 		default:
 			break;
