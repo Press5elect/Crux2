@@ -8471,7 +8471,7 @@ index 4faad6c..d1cb291 100644
 +}
 +#endif
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa0..556bf31 100644
+index 59f5aa0..8df4c11 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
 @@ -1,6 +1,9 @@
@@ -8484,7 +8484,21 @@ index 59f5aa0..556bf31 100644
  #include "GS.h"
  #include "Gif_Unit.h"
  #include "MTGS.h"
-@@ -123,6 +126,10 @@ void MTGS::StartThread()
+@@ -15,6 +18,13 @@
+ #include "common/WrappedMemCopy.h"
+ 
+ #include <list>
++
++#ifdef __PROSPERO__
++namespace PS5FrameQueue
++{
++	static void Reset();
++} // namespace PS5FrameQueue
++#endif
+ #include <mutex>
+ #include <thread>
+ 
+@@ -123,6 +133,10 @@ void MTGS::StartThread()
  	pxAssertRel(!s_open_flag.load(), "GS thread should not be opened when starting");
  	s_sem_event.Reset();
  	s_shutdown_flag.store(false, std::memory_order_release);
@@ -8495,7 +8509,185 @@ index 59f5aa0..556bf31 100644
  	s_thread.Start(&MTGS::ThreadEntryPoint);
  }
  
-@@ -282,7 +289,14 @@ void MTGS::PostVsyncStart(bool registers_written)
+@@ -210,6 +224,9 @@ void MTGS::ResetGS(bool hardware_reset)
+ 		s_ReadPos = s_WritePos.load();
+ 		s_QueuedFrameCount = 0;
+ 		s_VsyncSignalListener = 0;
++#ifdef __PROSPERO__
++		PS5FrameQueue::Reset();
++#endif
+ 	}
+ 
+ 	MTGS_LOG("MTGS: Sending Reset...");
+@@ -236,6 +253,152 @@ struct RingCmdPacket_Vsync
+ 	u32 pad[3];
+ };
+ 
++#ifdef __PROSPERO__
++extern "C" void ps5px_log(const char* format, ...);
++
++// Crux2 ([EmuCore/GS] PS5AutoFrameQueue, on by default): Crux2 queues no frames for the GS thread
++// (VsyncQueueSize 0, "None (hard sync)") for the least input delay, so at each vsync the EE waits until
++// the GS thread has finished and shown the frame before. While the GS thread keeps up that costs
++// nothing. Once its frame takes as long as the EE's, the two take turns instead of overlapping: a
++// lit scene in a game I test with ran at 81% with the EE waiting 45% of the time, the GS thread idle
++// 26% and the GPU 32%. While the game runs below full speed this lets the EE run up to two frames
++// ahead (PCSX2's own default), and goes back to none once the GS thread has caught up and stays
++// caught up for ten seconds. A queue chosen in the settings (1-3 frames) is used as it is.
++// Needs proper testing on games whose speed swings from scene to scene.
++namespace PS5FrameQueue
++{
++	static constexpr u32 WINDOW_FRAMES = 30; // half a second at 60 frames a second
++	static constexpr int OPEN_DEPTH = 2;
++	static constexpr u32 OPEN_AFTER = 2; // windows under 97% in a row
++	static constexpr u32 CLOSE_AFTER = 20; // windows at full speed, the GS thread rarely a frame behind
++	static constexpr u32 MAX_LOGGED = 30;
++
++	static int s_depth = 0;
++	static bool s_enabled = true;
++	static u64 s_window_start = 0;
++	static u32 s_window_frames = 0;
++	static u32 s_window_behind = 0; // vsyncs that found the frame before still with the GS thread
++	static u32 s_slow_windows = 0;
++	static u32 s_fast_windows = 0;
++	static u32 s_settings_age = 0;
++	static u32 s_logged = 0;
++	static u32 s_opened = 0;
++
++	static void Reset()
++	{
++		s_depth = 0;
++		s_window_start = 0;
++		s_window_frames = 0;
++		s_window_behind = 0;
++		s_slow_windows = 0;
++		s_fast_windows = 0;
++		s_settings_age = 0;
++		s_enabled = Host::GetBoolSettingValue("EmuCore/GS", "PS5AutoFrameQueue", true);
++	}
++
++	static void SetDepth(int depth, double speed, double behind)
++	{
++		if (depth == s_depth)
++			return;
++		s_depth = depth;
++		s_slow_windows = 0;
++		s_fast_windows = 0;
++		if (depth > 0)
++			s_opened++;
++		if (s_logged++ < MAX_LOGGED)
++		{
++			if (depth > 0)
++				ps5px_log("frames: the game fell behind (%.0f%% of full speed): the EE may run up to %d frames ahead of the GS thread "
++						  "while it stays behind (PS5AutoFrameQueue)", speed * 100.0, depth);
++			else if (speed > 0.0)
++				ps5px_log("frames: full speed again for %u s with the GS thread a frame behind at %.0f%% of vsyncs: none queued again",
++					CLOSE_AFTER * WINDOW_FRAMES / 60, behind * 100.0);
++			else
++				ps5px_log("frames: none queued again (PS5AutoFrameQueue switched off)");
++		}
++	}
++
++	// queued: frames still with the GS thread when this vsync was sent. Returns how many may be.
++	static int Limit(int queued, int configured)
++	{
++		if (configured > 0)
++		{
++			s_depth = 0;
++			return configured;
++		}
++
++		const u64 now = GetCPUTicks();
++		if (s_window_start == 0)
++		{
++			s_window_start = now;
++			s_window_frames = 0;
++			s_window_behind = 0;
++			return s_depth;
++		}
++
++		s_window_frames++;
++		s_window_behind += (queued > 0) ? 1u : 0u;
++		if (s_window_frames < WINDOW_FRAMES)
++			return s_depth;
++
++		const double secs = static_cast<double>(now - s_window_start) / static_cast<double>(GetTickFrequency());
++		const double behind = static_cast<double>(s_window_behind) / static_cast<double>(s_window_frames);
++		const u32 frames = s_window_frames;
++		s_window_start = now;
++		s_window_frames = 0;
++		s_window_behind = 0;
++
++		if (++s_settings_age >= 4)
++		{
++			s_settings_age = 0;
++			s_enabled = Host::GetBoolSettingValue("EmuCore/GS", "PS5AutoFrameQueue", true);
++		}
++
++		const double target = static_cast<double>(VMManager::GetTargetSpeed());
++		const double rate = static_cast<double>(VMManager::GetFrameRate());
++		if (!s_enabled)
++		{
++			SetDepth(0, 0.0, 0.0);
++			return 0;
++		}
++		// Unlimited speed, or a window that spans a pause or a load: nothing to judge by.
++		if (target <= 0.0 || rate <= 0.0 || secs <= 0.0 || secs > 2.0)
++		{
++			s_slow_windows = 0;
++			s_fast_windows = 0;
++			return s_depth;
++		}
++
++		const double speed = (static_cast<double>(frames) / secs) / (rate * target);
++		if (s_depth == 0)
++		{
++			s_slow_windows = (speed < 0.97) ? (s_slow_windows + 1) : 0;
++			if (s_slow_windows >= OPEN_AFTER)
++				SetDepth(OPEN_DEPTH, speed, behind);
++		}
++		else
++		{
++			// The GS thread is still on the frame before at most vsyncs while it is near its limit: closing
++			// then would make the two take turns again.
++			s_fast_windows = (speed >= 0.99 && behind < 0.10) ? (s_fast_windows + 1) : 0;
++			if (s_fast_windows >= CLOSE_AFTER)
++				SetDepth(0, speed, behind);
++		}
++		return s_depth;
++	}
++} // namespace PS5FrameQueue
++
++void MTGS::PS5ResetFrameQueue()
++{
++	PS5FrameQueue::Reset();
++}
++
++int MTGS::PS5FrameQueueDepth()
++{
++	return PS5FrameQueue::s_depth;
++}
++#endif
++
+ void MTGS::PostVsyncStart(bool registers_written)
+ {
+ 	// Optimization note: Typically regset1 isn't needed.  The regs in that area are typically
+@@ -271,8 +434,14 @@ void MTGS::PostVsyncStart(bool registers_written)
+ 	// If those are needed back, it's better to increase the VsyncQueueSize via PCSX_vm.ini.
+ 	// (The Xenosaga engine is known to run into this, due to it throwing bulks of data in one frame followed by 2 empty frames.)
+ 
++#ifdef __PROSPERO__
++	const int ps5_queued = s_QueuedFrameCount.fetch_add(1);
++	if (ps5_queued < PS5FrameQueue::Limit(ps5_queued, EmuConfig.GS.VsyncQueueSize))
++		return;
++#else
+ 	if ((s_QueuedFrameCount.fetch_add(1) < EmuConfig.GS.VsyncQueueSize) /*|| (!EmuConfig.GS.VsyncEnable && !EmuConfig.GS.FrameLimitEnable)*/)
+ 		return;
++#endif
+ 
+ 	s_VsyncSignalListener.store(true, std::memory_order_release);
+ 	//Console.WriteLn( Color_Blue, "(EEcore Sleep) Vsync\t\tringpos=0x%06x, writepos=0x%06x", m_ReadPos.load(), m_WritePos.load() );
+@@ -282,7 +451,14 @@ void MTGS::PostVsyncStart(bool registers_written)
  
  void MTGS::InitAndReadFIFO(u8* mem, u32 qwc)
  {
@@ -8510,7 +8702,7 @@ index 59f5aa0..556bf31 100644
  	{
  		if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
  			GSReadLocalMemoryUnsync(mem, qwc, vif1.BITBLTBUF._u64, vif1.TRXPOS._u64, vif1.TRXREG._u64);
-@@ -335,7 +349,16 @@ void MTGS::MainLoop()
+@@ -335,7 +511,16 @@ void MTGS::MainLoop()
  		else
  		{
  			mtvu_lock.unlock();
@@ -8527,6 +8719,22 @@ index 59f5aa0..556bf31 100644
  			mtvu_lock.lock();
  		}
  
+diff --git a/pcsx2/MTGS.h b/pcsx2/MTGS.h
+index ccd9f27..fd8cec4 100644
+--- a/pcsx2/MTGS.h
++++ b/pcsx2/MTGS.h
+@@ -64,6 +64,11 @@ namespace MTGS
+ 
+ 	int GetCurrentVsyncQueueSize();
+ 	void PostVsyncStart(bool registers_written);
++#ifdef __PROSPERO__
++	/// Crux2: frames the EE may run ahead of the GS thread while a game is behind (PS5AutoFrameQueue).
++	void PS5ResetFrameQueue();
++	int PS5FrameQueueDepth();
++#endif
+ 	void InitAndReadFIFO(u8* mem, u32 qwc);
+ 
+ 	void RunOnGSThread(AsyncCallType func);
 diff --git a/pcsx2/MTVU.cpp b/pcsx2/MTVU.cpp
 index 3f261dc..c4c82b4 100644
 --- a/pcsx2/MTVU.cpp

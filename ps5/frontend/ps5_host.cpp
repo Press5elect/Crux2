@@ -1140,12 +1140,15 @@ void PS5Host::TestRunTick()
 				if (s_test.game_running)
 				{
 					s_test.interface_noted = false;
+					// "frames queued": what the EE may run ahead of the GS thread at this moment (the setting, or
+					// PS5AutoFrameQueue's two frames while the game is behind).
 					ps5px_log("test: window %u: %.1f fps, speed %.0f%%, game's own %.1f fps, worst frame %.1f ms, "
-							  "%u over 40 ms, audio %llu writes of which %llu short",
+							  "%u over 40 ms, audio %llu writes of which %llu short, frames queued %d",
 						s_test.window_index, static_cast<double>(s_test.frames) / window_seconds,
 						static_cast<double>(PerformanceMetrics::GetSpeed()),
 						static_cast<double>(PerformanceMetrics::GetInternalFPS()), s_test.worst_ms, s_test.over_40ms,
-						played - s_test.audio_played, shortfall - s_test.audio_short);
+						played - s_test.audio_played, shortfall - s_test.audio_short,
+						EmuConfig.GS.VsyncQueueSize > 0 ? EmuConfig.GS.VsyncQueueSize : MTGS::PS5FrameQueueDepth());
 					if (const std::string stretch = AudioStream::PS5TakeStretchWindow(); !stretch.empty())
 						ps5px_log("test: window %u: %s", s_test.window_index, stretch.c_str());
 

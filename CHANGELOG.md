@@ -1,5 +1,11 @@
 # Crux2 - what changed
 
+## v1.0.14 (2026-10-24)
+
+- Changed: while a game runs below full speed, up to 2 frames may wait for the GS thread, so the
+  emulation and the GS thread no longer take turns in heavy scenes (a setting, on).
+- Added: frames queued in the boot log's test window lines.
+
 ## v1.0.13 (2026-10-24)
 
 - Changed: built on Mesa 27.0-devel's RADV (Mesa's main branch; was 26.2.5).

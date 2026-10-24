@@ -511,6 +511,15 @@ Page emulationPage(int layer, bool forGame)
 	rows.push_back(adv(list("Frames queued for the display",
 		"How many finished frames may wait to be shown (PCSX2's optimal frame pacing is 0). None: the least delay, and the most demanding", GS,
 		"VsyncQueueSize", 0, {"None (hard sync)", "1 frame", "2 frames", "3 frames"}, 0)));
+	{
+		Option o = toggle("Queue frames while the game is behind",
+			"With none queued: while a game runs below full speed, up to 2 frames may wait, so the emulation and the graphics thread "
+			"work at the same time instead of taking turns (a lit scene went from 81% towards full speed). None again once it keeps "
+			"up for 10 seconds. Costs up to 2 frames of controller delay while behind",
+			GS, "PS5AutoFrameQueue", true);
+		o.enabled = [](int l) { return effectiveInt(l, GS, "VsyncQueueSize", 0) == 0; };
+		rows.push_back(adv(std::move(o)));
+	}
 	rows.push_back(adv(toggle("Show a frame as it begins",
 		"Shows each frame earlier: can lower the controller's delay. A few games show glitches with it", GS, "AdvancedFrameDisplay", false)));
 	{

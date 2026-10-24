@@ -468,6 +468,18 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.14 changed
+
+Changed:
+- **Frames queue while a game is behind**: with no frames queued (Crux2's default), the
+  emulation waited at every frame for the GS thread to finish the one before, so the two took
+  turns once a scene got heavy. While a game runs below full speed up to 2 frames may now wait,
+  and the two work at the same time; none again after 10 seconds at full speed (*Queue frames
+  while the game is behind*, on; Graphics > Advanced).
+
+Added:
+- **Frames queued** at the end of each `test: window` line of the boot log.
+
 ## What v1.0.13 changed
 
 Changed:
