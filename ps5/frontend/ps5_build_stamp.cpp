@@ -23,3 +23,12 @@ extern "C" const char* ps5px_build_version(void)
 {
   return PS5PX_BUILD_VERSION;
 }
+
+extern "C" const char* ps5px_build_number(void)
+{
+#ifdef PS5PX_BUILD_NUMBER
+  return PS5PX_BUILD_NUMBER;
+#else
+  return "0";
+#endif
+}

@@ -200,6 +200,8 @@ echo "$identity" > "$build/build-identity.txt"
     printf '#define PS5PX_BUILD_STAMP "%s"\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
     printf '#define PS5PX_BUILD_IDENTITY "%s"\n' "$identity"
     printf '#define PS5PX_BUILD_VERSION "%s"\n' "${PS5PX_VERSION:-}"
+    # The build number shown in the interface's top bar: the count of commits in this repository.
+    printf '#define PS5PX_BUILD_NUMBER "%s"\n' "$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 0)"
 } > "$build/ps5px-generated/ps5_build_stamp.inc"
 echo "build identity: $identity"
 

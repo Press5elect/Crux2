@@ -468,6 +468,21 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.15 changed
+
+Added:
+- **The version, WIP, the build number and "by Press5elect"** in the top bar, under the clock.
+
+Changed:
+- **Every setting's description is rewritten** in short, plain English. Settings that PCSX2 also
+  has use PCSX2's own description.
+- **The content version goes up with each release** (`01.015.000`), so the console and the
+  homebrew catalog see updates.
+
+Fixed:
+- **A game could freeze a few seconds after it started** (v1.0.14; to be confirmed on the console): the emulation thread could
+  wait for a wake-up the GS thread had already given up on when the frame queue changed size.
+
 ## What v1.0.14 changed
 
 Changed:

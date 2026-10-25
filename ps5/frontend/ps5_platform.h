@@ -44,6 +44,9 @@ void ps5px_apply_ui_sound_settings(void);
 /// empty string for a build that was given none.
 const char* ps5px_build_version(void);
 
+/// The build number shown in the top bar (the repository's commit count when it was built).
+const char* ps5px_build_number(void);
+
 /// How many 256-frame writes the audio thread has made to the console's output since the title
 /// started, and how many of them found less sound buffered than a write holds (and so carried
 /// silence): a test run's measure of audio continuity.

@@ -288,16 +288,16 @@ Page interfacePage()
 
 	rows.push_back(heading("BEHAVIOUR"));
 	rows.push_back(list("Settings shown",
-		"Normal: what most people need. Advanced: the finer settings as well. Expert: everything, the settings that can stop games "
-		"from working included (the emulated processors, fixes for all games, PS5 tuning, native code, debugging; PCSX2's developers "
-		"give no support for a configuration changed there). Triangle changes it from anywhere in the Settings",
+		"How many settings are shown. Normal covers what most people need, Advanced adds finer options, and Expert "
+			"shows everything, including options that can stop games from working. Press Triangle anywhere in Settings to "
+			"switch.",
 		FRONT, "SettingsLevel", 0, {"Normal", "Advanced", "Expert"}, 0, Option::Front));
-	rows.push_back(toggle("Pause when a controller disconnects", "Pauses the game when a controller it is played with goes away", "UI",
+	rows.push_back(toggle("Pause when a controller disconnects", "Pauses the emulator when a controller with bindings is disconnected.", "UI",
 		"PauseOnControllerDisconnection", false, A));
-	rows.push_back(toggle("Warn about unsafe settings", "A line on the screen when a game starts with settings that may break games", CORE,
+	rows.push_back(toggle("Warn about unsafe settings", "Displays warnings when settings are enabled which may break games.", CORE,
 		"WarnAboutUnsafeSettings", true, A));
 	rows.push_back(toggle("Circle chooses, Cross goes back",
-		"The two buttons change places in every menu, as on consoles of the Japanese kind. The hints at the bottom show the buttons as they are then",
+		"Swaps the Cross and Circle buttons in all menus, as on Japanese consoles.",
 		FRONT, "SwapConfirm", false, F));
 
 	Names skinNames, accentNames, backNames{"The skin's own"};
@@ -309,21 +309,20 @@ Page interfacePage()
 		backNames.push_back(name);
 	rows.push_back(heading("APPEARANCE"));
 	rows.push_back(list("Skin",
-		"The colours and shapes of every screen. Crux is the title's own; Carbon is black, for an OLED screen; the thirty after them are the "
-		"themes of the PS5 homebrew UI kit, as the other titles of the family have them",
+		"Changes the colours and style of the interface. Carbon uses a black background, which suits OLED screens.",
 		FRONT, "Look", 0, skinNames, 0, F));
-	rows.push_back(list("Accent colour", "The colour of what is focused or switched on", FRONT, "Accent", 0, accentNames, 0, F));
+	rows.push_back(list("Accent colour", "The colour used to highlight the selected item and switched-on options.", FRONT, "Accent", 0, accentNames, 0, F));
 	rows.push_back(list("Background",
-		"What is behind the screens: still, alive in one of six ways, the focused game's picture, or pictures of your own (put them in the "
-		"folder \"backgrounds\" of the title folder)",
+		"What is shown behind the menus: a still or animated background, the selected game's artwork, or your own "
+			"pictures from the \"backgrounds\" folder.",
 		FRONT, "Backdrop", 0, backNames, 0, F));
-	rows.push_back(adv(whenInt(listOf("My pictures: each stays for", "With several pictures in the folder, one follows the other", FRONT, "WallEvery", 60,
+	rows.push_back(adv(whenInt(listOf("My pictures: each stays for", "How long each of your pictures is shown before the next one.", FRONT, "WallEvery", 60,
 							   {"30 seconds", "1 minute", "2 minutes", "5 minutes", "15 minutes", "1 hour"}, {30, 60, 120, 300, 900, 3600}, F),
 		FRONT, "Backdrop", 0, static_cast<int>(BackOwn) + 1)));
-	rows.push_back(adv(whenInt(listOf("My pictures: made darker by", "So that what is written over a picture can be read", FRONT, "WallDim", 50,
+	rows.push_back(adv(whenInt(listOf("My pictures: made darker by", "Darkens your pictures so the text on top of them stays readable.", FRONT, "WallDim", 50,
 							   {"Nothing", "25%", "40%", "50%", "60%", "75%"}, {0, 25, 40, 50, 60, 75}, F),
 		FRONT, "Backdrop", 0, static_cast<int>(BackOwn) + 1)));
-	rows.push_back(whenInt(action("My pictures: look into the folder again", "For pictures copied there while the title runs",
+	rows.push_back(whenInt(action("My pictures: look into the folder again", "Checks the folder again for new pictures.",
 							   [] {
 								   const int found = be->wallpapers(true);
 								   toast(found == 0 ? std::string("No picture in the folder \"backgrounds\" of the title folder (PNG or JPEG).") :
@@ -331,41 +330,41 @@ Page interfacePage()
 									   4.f);
 							   }),
 		FRONT, "Backdrop", 0, static_cast<int>(BackOwn) + 1));
-	rows.push_back(list("Motion", "All: living background, screens that slide, cards that rise. Less: fades only. None: everything is at once",
+	rows.push_back(list("Motion", "How much the interface animates. All: animated background and sliding menus. Less: fades only. None: no "
+		"animation.",
 		FRONT, "Motion", 0, {"All", "Less", "None"}, 0, F));
 	rows.push_back(toggle("Start-up animation",
-		"The name is built out of its parts when the title starts, and goes to the top bar. Any button ends it early", FRONT, "Splash", true, F));
-	rows.push_back(when(list("Which start-up", "There are four, each timed to the start-up sound. Left alone, each start plays another one",
+		"Plays the animated logo when Crux2 starts. Press any button to skip it.", FRONT, "Splash", true, F));
+	rows.push_back(when(list("Which start-up", "Chooses which of the four start-up animations plays. Random picks a different one each time.",
 							FRONT, "SplashKind", 0, {"Another one each start", "Strike", "Unfold", "Spin", "Slash"}, 0, F),
 		FRONT, "Splash", true));
 	rows.push_back(listOf("Interface size",
-		"The whole interface smaller, to see more of it at once: more rows, more covers, smaller text. 100% is the size it was made at",
+		"Makes the whole interface smaller so more fits on screen.",
 		FRONT, "InterfaceSize", 100, {"100%", "90%", "80%", "70%"}, {100, 90, 80, 70}, F));
-	rows.push_back(listOf("Text size", "The text of rows, lists and hints, smaller or larger than the rest of the interface", FRONT, "TextSize", 0,
+	rows.push_back(listOf("Text size", "Makes the text larger or smaller without changing the rest of the interface.", FRONT, "TextSize", 0,
 		{"Smallest", "Smaller", "Normal", "Larger", "Largest"}, {-2, -1, 0, 1, 2}, F));
-	rows.push_back(toggle("High contrast", "What is written is brighter, and the lines between things stronger", FRONT, "HighContrast", false, F));
-	rows.push_back(toggle("Colours for colour blindness", "Blue and orange in place of green and red for what went well and what did not", FRONT,
+	rows.push_back(toggle("High contrast", "Makes text brighter and outlines stronger.", FRONT, "HighContrast", false, F));
+	rows.push_back(toggle("Colours for colour blindness", "Uses blue and orange instead of green and red to show success and failure.", FRONT,
 		"ColourBlind", false, F));
 
 	addRows(rows, be->extraRows("interface", Shared));
 
 	rows.push_back(heading("CARE FOR THE SCREEN"));
 	rows.push_back(listOf("Go dark when nothing is pressed",
-		"After this long the screens go dark; after as long again they are black, with the mark wandering, until a button is pressed", FRONT,
+		"Dims the screen after this long without input, then turns it black. Press any button to wake it.", FRONT,
 		"IdleDim", 3, {"Never", "After 1 minute", "After 2 minutes", "After 3 minutes", "After 5 minutes", "After 10 minutes"}, {0, 1, 2, 3, 5, 10}, F));
 	{
 		Option o = toggle("Then the black screen with the mark",
-			"Off: the screens only go dark, and stay so. The press that ends the black screen does nothing else", FRONT, "ScreenSaver", true, F);
+			"Shows a black screen with a moving logo after the screen dims. Off: the screen only dims.", FRONT, "ScreenSaver", true, F);
 		o.enabled = [](int) { return be->getInt(Shared, FRONT, "IdleDim").value_or(3) != 0; };
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(adv(toggle("Move everything a little",
-		"Every other minute all of a screen moves by a few pixels: no edge stays on the same row of pixels", FRONT, "PixelShift", true, F)));
-	rows.push_back(adv(toggle("Fade the hints", "The words of the bar at the bottom go faint when nothing was pressed for a quarter of a minute", FRONT,
+		"Moves the whole picture by a few pixels every couple of minutes to reduce the risk of burn-in on OLED screens.", FRONT, "PixelShift", true, F)));
+	rows.push_back(adv(toggle("Fade the hints", "Fades the button hints at the bottom of the screen when nothing has been pressed for a while.", FRONT,
 		"HintFade", true, F)));
 	rows.push_back(listOf("Darken the game when nothing is pressed",
-		"After this long without a button the picture is made darker, and is as it was with the next button. A film a game plays by itself is "
-		"darkened too",
+		"Dims the game after this long without input. Pressing any button brings it back.",
 		FRONT, "GameDim", 0, {"Never", "After 5 minutes", "After 10 minutes", "After 15 minutes", "After 30 minutes"}, {0, 5, 10, 15, 30}, F));
 	return page;
 }
@@ -377,14 +376,15 @@ Page gameListPage()
 	Page page{ICON_FA_FOLDER_OPEN, "Game List", {}};
 	auto& rows = page.rows;
 	rows.push_back(heading("GAME SCANNING"));
-	rows.push_back(action("Scan for games", "Looks for new games in the games folder, on USB drives and on the network shares",
+	rows.push_back(action("Scan for games", "Looks for new games in the games folder, on USB drives and on network shares.",
 		[] {
 			be->scan(false);
 			toast("Looking for new games...", 3.f);
 		},
 		Option::NoGame));
 	rows.push_back(action("Scan again from nothing",
-		"Reads every game file anew, not only the new ones: for when a game shows the wrong title or serial. Takes a while on a network share",
+		"Rescans all game files, not just new ones. Use it if a game shows the wrong title. Can take a while on a "
+			"network share.",
 		[] {
 			be->scan(true);
 			toast("Reading every game again...", 3.f);
@@ -392,19 +392,17 @@ Page gameListPage()
 		Option::NoGame));
 	rows.push_back(heading("THE LIST"));
 	rows.push_back(list("Library view",
-		"How the games are laid out: shelves, a grid of covers, a list, covers that flow past, books on a bookcase, a table, a showcase "
-		"(the game large over its picture of play, a strip of covers under it), a wheel of titles beside the game's art, a wall of every "
-		"cover, or the discs themselves. The touch pad goes from one to the next in the library",
+		"How games are shown in the library. You can also switch views with the touch pad.",
 		FRONT, "View", 0, {"Shelves", "Grid", "List", "Flow", "Bookcase", "Table", "Showcase", "Wheel", "Wall", "Discs"}, 0, Option::Front));
 	rows.push_back(toggle("A picture of play behind the shelves",
-		"In the shelves view, the focused game's picture from play is behind its title, where it has one", FRONT, "HeroPlay", true, Option::Front));
+		"Shows a screenshot of the selected game behind the shelves.", FRONT, "HeroPlay", true, Option::Front));
 	rows.push_back(toggle("Group the discs of a game",
-		"A game with several discs is one entry; it starts from the disc last played, and Details chooses another", FRONT, "GroupDiscs", true,
+		"Shows a game that has several discs as one entry. It starts from the disc you played last.", FRONT, "GroupDiscs", true,
 		Option::Front));
-	rows.push_back(toggle("English titles", "For a game that has a title in its own language and one in English: the English one", "UI",
+	rows.push_back(toggle("English titles", "For games with both a title in the game's native language and one in English, prefer the English title.", "UI",
 		"PreferEnglishGameList", false, Option::AllGames));
 	rows.push_back(action("Fetch the games' pictures",
-		"For each game, its title screen and a picture of it being played, from libretro's collection of thumbnails",
+		"Downloads title screens and screenshots for your games from libretro's collection.",
 		[] { be->fetchPictures(nullptr, false); }));
 	addRows(rows, be->extraRows("library", Shared));
 	return page;
@@ -420,8 +418,7 @@ Page biosPageOf(int layer, bool forGame)
 	{
 		rows.push_back(heading("THE PLAYSTATION 2'S OWN MENU"));
 		rows.push_back(action("Start the PlayStation 2 menu",
-			"The BIOS with no game: the PS2's browser (its memory cards and discs) and its System Configuration (clock, language, "
-			"screen). The quick menu's Quit game goes back to the library",
+			"Starts the PS2 BIOS without a game, to use the memory card browser and System Configuration.",
 			[] { startPs2Menu(); }, Option::NoGame));
 	}
 	addPageRows(rows, be->biosPage(layer), "BIOS SELECTION");
@@ -429,16 +426,16 @@ Page biosPageOf(int layer, bool forGame)
 	// Not written to the BIOS's own settings; for one game, in its options.
 	rows.push_back(heading("LANGUAGE"));
 	rows.push_back(list("Console language",
-		"The language games are told the PlayStation 2 is set to: many European games show theirs in it. As the BIOS has it: the "
-		"language its own System Configuration chose. The BIOS's setting is left as it is",
+		"The language games are told the PS2 is set to. Many European games use it to choose their language. Your BIOS "
+			"settings are not changed.",
 		"PS5", "ConsoleLanguage", -1,
 		{"As the BIOS has it", "Japanese", "English", "French", "Spanish", "German", "Italian", "Dutch", "Portuguese"}, -1,
 		Option::NextStart));
 	if (!forGame)
 	{
 		rows.push_back(heading("OPTIONS AND PATCHES"));
-		rows.push_back(toggle("Fast boot", "Starts the game straight away, without the PS2's start-up screens", CORE, "EnableFastBoot", true));
-		rows.push_back(adv(when(toggle("Fast-forward to the game", "Runs at full tilt until the game itself starts", CORE, "EnableFastBootFastForward",
+		rows.push_back(toggle("Fast boot", "Patches the BIOS to skip the console's boot animation.", CORE, "EnableFastBoot", true));
+		rows.push_back(adv(when(toggle("Fast-forward to the game", "Removes emulation speed throttle until the game starts to reduce startup time.", CORE, "EnableFastBootFastForward",
 								false),
 			CORE, "EnableFastBoot", true)));
 	}
@@ -453,30 +450,31 @@ Page emulationPage(int layer, bool forGame)
 	auto& rows = page.rows;
 
 	rows.push_back(heading("SPEED CONTROL"));
-	rows.push_back(floats("Normal speed", "100% is the console's own: 60 frames a second for NTSC games, 50 for PAL", "Framerate", "NominalScalar", 1.f,
+	rows.push_back(floats("Normal speed", "Sets the speed when running without fast forwarding.", "Framerate", "NominalScalar", 1.f,
 		SPEEDS, SPEED_VALUES));
-	rows.push_back(floats("Fast-forward speed", "While fast forward is on (quick menu, or a button under Controllers)", "Framerate", "TurboScalar", 2.f,
+	rows.push_back(floats("Fast-forward speed", "Sets the speed when using the fast forward hotkey.", "Framerate", "TurboScalar", 2.f,
 		SPEEDS, SPEED_VALUES));
-	rows.push_back(floats("Slow-motion speed", "While slow motion is on (a button under Controllers)", "Framerate", "SlomoScalar", 0.5f, SPEEDS,
+	rows.push_back(floats("Slow-motion speed", "Sets the speed when using the slow motion hotkey.", "Framerate", "SlomoScalar", 0.5f, SPEEDS,
 		SPEED_VALUES));
 
 	rows.push_back(heading("SYSTEM SETTINGS"));
 	rows.push_back(list("EE cycle rate",
-		"Runs the PS2's main processor slower or faster. Faster can steady a game that also slowed down on a real PS2, and needs more "
-		"speed here. Anything but 100% can break games",
+		"Underclocks or overclocks the emulated Emotion Engine CPU.",
 		SPEED, "EECycleRate", 0, {"50%", "60%", "75%", "100% (the PS2's own)", "130%", "180%", "300%"}, -3));
-	rows.push_back(expert(list("EE cycle skipping", "Helps very few games; usually makes a game stutter or break", SPEED, "EECycleSkip", 0,
+	rows.push_back(expert(list("EE cycle skipping", "Makes the emulated Emotion Engine skip cycles. Helps a small subset of games like SOTC. Most of the time it's "
+		"harmful to performance.", SPEED, "EECycleSkip", 0,
 		{"Off", "Mild", "Moderate", "Maximum"})));
 	rows.push_back(adv(toggle("Multi-threaded VU1 (MTVU)",
-		"Runs a vector unit on a thread of its own: faster in most 3D games. A few games hang or glitch with it", SPEED, "vuThread", false)));
+		"Generally a speedup on CPUs with 4 or more cores. Safe for most games, but a few are incompatible and may "
+			"hang.", SPEED, "vuThread", false)));
 	{
 		// One choice for two switches: PCSX2's pinning and Crux2's own layout (which wins when both
 		// are on, so that state is not offered).
 		Option o;
 		o.kind = Option::Combo;
 		o.label = "Thread pinning";
-		o.desc = "Anywhere: the console decides, best in most games. Pinned: PCSX2's way, the three main threads each kept on a core. "
-				 "Cores of their own (Crux2): the main threads get cores nothing else uses. For a game that is slow at every resolution";
+		o.desc = "How the emulator's threads are placed on the CPU cores. Anywhere is best for most games. Try another option if "
+			"a game is slow at every resolution.";
 		o.section = "PS5";
 		o.key = "ThreadLayout";
 		o.names = {"Anywhere", "Pinned (PCSX2)", "Cores of their own (Crux2)"};
@@ -486,12 +484,13 @@ Page emulationPage(int layer, bool forGame)
 		o.flags |= Option::Advanced;
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(toggle("Fast disc access", "Shorter loading. A few games break with it", SPEED, "fastCDVD", false));
+	rows.push_back(toggle("Fast disc access", "Fast disc access, shorter loading times. Check HDLoader compatibility lists for games that are known to have "
+		"issues with this.", SPEED, "fastCDVD", false));
 	rows.push_back(toggle("Load the whole disc into memory",
-		"Reads the whole disc image before the game starts, so a network share is not needed while playing. Takes as long as copying it",
+		"Loads the disc image into RAM before starting the virtual machine.",
 		CORE, "CdvdPrecache", false, Option::NextStart));
-	rows.push_back(toggle("Cheats", "Uses the cheats chosen for a game (each game's Cheats page)", CORE, "EnableCheats", false));
-	rows.push_back(expert(toggle("Host file system", "Lets games and homebrew read the title folder's files", CORE, "HostFs", false, Option::Advanced)));
+	rows.push_back(toggle("Cheats", "Enables loading cheats from pnach files.", CORE, "EnableCheats", false));
+	rows.push_back(expert(toggle("Host file system", "Allows games and homebrew to access files and folders directly in the title folder.", CORE, "HostFs", false, Option::Advanced)));
 
 	rows.push_back(heading("FRAME PACING / LATENCY CONTROL"));
 	addRows(rows, be->extraRows("motion", layer));
@@ -499,8 +498,8 @@ Page emulationPage(int layer, bool forGame)
 		Option o;
 		o.kind = Option::Combo;
 		o.label = "Frame pacing";
-		o.desc = "By the screen: every frame is shown for the same time, the smoothest. By the clock: for a game whose frame rate the "
-				 "screen does not have (Crux2 switches to it by itself when needed)";
+		o.desc = "By the screen: frames are paced by the display's refresh, the smoothest option. By the clock: for games whose "
+			"frame rate the display can't match.";
 		o.section = GS;
 		o.key = "UseVSyncForTiming";
 		o.names = {"By the screen (smoothest)", "By the clock, in step with the screen", "By the clock, at the game's own rate"};
@@ -509,46 +508,48 @@ Page emulationPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(adv(list("Frames queued for the display",
-		"How many finished frames may wait to be shown (PCSX2's optimal frame pacing is 0). None: the least delay, and the most demanding", GS,
+		"Sets the number of frames which can be queued.", GS,
 		"VsyncQueueSize", 0, {"None (hard sync)", "1 frame", "2 frames", "3 frames"}, 0)));
 	{
 		Option o = toggle("Queue frames while the game is behind",
-			"With none queued: while a game runs below full speed, up to 2 frames may wait, so the emulation and the graphics thread "
-			"work at the same time instead of taking turns (a lit scene went from 81% towards full speed). None again once it keeps "
-			"up for 10 seconds. Costs up to 2 frames of controller delay while behind",
+			"When a game runs below full speed, lets up to 2 frames wait in the queue so the emulator and the graphics "
+				"thread can work at the same time. Can add a little input lag while the game is slow.",
 			GS, "PS5AutoFrameQueue", true);
 		o.enabled = [](int l) { return effectiveInt(l, GS, "VsyncQueueSize", 0) == 0; };
 		rows.push_back(adv(std::move(o)));
 	}
 	rows.push_back(adv(toggle("Show a frame as it begins",
-		"Shows each frame earlier: can lower the controller's delay. A few games show glitches with it", GS, "AdvancedFrameDisplay", false)));
+		"Displays the newest frame immediately at the beginning of the frame raster time, instead of at the end. Can "
+			"reduce perceived input lag, but may cause problems with some games, such as Soulcalibur II and Baldur's Gate "
+			"Dark Alliance II.", GS, "AdvancedFrameDisplay", false)));
 	{
 		Option o = toggle("Skip repeated frames",
-			"With pacing by the clock: a game at 25 or 30 frames a second shows each frame twice, and the repeat is left out. Faster, less even",
+			"Skips displaying frames that don't change in 25/30fps games. Can improve speed, but increase input lag/make "
+				"frame pacing worse.",
 			GS, "SkipDuplicateFrames", false);
 		o.enabled = [](int l) { return !effective(l, GS, "UseVSyncForTiming", true); };
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(adv(toggle("Black frame insertion",
-		"At 120 Hz, every other refresh is black: moving things look sharper, like on a CRT, and the picture is darker. Not together "
-		"with frame generation's doubling",
+		"At 120 Hz, inserts a black frame after each frame to reduce motion blur. Makes the picture darker. Can't be "
+			"used together with frame generation.",
 		GS, "BlackFrameInsertion", false)));
 
 	if (forGame)
 	{
 		rows.push_back(heading("REAL-TIME CLOCK"));
 		const unsigned f = Option::OneGame;
-		rows.push_back(toggle("Set the clock by hand", "The emulated PS2's clock starts at a date you choose instead of today", CORE,
+		rows.push_back(toggle("Set the clock by hand", "Manually set a real-time clock to use for the virtual PlayStation 2 instead of using your OS' system clock.", CORE,
 			"ManuallySetRealTimeClock", false, f | Option::NextStart));
 		Names years;
 		for (int year = 2000; year < 2100; year++)
 			years.push_back(std::to_string(year));
-		rows.push_back(when(list("Year", "", CORE, "RtcYear", 0, years, 0, f), CORE, "ManuallySetRealTimeClock", false));
-		rows.push_back(when(range("Month", "", CORE, "RtcMonth", 1, 1, 12, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
-		rows.push_back(when(range("Day", "", CORE, "RtcDay", 1, 1, 31, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
-		rows.push_back(when(range("Hour", "", CORE, "RtcHour", 0, 0, 23, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
-		rows.push_back(when(range("Minute", "", CORE, "RtcMinute", 0, 0, 59, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
-		rows.push_back(when(range("Second", "", CORE, "RtcSecond", 0, 0, 59, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(list("Year", "Calendar year for the virtual PS2 RTC.", CORE, "RtcYear", 0, years, 0, f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(range("Month", "Month of the year (1-12).", CORE, "RtcMonth", 1, 1, 12, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(range("Day", "Day of the month (1-31).", CORE, "RtcDay", 1, 1, 31, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(range("Hour", "Hour of the day (0-23).", CORE, "RtcHour", 0, 0, 23, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(range("Minute", "Minute of the hour (0-59).", CORE, "RtcMinute", 0, 0, 59, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
+		rows.push_back(when(range("Second", "Second of the minute (0-59).", CORE, "RtcSecond", 0, 0, 59, 1, "", f), CORE, "ManuallySetRealTimeClock", false));
 	}
 	return page;
 }
@@ -564,45 +565,46 @@ void hardwareFixRows(std::vector<Option>& rows, unsigned f)
 		return o;
 	};
 	Option manual = toggle("Manual hardware renderer fixes",
-		"Crux2 applies the known fixes for each game by itself. Turn this on only if a game still draws wrong: the fixes below then take their "
-		"place", GS, "UserHacks", false, f);
+		"Disables automatic hardware fixes, allowing you to set fixes manually.", GS, "UserHacks", false, f);
 	manual.enabled = [](int l) { return !effective(l, GS, "PS5ParallelGS", false); };
 	rows.push_back(std::move(manual));
-	rows.push_back(fix(list("CPU sprite render size", "The widest target the processor draws sprites for", GS, "UserHacks_CPUSpriteRenderBW", 0,
+	rows.push_back(fix(list("CPU sprite render size", "The maximum target memory width that will allow the CPU Sprite Renderer to activate on.", GS, "UserHacks_CPUSpriteRenderBW", 0,
 		{"Off", "1 (64 wide)", "2 (128)", "3 (192)", "4 (256)", "5 (320)", "6 (384)", "7 (448)", "8 (512)", "9 (576)", "10 (640)"}, 0, f)));
-	rows.push_back(fix(list("CPU sprite render level", "What the processor draws", GS, "UserHacks_CPUSpriteRenderLevel", 0,
+	rows.push_back(fix(list("CPU sprite render level", "Determines filter level for CPU sprite render.", GS, "UserHacks_CPUSpriteRenderLevel", 0,
 		{"Sprites only", "Sprites and triangles", "Blended sprites and triangles"}, 0, f)));
-	rows.push_back(fix(list("Software CLUT render", "Draws a palette the game draws itself on the processor", GS, "UserHacks_CPUCLUTRender", 0,
+	rows.push_back(fix(list("Software CLUT render", "Tries to detect when a game is drawing its own color palette and then renders it in software, instead of on "
+		"the GPU.", GS, "UserHacks_CPUCLUTRender", 0,
 		{"Off", "Normal", "Aggressive"}, 0, f)));
-	rows.push_back(fix(list("GPU target CLUT", "Draws a palette the game draws itself on the graphics chip", GS, "UserHacks_GPUTargetCLUTMode", 0,
+	rows.push_back(fix(list("GPU target CLUT", "Tries to detect when a game is drawing its own color palette and then renders it on the GPU with special "
+		"handling.", GS, "UserHacks_GPUTargetCLUTMode", 0,
 		{"Off", "On (exact match)", "On (check inside the target)"}, 0, f)));
-	rows.push_back(fix(range("Skip draws from", "Leaves out the draws from this one to the one below", GS, "UserHacks_SkipDraw_Start", 0, 0, 5000, 1, "", f)));
-	rows.push_back(fix(range("Skip draws to", "", GS, "UserHacks_SkipDraw_End", 0, 0, 5000, 1, "", f)));
+	rows.push_back(fix(range("Skip draws from", "Completely skips drawing surfaces from the starting index up to the ending index.", GS, "UserHacks_SkipDraw_Start", 0, 0, 5000, 1, "", f)));
+	rows.push_back(fix(range("Skip draws to", "Completely skips drawing surfaces from the starting index up to the ending index.", GS, "UserHacks_SkipDraw_End", 0, 0, 5000, 1, "", f)));
 	rows.push_back(fix(list("Auto flush",
-		"Fixes some effects (shadows, lighting) that read the picture back. Costs speed", GS, "UserHacks_AutoFlushLevel", 0,
+		"Forces a primitive flush when a framebuffer is also an input texture. Fixes some processing effects such as "
+			"the shadows in the Jak series and radiosity in GTA:SA.", GS, "UserHacks_AutoFlushLevel", 0,
 		{"Off", "Sprites only", "All primitives"}, 0, f)));
-	rows.push_back(fix(toggle("Framebuffer conversion on the processor", "Converts 4 and 8 bit framebuffers on the processor", GS,
+	rows.push_back(fix(toggle("Framebuffer conversion on the processor", "Convert 4-bit and 8-bit framebuffer on the CPU instead of the GPU.", GS,
 		"UserHacks_CPU_FB_Conversion", false, f)));
-	rows.push_back(fix(toggle("No depth conversion", "Depth buffers are not kept as textures", GS, "UserHacks_DisableDepthSupport", false, f)));
-	rows.push_back(fix(toggle("No safe features", "Switches several safe features off", GS, "UserHacks_Disable_Safe_Features", false, f)));
-	rows.push_back(fix(toggle("No render fixes", "The fixes for particular games are not applied", GS, "UserHacks_DisableRenderFixes", false, f)));
-	rows.push_back(fix(toggle("Preload frame data", "Puts what the game wrote straight into video memory on the screen. Fixes black screens in "
-		"games that draw on the processor (Tekken 5's Arcade History)", GS, "preload_frame_with_gs_data", false, f)));
-	rows.push_back(fix(toggle("No partial invalidation", "A texture that is touched at all is thrown away whole", GS, "UserHacks_DisablePartialInvalidation",
+	rows.push_back(fix(toggle("No depth conversion", "Disable the support of depth buffers in the texture cache.", GS, "UserHacks_DisableDepthSupport", false, f)));
+	rows.push_back(fix(toggle("No safe features", "This option disables multiple safe features.", GS, "UserHacks_Disable_Safe_Features", false, f)));
+	rows.push_back(fix(toggle("No render fixes", "This option disables game-specific render fixes.", GS, "UserHacks_DisableRenderFixes", false, f)));
+	rows.push_back(fix(toggle("Preload frame data", "Uploads GS data when rendering a new frame to reproduce some effects accurately.", GS, "preload_frame_with_gs_data", false, f)));
+	rows.push_back(fix(toggle("No partial invalidation", "Removes texture cache entries when there is any intersection, rather than only the intersected areas.", GS, "UserHacks_DisablePartialInvalidation",
 		false, f)));
-	rows.push_back(fix(list("Texture inside a render target", "Lets a part of an earlier picture be used as a texture", GS, "UserHacks_TextureInsideRt", 0,
+	rows.push_back(fix(list("Texture inside a render target", "Allows the texture cache to reuse as an input texture the inner portion of a previous framebuffer.", GS, "UserHacks_TextureInsideRt", 0,
 		{"Off", "Inside the target", "Merge targets"}, 0, f)));
-	rows.push_back(fix(toggle("Read targets when closing", "Writes every picture back to the PS2's memory when the game is closed", GS,
+	rows.push_back(fix(toggle("Read targets when closing", "Flushes all targets in the texture cache back to local memory when shutting down.", GS,
 		"UserHacks_ReadTCOnClose", false, f)));
-	rows.push_back(fix(toggle("Estimate texture region", "Makes textures smaller where the game does not say how large they are", GS,
+	rows.push_back(fix(toggle("Estimate texture region", "Attempts to reduce the texture size when games do not set it themselves (e.g. Snowblind games).", GS,
 		"UserHacks_EstimateTextureRegion", false, f)));
-	rows.push_back(fix(toggle("Draw buffering", "Fewer draws in games that switch between two blending states", GS, "UserHacks_DrawBuffering", false, f)));
-	rows.push_back(fix(toggle("Rewrite large ST", "Rewrites large texture coordinates and clamps them", GS, "UserHacks_RewriteLargeSTCoords", false, f)));
-	rows.push_back(fix(toggle("Target page rearranging", "For games that change how a picture's memory is laid out", GS, "UserHacks_TargetPageRearranging",
+	rows.push_back(fix(toggle("Draw buffering", "Attempts to reduce draw calls in games which do heavy context switching for blending purposes.", GS, "UserHacks_DrawBuffering", false, f)));
+	rows.push_back(fix(toggle("Rewrite large ST", "Rewrites large texture coordinates to avoid stretched or wrong textures in some games.", GS, "UserHacks_RewriteLargeSTCoords", false, f)));
+	rows.push_back(fix(toggle("Target page rearranging", "Rearranges memory pages of a target if the game changes the layout at that current VRAM address.", GS, "UserHacks_TargetPageRearranging",
 		false, f)));
-	rows.push_back(fix(toggle("Palette conversion on the graphics chip", "Paletted textures are converted there, not on the processor", GS, "paltex",
+	rows.push_back(fix(toggle("Palette conversion on the graphics chip", "When enabled GPU converts colormap-textures, otherwise the CPU will. It is a trade-off between GPU and CPU.", GS, "paltex",
 		false, f)));
-	rows.push_back(fix(list("Limit depth to 24 bits", "For games whose surfaces flicker against each other", GS, "UserHacks_Limit24BitDepth", 0,
+	rows.push_back(fix(list("Limit depth to 24 bits", "Truncate 32-bit depth values to 24 bits. Helps games struggling with Z-fighting.", GS, "UserHacks_Limit24BitDepth", 0,
 		{"Off", "Keep the upper bits", "Keep the lower bits"}, 0, f)));
 }
 
@@ -612,19 +614,20 @@ void upscalingFixRows(std::vector<Option>& rows, unsigned f)
 		o.enabled = [](int l) { return effective(l, GS, "UserHacks", false) && !effective(l, GS, "PS5ParallelGS", false); };
 		return o;
 	};
-	rows.push_back(fix(list("Half pixel offset", "Can fix misplaced fog, bloom or blur", GS, "UserHacks_HalfPixelOffset", 0,
+	rows.push_back(fix(list("Half pixel offset", "Might fix some misaligned fog, bloom, or blend effect.", GS, "UserHacks_HalfPixelOffset", 0,
 		{"Off", "Normal (vertex)", "Special (texture)", "Special (texture, aggressive)", "Align to native", "Align to native, with texture offset"}, 0, f)));
-	rows.push_back(fix(list("Native scaling", "Hides seams in games that draw their own 2D effects", GS, "UserHacks_native_scaling", 0,
+	rows.push_back(fix(list("Native scaling", "Emulates native PS2 coordinate scaling behavior when upscaling to reduce misalignment artifacts and seams in "
+		"games that draw custom 2D elements.", GS, "UserHacks_native_scaling", 0,
 		{"Off", "Normal", "Aggressive", "Normal (keep the upscale)", "Aggressive (keep the upscale)"}, 0, f)));
-	rows.push_back(fix(list("Round sprite", "Corrects sprite coordinates", GS, "UserHacks_round_sprite_offset", 0, {"Off", "Half", "Full"}, 0, f)));
-	rows.push_back(fix(list("Bilinear dirty upscale", "Can smooth textures that are filtered when upscaling", GS, "UserHacks_BilinearHack", 0,
+	rows.push_back(fix(list("Round sprite", "Adjusts sprite coordinates.", GS, "UserHacks_round_sprite_offset", 0, {"Off", "Half", "Full"}, 0, f)));
+	rows.push_back(fix(list("Bilinear dirty upscale", "Can smooth out textures due to be bilinear filtered when upscaling. E.g. Brave sun glare.", GS, "UserHacks_BilinearHack", 0,
 		{"Automatic", "Force bilinear", "Force nearest"}, 0, f)));
-	rows.push_back(fix(range("Texture offset X", "Moves target textures", GS, "UserHacks_TCOffsetX", 0, -4096, 4096, 1, "", f)));
-	rows.push_back(fix(range("Texture offset Y", "", GS, "UserHacks_TCOffsetY", 0, -4096, 4096, 1, "", f)));
-	rows.push_back(fix(toggle("Align sprite", "Fixes vertical lines in some games when upscaling", GS, "UserHacks_align_sprite_X", false, f)));
-	rows.push_back(fix(toggle("Merge sprite", "Fewer lines in games whose screens are made of many sprites", GS, "UserHacks_merge_pp_sprite", false, f)));
-	rows.push_back(fix(toggle("Even sprite positions", "Closes gaps between pixels when upscaling", GS, "UserHacks_ForceEvenSpritePosition", false, f)));
-	rows.push_back(fix(toggle("Palette draws at native resolution", "Draws with a paletted texture are not upscaled", GS, "UserHacks_NativePaletteDraw",
+	rows.push_back(fix(range("Texture offset X", "Adjusts target texture offsets.", GS, "UserHacks_TCOffsetX", 0, -4096, 4096, 1, "", f)));
+	rows.push_back(fix(range("Texture offset Y", "Adjusts target texture offsets.", GS, "UserHacks_TCOffsetY", 0, -4096, 4096, 1, "", f)));
+	rows.push_back(fix(toggle("Align sprite", "Fixes issues with upscaling (vertical lines) in some games.", GS, "UserHacks_align_sprite_X", false, f)));
+	rows.push_back(fix(toggle("Merge sprite", "Replaces post-processing multiple paving sprites by a single fat sprite. It reduces various upscaling lines.", GS, "UserHacks_merge_pp_sprite", false, f)));
+	rows.push_back(fix(toggle("Even sprite positions", "Lowers the GS precision to avoid gaps between pixels when upscaling. Fixes the text on Wild Arms games.", GS, "UserHacks_ForceEvenSpritePosition", false, f)));
+	rows.push_back(fix(toggle("Palette draws at native resolution", "Forces palette texture draws to render at native resolution.", GS, "UserHacks_NativePaletteDraw",
 		false, f)));
 }
 
@@ -634,24 +637,25 @@ Page gameFixesPage()
 	auto& rows = page.rows;
 	const unsigned f = Option::OneGame;
 	rows.push_back(heading("GAME FIXES (SET BY ITSELF FOR KNOWN GAMES)", f));
-	rows.push_back(toggle("FPU multiply hack", "For a game whose maths needs it", FIX, "FpuMulHack", false, f));
-	rows.push_back(toggle("Software renderer for videos", "For games whose videos the hardware renderer draws wrong", FIX, "SoftwareRendererFMVHack", false, f));
-	rows.push_back(toggle("Skip videos", "Leaves out videos that make a game hang", FIX, "SkipMPEGHack", false, f));
-	rows.push_back(toggle("Preload TLB hack", "Avoids a TLB miss in a game that has one at its start", FIX, "GoemonTlbHack", false, f));
-	rows.push_back(toggle("EE timing hack", "A timing change for several games", FIX, "EETimingHack", false, f));
-	rows.push_back(toggle("Instant DMA hack", "For problems with the emulated cache", FIX, "InstantDMAHack", false, f));
-	rows.push_back(toggle("OPH flag hack", "For games that hang waiting for a GS flag", FIX, "OPHFlagHack", false, f));
-	rows.push_back(toggle("Emulate the GIF FIFO", "More exact, and slower", FIX, "GIFFIFOHack", false, f));
-	rows.push_back(toggle("DMA busy hack", "For games that wait on a DMA that is not busy", FIX, "DMABusyHack", false, f));
-	rows.push_back(toggle("Delay VIF1 stalls", "For HUDs and loading that need the stalls later", FIX, "VIF1StallHack", false, f));
-	rows.push_back(toggle("Emulate the VIF FIFO", "Reads ahead in the VIF1 FIFO", FIX, "VIFFIFOHack", false, f));
-	rows.push_back(toggle("Full VU0 synchronisation", "Keeps the first vector unit in step at every instruction", FIX, "FullVU0SyncHack", false, f));
-	rows.push_back(toggle("VU I bit hack", "Avoids constant recompiling", FIX, "IbitHack", false, f));
-	rows.push_back(toggle("VU add hack", "For the games of one developer that need it", FIX, "VuAddSubHack", false, f));
-	rows.push_back(toggle("VU overflow hack", "Checks for overflows", FIX, "VUOverflowHack", false, f));
-	rows.push_back(toggle("VU sync", "Runs the vector units behind, for games that read their registers", FIX, "VUSyncHack", false, f));
-	rows.push_back(toggle("VU XGKick sync", "Exact timing of the vector units' transfers. Slower", FIX, "XgKickHack", false, f));
-	rows.push_back(toggle("Count frames by blits", "Another way to count the game's frames, where the usual one is wrong", FIX, "BlitInternalFPSHack", false, f));
+	rows.push_back(toggle("FPU multiply hack", "For Tales of Destiny.", FIX, "FpuMulHack", false, f));
+	rows.push_back(toggle("Software renderer for videos", "Needed for some games with complex FMV rendering.", FIX, "SoftwareRendererFMVHack", false, f));
+	rows.push_back(toggle("Skip videos", "Skips videos/FMVs in games to avoid game hanging/freezes.", FIX, "SkipMPEGHack", false, f));
+	rows.push_back(toggle("Preload TLB hack", "To avoid TLB miss on Goemon.", FIX, "GoemonTlbHack", false, f));
+	rows.push_back(toggle("EE timing hack", "General-purpose timing hack. Known to affect following games: Digital Devil Saga, SSX.", FIX, "EETimingHack", false, f));
+	rows.push_back(toggle("Instant DMA hack", "Good for cache emulation problems. Known to affect following games: Fire Pro Wrestling Z.", FIX, "InstantDMAHack", false, f));
+	rows.push_back(toggle("OPH flag hack", "Known to affect following games: Bleach Blade Battlers, Growlanser II and III, Wizardry.", FIX, "OPHFlagHack", false, f));
+	rows.push_back(toggle("Emulate the GIF FIFO", "Correct but slower. Known to affect the following games: FIFA Street 2.", FIX, "GIFFIFOHack", false, f));
+	rows.push_back(toggle("DMA busy hack", "Known to affect following games: Mana Khemia 1, Metal Saga, Pilot Down Behind Enemy Lines.", FIX, "DMABusyHack", false, f));
+	rows.push_back(toggle("Delay VIF1 stalls", "For SOCOM 2 HUD and Spy Hunter loading hang.", FIX, "VIF1StallHack", false, f));
+	rows.push_back(toggle("Emulate the VIF FIFO", "Simulate VIF1 FIFO read ahead. Known to affect following games: Test Drive Unlimited, Transformers.", FIX, "VIFFIFOHack", false, f));
+	rows.push_back(toggle("Full VU0 synchronisation", "Forces tight VU0 sync on every COP2 instruction.", FIX, "FullVU0SyncHack", false, f));
+	rows.push_back(toggle("VU I bit hack", "Avoids constant recompilation in some games. Known to affect the following games: Scarface The World is Yours, "
+		"Crash Tag Team Racing.", FIX, "IbitHack", false, f));
+	rows.push_back(toggle("VU add hack", "For Tri-Ace Games: Star Ocean 3, Radiata Stories, Valkyrie Profile 2.", FIX, "VuAddSubHack", false, f));
+	rows.push_back(toggle("VU overflow hack", "To check for possible float overflows (Superman Returns).", FIX, "VUOverflowHack", false, f));
+	rows.push_back(toggle("VU sync", "Run behind. To avoid sync problems when reading or writing VU registers.", FIX, "VUSyncHack", false, f));
+	rows.push_back(toggle("VU XGKick sync", "Use accurate timing for VU XGKicks (slower).", FIX, "XgKickHack", false, f));
+	rows.push_back(toggle("Count frames by blits", "Use alternative method to calculate internal FPS to avoid false readings in some games.", FIX, "BlitInternalFPSHack", false, f));
 	return page;
 }
 
@@ -726,9 +730,8 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(hwAny(toggle("Automatic quality",
-		"When the graphics chip cannot keep the game at full speed, the internal resolution goes down a step for as long as it needs to "
-		"(said on the screen), and back up when there is room again; with paraLLEl-GS, the samples a pixel instead. What you chose stays "
-		"what you chose. No help where the processor is the limit",
+		"Lowers the internal resolution when the game can't hold full speed, and raises it again when there's room. "
+			"Doesn't help when the CPU is the bottleneck.",
 		GS, "PS5AutoQuality", true)));
 
 	// ---- Display
@@ -739,13 +742,8 @@ Page graphicsPage(int layer, bool forGame)
 		Option o;
 		o.kind = Option::Combo;
 		o.label = "Renderer";
-		o.desc = "Hardware: the console's graphics chip draws, at any resolution. Software: the processor draws, like the PS2 did; slow, always "
-				 "at the PS2's resolution, but right in the few games the hardware renderer gets wrong. paraLLEl-GS: the whole GS drawn on "
-				 "the graphics chip in compute shaders: far less work for the processor, no texture cache; the picture is the PS2's own "
-				 "resolution made sharp by super-sampling (the rows below), so the resolution setting does not apply. It takes Deinterlacing, "
-				 "Anti-blur, Screen offsets, Show overscan, Mipmapping and everything after the picture is made (FSR, looks, FXAA, shade "
-				 "boost); what it has no equivalent of (texture filtering, the hardware fixes, texture packs) is greyed out. Its "
-				 "save states are its own. Takes effect when a game starts";
+		o.desc = "Selects how the emulated GS is drawn: Hardware uses the GPU, Software uses the CPU like the PS2 did (slow but "
+			"accurate), paraLLEl-GS emulates the GS on the GPU at high accuracy.";
 		o.section = GS;
 		o.key = "Renderer";
 		o.names = {"Hardware (Vulkan)", "Software", "paraLLEl-GS"};
@@ -764,39 +762,36 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(adv(when(listOf("paraLLEl-GS samples",
-		"Samples for each pixel: more is a smoother, sharper picture and more work for the graphics chip. With the picture at twice the size, 4 and 8 give the same size (8 smooths a little more, at about twice the work); 16 with it is the sharpest. Its picture is enlarged "
-		"to the screen as Upscaling and sharpening says (an FSR 1 choice enlarges it with FSR)",
+		"How many samples paraLLEl-GS takes per pixel. More samples give a smoother, sharper picture but need more GPU "
+			"power.",
 		GS, "PS5ParallelGSSamples", 8, {"1 (the PS2's picture)", "2", "4", "8", "16"}, {1, 2, 4, 8, 16}, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS at twice the size",
-		"With 4 samples or more, the picture is made at twice the PS2's size from the samples: sharper, where the game draws its "
-		"3-D straight to the screen",
+		"Renders at twice the PS2's resolution when using 4 or more samples. Sharper, but needs more GPU power.",
 		GS, "PS5ParallelGSHighRes", true, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS sharp 2-D",
-		"Text, menus and other 2-D super-sampled like the 3-D. Sharper, at the risk of seams where pieces of 2-D meet",
+		"Applies super-sampling to text, menus and other 2D elements. Sharper, but may cause seams in some games.",
 		GS, "PS5ParallelGSSharp2D", false, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS hands work over as it goes (experimental)",
-		"The graphics chip gets what is recorded so far while paraLLEl-GS's thread waits for the game, instead of a frame at a time: "
-		"a game that reads its picture back waits for less. Off: a frame at a time, as before v1.0.8",
+		"Sends work to the GPU while the frame is still being recorded. Can help games that read back the screen. "
+			"Experimental.",
 		GS, "PS5ParallelGSEarlySubmit", false, 0), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS full-detail effects",
-		"Keeps the samples where a game draws its picture into a texture and over the screen again (blur, glow, depth of field): "
-		"without them such effects bring the picture back to the PS2's resolution, as the PS2 showed them. More work for the "
-		"graphics chip",
+		"Keeps full detail in effects that render to a texture, such as blur, glow and depth of field. Needs more GPU "
+			"power.",
 		GS, "PS5ParallelGSTextures", false, Option::NextStart), GS, "PS5ParallelGS", false)));
 	rows.push_back(adv(when(toggle("paraLLEl-GS pictures shared with the graphics device (experimental)",
-		"Each picture goes from paraLLEl-GS to the rest of the picture's way (FSR, frame generation, the on-screen display) "
-		"by the graphics chip, from memory both share, instead of being copied by the processor: less work for the GS "
-		"thread, most at twice the size. Off: copied by the processor, as before",
+		"Passes paraLLEl-GS frames to the display without copying them on the CPU. Experimental.",
 		GS, "PS5ParallelGSSharedFrames", false, Option::NextStart), GS, "PS5ParallelGS", false)));
-	rows.push_back(strings("Aspect ratio", "The shape of the picture", GS, "AspectRatio", "Auto 4:3/3:2",
+	rows.push_back(strings("Aspect ratio", "Selects the aspect ratio to display the game content at.", GS, "AspectRatio", "Auto 4:3/3:2",
 		{"Stretch to fill the screen", "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"}, {"Stretch", "Auto 4:3/3:2", "4:3", "16:9", "10:7"}));
-	rows.push_back(adv(strings("FMV aspect ratio override", "A different shape while the game plays a video", GS, "FMVAspectRatioSwitch", "Off",
+	rows.push_back(adv(strings("FMV aspect ratio override", "Selects the aspect ratio for display when a FMV is detected as playing.", GS, "FMVAspectRatioSwitch", "Off",
 		{"The same as the game", "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"}, {"Off", "Auto 4:3/3:2", "4:3", "16:9", "10:7"})));
 	{
 		Option o;
 		o.kind = Option::Combo;
 		o.label = "Beside a 4:3 picture";
-		o.desc = "What fills the sides of the screen. Dark grey ages an OLED screen more evenly than black";
+		o.desc = "What fills the sides of the screen when the game is 4:3. Dark grey wears an OLED screen more evenly than "
+			"black.";
 		o.section = GS;
 		o.key = "SidePicture";
 		o.names = {"Black", "Dark grey", "A blurred copy of the picture"};
@@ -805,41 +800,43 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(list("Deinterlacing",
-		"Automatic suits most games. Try another if the picture shakes or shows thin lines. With paraLLEl-GS: Automatic shows a progressive "
-		"picture where the game allows it; any other choice shows the fields as the PS2's own scan-out blended them",
+		"Determines the deinterlacing method to be used on the interlaced screen of the emulated console. Automatic "
+			"should be able to correctly deinterlace most games, but if you see visibly shaky graphics, try one of the "
+			"other options.",
 		GS, "deinterlace_mode", 0,
 		{"Automatic", "Off", "Weave (top field first)", "Weave (bottom field first)", "Bob (top field first)", "Bob (bottom field first)",
 			"Blend (top field first)", "Blend (bottom field first)", "Adaptive (top field first)", "Adaptive (bottom field first)"}));
-	rows.push_back(adv(list("Bilinear filtering", "How the picture is stretched to the screen. Sharp bilinear keeps pixels crisp without shimmering", GS,
+	rows.push_back(adv(list("Bilinear filtering", "Smooths out the image when upscaling the console to the screen.", GS,
 		"linear_present_mode", 2, {"Off (pixels)", "Bilinear (soft)", "Bilinear (sharp)"})));
-	rows.push_back(toggle("Widescreen patches", "Games that have a 16:9 patch start in widescreen. Set the aspect ratio to 16:9 with it. Can cause glitches",
+	rows.push_back(toggle("Widescreen patches", "Automatically loads and applies widescreen patches on game start. Can cause issues.",
 		CORE, "EnableWideScreenPatches", true, Option::AllGames | Option::NextStart));
-	rows.push_back(toggle("No-interlacing patches", "Games that have a patch for it stop interlacing: a steadier, sharper picture", CORE,
+	rows.push_back(toggle("No-interlacing patches", "Automatically loads and applies no-interlacing patches on game start. Can cause issues.", CORE,
 		"EnableNoInterlacingPatches", true, Option::AllGames | Option::NextStart));
 	// A game's own: PCSX2 keeps these as the game's patch lists ([Patches] Enable and Disable, by
 	// the patch's name), not as the switches above, which are every game's.
-	rows.push_back(list("Widescreen patch", "This game's 16:9 patch, where it has one", "PS5GamePatch", "Widescreen 16:9", 0,
+	rows.push_back(list("Widescreen patch", "Applies this game's widescreen patch, if one exists.", "PS5GamePatch", "Widescreen 16:9", 0,
 		{"As in Settings", "On", "Off"}, 0, Option::OneGame | Option::NextStart));
-	rows.push_back(list("No-interlacing patch", "This game's patch that stops interlacing, where it has one", "PS5GamePatch", "No-Interlacing", 0,
+	rows.push_back(list("No-interlacing patch", "Applies this game's no-interlacing patch, if one exists.", "PS5GamePatch", "No-Interlacing", 0,
 		{"As in Settings", "On", "Off"}, 0, Option::OneGame | Option::NextStart));
-	rows.push_back(toggle("Anti-blur", "Removes the blur some games add on purpose. Sharper, a little less like the console", GS, "pcrtc_antiblur", true));
-	rows.push_back(toggle("Integer scaling", "Enlarges by whole numbers only: sharper pixels in 2D games, with borders", GS, "IntegerScaling", false));
-	rows.push_back(adv(toggle("Screen offsets", "Places the picture where the game asks for it", GS, "pcrtc_offsets", false)));
-	rows.push_back(adv(toggle("Show overscan", "Shows the edges an old television hid", GS, "pcrtc_overscan", false)));
-	rows.push_back(adv(notPgs(toggle("Disable interlace offset", "Can make an interlaced picture less blurry", GS, "disable_interlace_offset", true))));
-	rows.push_back(adv(range("Vertical stretch", "Makes the picture taller or flatter", GS, "StretchY", 100, 10, 300, 1, "%")));
-	rows.push_back(adv(range("Crop left", "Cuts off the picture's edges, keeping its shape", GS, "CropLeft", 0, 0, 720, 1, " px")));
-	rows.push_back(adv(range("Crop top", "", GS, "CropTop", 0, 0, 720, 1, " px")));
-	rows.push_back(adv(range("Crop right", "", GS, "CropRight", 0, 0, 720, 1, " px")));
-	rows.push_back(adv(range("Crop bottom", "", GS, "CropBottom", 0, 0, 720, 1, " px")));
+	rows.push_back(toggle("Anti-blur", "Enables internal Anti-Blur hacks. Less accurate than PS2 rendering but will make a lot of games look less "
+		"blurry.", GS, "pcrtc_antiblur", true));
+	rows.push_back(toggle("Integer scaling", "Adds padding to the display area to ensure that the ratio between pixels on the host to pixels in the console "
+		"is an integer number. May result in a sharper image in some 2D games.", GS, "IntegerScaling", false));
+	rows.push_back(adv(toggle("Screen offsets", "Enables PCRTC Offsets which position the screen as the game requests.", GS, "pcrtc_offsets", false)));
+	rows.push_back(adv(toggle("Show overscan", "Enables the option to show the overscan area on games which draw more than the safe area of the screen.", GS, "pcrtc_overscan", false)));
+	rows.push_back(adv(notPgs(toggle("Disable interlace offset", "Disables interlacing offset which may reduce blurring in some situations.", GS, "disable_interlace_offset", true))));
+	rows.push_back(adv(range("Vertical stretch", "Increases or decreases the virtual picture size vertically.", GS, "StretchY", 100, 10, 300, 1, "%")));
+	rows.push_back(adv(range("Crop left", "Crops the image, while respecting aspect ratio.", GS, "CropLeft", 0, 0, 720, 1, " px")));
+	rows.push_back(adv(range("Crop top", "Crops the image, while respecting aspect ratio.", GS, "CropTop", 0, 0, 720, 1, " px")));
+	rows.push_back(adv(range("Crop right", "Crops the image, while respecting aspect ratio.", GS, "CropRight", 0, 0, 720, 1, " px")));
+	rows.push_back(adv(range("Crop bottom", "Crops the image, while respecting aspect ratio.", GS, "CropBottom", 0, 0, 720, 1, " px")));
 	addRows(rows, be->extraRows("output", layer));
 
 	// ---- Rendering
 	rows.push_back(heading("RENDERING"));
 	{
 		Option o = floats("Internal resolution",
-			"How sharp the game is drawn. Higher looks better on a big television and needs more speed. With an FSR 1 choice in the next row, FSR "
-			"picks it",
+			"Multiplies the render resolution by the specified factor (upscaling).",
 			GS, "upscale_multiplier", 6.f,
 			{"Native (PS2)", "2x (~720p)", "3x (~1080p)", "4x (~1440p)", "5x (~1800p)", "6x (~2160p, 4K)", "7x", "8x (~2880p)", "9x", "10x", "11x", "12x"},
 			{1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 10.f, 11.f, 12.f});
@@ -847,39 +844,42 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(hwAny(listOf("Upscaling and sharpening",
-		"Off: the internal resolution above is what you get. FSR 1 draws the game smaller and enlarges it to the screen with AMD's filter: nearly as sharp, much faster; it sets the internal resolution itself. NIS enlarges and "
-		"sharpens (NVIDIA's filter). CAS only sharpens",
+		"Off uses the internal resolution as it is. FSR 1 renders the game at a lower resolution and upscales it with "
+			"AMD FidelityFX Super Resolution; CAS sharpens the image with FidelityFX Contrast Adaptive Sharpening.",
 		GS, "CASMode", 5,
 		{"Off", "FSR 1 from 4x (sharpest)", "FSR 1 from 3x", "FSR 1 from 2x (fastest)", "NIS: enlarge and sharpen", "CAS: sharpen", "CAS: sharpen and resize"},
 		{0, 5, 3, 4, 6, 1, 2})));
 	{
-		Option o = range("Sharpness", "How strong the sharpening is", GS, "CASSharpness", 50, 0, 100, 5, "%");
+		Option o = range("Sharpness", "Determines the intensity the sharpening effect in CAS post-processing.", GS, "CASSharpness", 50, 0, 100, 5, "%");
 		o.enabled = [hardwareAny](int l) { return hardwareAny(l) && effectiveInt(l, GS, "CASMode", 5) != 0; };
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(hw(list("Texture filtering", "How textures are smoothed. \"As the PS2\" is right for nearly every game", GS, "filter", 2,
+	rows.push_back(hw(list("Texture filtering", "Selects where bilinear filtering is utilized when rendering textures.", GS, "filter", 2,
 		{"Nearest (blocky)", "Bilinear (always)", "Bilinear (as the PS2)", "Bilinear (always, not sprites)"})));
-	rows.push_back(adv(hw(list("Trilinear filtering", "Smooths between a texture's smaller copies", GS, "TriFilter", -1,
+	rows.push_back(adv(hw(list("Trilinear filtering", "Selects where trilinear filtering is utilized when rendering textures.", GS, "TriFilter", -1,
 		{"Automatic", "Off", "As the PS2", "Always"}, -1))));
-	rows.push_back(hw(listOf("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle. Costs little", GS, "MaxAnisotropy", 0,
+	rows.push_back(hw(listOf("Anisotropic filtering", "Reduces texture aliasing at extreme viewing angles.", GS, "MaxAnisotropy", 0,
 		{"Off", "2x", "4x", "8x", "16x"}, {0, 2, 4, 8, 16})));
-	rows.push_back(adv(hwAny(list("Dithering", "The fine pattern the PS2 lays over colour gradients. With paraLLEl-GS: Off and Force 32 bit "
-		"draw without it (Force 32 bit also shows the 32-bit picture a game copies into a 16-bit screen at the end), Scaled and Unscaled "
-		"as the PS2", GS, "dithering_ps2", 2,
+	rows.push_back(adv(hwAny(list("Dithering", "Selects the type of dithering applies when the game requests it.", GS, "dithering_ps2", 2,
 		{"Off", "Scaled", "Unscaled (as the PS2)", "Force 32 bit"}))));
 	rows.push_back(hw(list("Blending accuracy",
-		"How exactly transparent effects (smoke, glass, lights) are drawn. Basic suits most games; higher is more exact and slower. "
-		"Some games get a higher level from the game database by themselves",
+		"Determines the level of accuracy when emulating blend modes not supported by the host graphics API.",
 		GS, "accurate_blending_unit", 1, {"Minimum", "Basic", "Medium", "High", "Full (slow)", "Maximum (very slow)"})));
-	rows.push_back(adv(hwAny(toggle("Mipmapping", "Smaller copies of textures for far surfaces. Some games need it to look right", GS, "hw_mipmap", true))));
-	rows.push_back(adv(hw(toggle("Accurate alpha test", "Some games need it to draw right. Costs some speed", GS, "HWAccurateAlphaTest", false))));
-	rows.push_back(adv(hw(toggle("AA1", "The PS2's own edge smoothing. A few games need it to draw right; can cost a lot of speed", GS, "HWAA1", false))));
+	rows.push_back(adv(hwAny(toggle("Mipmapping", "Enables mipmapping, which some games require to render correctly. Mipmapping uses progressively lower "
+		"resolution variants of textures at progressively further distances to reduce processing load and avoid visual "
+		"artifacts.", GS, "hw_mipmap", true))));
+	rows.push_back(adv(hw(toggle("Accurate alpha test", "Enables accurate alpha testing, which some games require to render correctly. This may require more draw calls "
+		"and result in a speed penalty.", GS, "HWAccurateAlphaTest", false))));
+	rows.push_back(adv(hw(toggle("AA1", "Enables AA1 (PS2 antialiasing), which some games require to render correctly. This may result in a heavy "
+		"performance penalty.", GS, "HWAA1", false))));
 	rows.push_back(adv(hw(toggle("Rasterizer ordered view",
-		"The higher blending accuracies without a pause of the GPU before each draw: much faster on this console (the GPU orders "
-		"the pixels itself). Used only where it saves pauses. Off for a game that shows glitches with it", GS, "HWROV", true))));
-	rows.push_back(adv(sw(range("Software renderer threads", "How many threads help draw", GS, "extrathreads", 2, 0, 10, 1, ""))));
-	rows.push_back(adv(sw(toggle("Software auto flush", "Needed by effects that read the picture back as a texture", GS, "autoflush_sw", true))));
-	rows.push_back(adv(sw(toggle("Software mipmapping", "Smaller copies of textures for far surfaces", GS, "mipmap", true))));
+		"Enables Rasterizer Ordered View (ROV), which allows feedback loops to be executed with fewer draw calls. Can "
+			"improve performance in feedback heavy games with higher accuracy settings.", GS, "HWROV", true))));
+	rows.push_back(adv(sw(range("Software renderer threads", "Number of threads to use in addition to the main GS thread for rasterization.", GS, "extrathreads", 2, 0, 10, 1, ""))));
+	rows.push_back(adv(sw(toggle("Software auto flush", "Force a primitive flush when a framebuffer is also an input texture.", GS, "autoflush_sw", true))));
+	rows.push_back(adv(sw(toggle("Software mipmapping", "Enables mipmapping, which some games require to render correctly. Mipmapping uses progressively lower "
+		"resolution variants of textures at progressively further distances to reduce processing load and avoid visual "
+		"artifacts.", GS, "mipmap", true))));
 
 	// ---- Hardware Fixes and Upscaling Fixes: a game's own, or every game's (advanced)
 	const unsigned fixFlags = forGame ? Option::OneGame : (Option::AllGames | Option::Expert);
@@ -891,40 +891,37 @@ Page graphicsPage(int layer, bool forGame)
 	// ---- Texture Replacement
 	rows.push_back(heading("TEXTURE REPLACEMENT"));
 	rows.push_back(hw(toggle("Load textures",
-		"A folder or ZIP named after the game's serial, in textures/ of the title folder, or in a folder named Crux2 or PS2 on a USB drive "
-		"or a network share. A game's options say where its pack was found",
+		"Loads replacement textures where available and user-provided.",
 		GS, "LoadTextureReplacements", true)));
-	rows.push_back(adv(when(toggle("Asynchronous texture loading", "Less stutter while textures come in", GS, "LoadTextureReplacementsAsync", true), GS,
+	rows.push_back(adv(when(toggle("Asynchronous texture loading", "Loads replacement textures on a worker thread, reducing microstutter when replacements are enabled.", GS, "LoadTextureReplacementsAsync", true), GS,
 		"LoadTextureReplacements", true)));
-	rows.push_back(adv(when(toggle("Precache replacements", "The whole pack into memory before the game starts", GS, "PrecacheTextureReplacements",
+	rows.push_back(adv(when(toggle("Precache replacements", "Preloads all replacement textures to memory. Not necessary with asynchronous loading.", GS, "PrecacheTextureReplacements",
 							true),
 		GS, "LoadTextureReplacements", true)));
 	{
 		Option o = action("Download an HD texture pack",
-			"Looks for this game's pack in the Internet Archive's collection of PCSX2 HD texture packs (archive.org/details/"
-			"pcsx2-hd-texture-packs) and puts it on this console or a USB drive, as you choose. It is unpacked as it downloads and used as "
-			"soon as it is whole, also in a game that runs. Packs are their makers' work, and large: often several GB",
+			"Downloads this game's HD texture pack from the Internet Archive. Packs can be several GB.",
 			[] { be->findTexturePacks(); }, Option::OneGame);
 		o.info = [] { return be->texturePackDoing(); };
 		rows.push_back(std::move(o));
 	}
 	{
-		Option o = action("Stop the download", "What was unpacked whole stays", [] { be->stopTexturePack(); }, Option::OneGame);
+		Option o = action("Stop the download", "Stops the download. Files already unpacked are kept.", [] { be->stopTexturePack(); }, Option::OneGame);
 		o.enabled = [](int) { return !be->texturePackDoing().empty(); };
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(hw(toggle("Dump textures", "Writes the game's textures to textures/<serial>/dumps, for making a pack. Slows the game", GS,
+	rows.push_back(hw(toggle("Dump textures", "Dumps replaceable textures to disk. Will reduce performance.", GS,
 		"DumpReplaceableTextures", false, ADV)));
-	rows.push_back(when(toggle("Dump mipmaps", "", GS, "DumpReplaceableMipmaps", false, ADV), GS, "DumpReplaceableTextures", false));
-	rows.push_back(when(toggle("Dump FMV textures", "", GS, "DumpTexturesWithFMVActive", false, ADV), GS, "DumpReplaceableTextures", false));
+	rows.push_back(when(toggle("Dump mipmaps", "Includes mipmaps when dumping textures.", GS, "DumpReplaceableMipmaps", false, ADV), GS, "DumpReplaceableTextures", false));
+	rows.push_back(when(toggle("Dump FMV textures", "Allows texture dumping when FMVs are active. You should not enable this.", GS, "DumpTexturesWithFMVActive", false, ADV), GS, "DumpReplaceableTextures", false));
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Smooths jagged edges over the finished picture. Costs little, softens a little", GS, "fxaa", false));
-	rows.push_back(adv(list("TV shader", "PCSX2's own simpler looks. Not together with a look below", GS, "TVShader", 0,
+	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.", GS, "fxaa", false));
+	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",
-		"Make it look like an old television: CRT shaders (the fast ones suit 4K), a composite or S-Video signal, film grain",
+		"Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain.",
 		GS, "Look", "",
 		{"None", "CRT (fast)", "CRT (fastest)", "CRT (finest; demanding at 4K)", "CRT through a composite signal", "Composite signal",
 			"S-Video signal", "Film grain", "Warmer colours"},
@@ -932,59 +929,56 @@ Page graphicsPage(int layer, bool forGame)
 			"crux2/crt-guest-advanced-composite.slangp", "crux2/composite.slangp", "crux2/s-video.slangp", "crux2/film-grain.slangp",
 			"crux2/colour.slangp"}));
 	addRows(rows, be->extraRows("picture", layer));
-	rows.push_back(toggle("Shade boost", "Brightness, contrast, gamma and saturation of your own", GS, "ShadeBoost", false));
-	rows.push_back(when(range("Brightness", "50 is the game's own", GS, "ShadeBoost_Brightness", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
-	rows.push_back(when(range("Contrast", "50 is the game's own", GS, "ShadeBoost_Contrast", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
-	rows.push_back(when(range("Gamma", "50 is the game's own", GS, "ShadeBoost_Gamma", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
-	rows.push_back(when(range("Saturation", "50 is the game's own", GS, "ShadeBoost_Saturation", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
+	rows.push_back(toggle("Shade boost", "Enables brightness/contrast/gamma/saturation adjustment.", GS, "ShadeBoost", false));
+	rows.push_back(when(range("Brightness", "Adjusts brightness. 50 is normal.", GS, "ShadeBoost_Brightness", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
+	rows.push_back(when(range("Contrast", "Adjusts contrast. 50 is normal.", GS, "ShadeBoost_Contrast", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
+	rows.push_back(when(range("Gamma", "Adjusts gamma. 50 is normal.", GS, "ShadeBoost_Gamma", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
+	rows.push_back(when(range("Saturation", "Adjusts saturation. 50 is normal.", GS, "ShadeBoost_Saturation", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
 	rows.push_back(list("Frame generation",
-		"Makes extra pictures between the game's own, like a television's motion smoothing: a game at 30 frames a second is shown at 60. "
-		"Adds a little delay; fast movement in front of something else can smear. The last choice also doubles 60 to 120 on a 120 Hz screen",
+		"Generates extra frames between the game's own, so a 30 fps game is shown at 60 fps. Adds a little input lag "
+			"and can cause smearing on fast movement.",
 		GS, "FrameGeneration", 0, {"Off", "30 to 60", "30 to 60, and 60 to 120 at 120 Hz"}));
 	const auto fg = [](Option o) { return whenNot(std::move(o), GS, "FrameGeneration", 0, 0); };
-	rows.push_back(fg(list("Frame generation method", "AMD FSR 3's optical flow follows small, fast movement better and keeps still things still", GS,
+	rows.push_back(fg(list("Frame generation method", "How the extra frames are generated. AMD FSR 3 optical flow handles small, fast movement better.", GS,
 		"FrameGenerationMethod", 0, {"Crux2's own", "AMD FSR 3 optical flow"})));
 	{
-		Option o = list("Optical flow quality", "Finer costs more of the graphics chip", GS, "FrameGenerationQuality", 1,
+		Option o = list("Optical flow quality", "Higher quality needs more GPU power.", GS, "FrameGenerationQuality", 1,
 			{"Performance", "Balanced", "Quality"});
 		o.enabled = [](int l) { return effectiveInt(l, GS, "FrameGeneration", 0) != 0 && effectiveInt(l, GS, "FrameGenerationMethod", 0) == 1; };
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(fg(toggle("No frame generation during videos", "The game's own videos are shown as they are", GS, "FrameGenerationSkipVideos", true)));
+	rows.push_back(fg(toggle("No frame generation during videos", "Turns frame generation off while the game plays a video.", GS, "FrameGenerationSkipVideos", true)));
 
 	// ---- Advanced
 	rows.push_back(heading("ADVANCED", ADV));
 	rows.push_back(adv(hw(toggle("Keep read render targets uncompressed (experimental)",
-		"A render target a glow or flare reads from itself stays in the layout that allows it, instead of being decompressed by the "
-		"graphics chip each time a draw reads it again: faster at light sources in some games. Takes effect at the next start",
+		"Keeps render targets uncompressed when glow and flare effects read them. Can be faster in some games. "
+			"Experimental; takes effect the next time a game starts.",
 		GS, "PS5HoldFeedbackLayout", false, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Render targets without compression (experimental)",
-		"Every render target is made without the graphics chip's colour compression, so it never has to be decompressed when a "
-		"glow, flare or light cone reads it: can be faster where those effects slow a game down, but every other draw moves more "
-		"data, so it can also be slower. Compare a scene's speed with it off and on. Takes effect at the next start",
+		"Creates render targets without colour compression. Can be faster or slower depending on the game. "
+			"Experimental; takes effect the next time a game starts.",
 		GS, "PS5RTNoCompression", false, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Leave out barriers with nothing to wait for",
-		"A draw that reads the picture it draws on waits for the graphics chip only when something was drawn there since the last "
-		"wait. The picture is the same; off makes every wait, as PCSX2 does. Takes effect at the next start",
+		"Skips GPU waits when nothing has been drawn since the last one. Turn off if effects look wrong. Takes effect "
+			"the next time a game starts.",
 		GS, "PS5SkipRedundantBarriers", true, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Reuse copies of the picture",
-		"A copy of the picture that a glow or blur reads is used again while nothing has been drawn into it since. The picture is "
-		"the same; switch off if an effect ever looks a frame behind. Takes effect at the next start",
+		"Reuses copies of the screen for glow and blur effects when nothing has changed. Turn off if an effect looks a "
+			"frame behind. Takes effect the next time a game starts.",
 		GS, "PS5ReuseRTCopies", true, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Keep the ordered view's render passes",
-		"With Rasterizer ordered view, draws that blend and draws that do not stay in one render pass instead of each "
-		"starting its own: far less work for the processor at lit scenes. The picture is the same; off ends the pass as "
-		"PCSX2 does. Takes effect at the next start",
+		"Keeps draws that use the rasterizer ordered view in the same render pass. Much less CPU work in scenes with "
+			"many lights. Takes effect the next time a game starts.",
 		GS, "PS5ROVKeepPass", true, Option::NextStart))));
-	rows.push_back(list("Hardware download mode", "How the emulation waits for pictures a game reads back. With paraLLEl-GS, a read waits for everything "
-		"drawn before it: \"Unsynchronised\" does not wait for the card and answers zeros where it has not finished (a game that reads what it "
-		"has just drawn gets zeros every time), \"Off\" reads nothing; both faster, both wrong where the game uses what it read", GS, "HWDownloadMode", 0,
+	rows.push_back(list("Hardware download mode", "Changes synchronization behavior for GS downloads.", GS, "HWDownloadMode", 0,
 		{"Accurate", "Accurate, always whole (fewer readbacks)", "No readbacks (the threads run in step)", "Unsynchronised (not the same twice)",
 			"Off (the game reads nothing back)"},
 		0, ADV));
-	rows.push_back(hw(list("Texture preloading", "Uploads whole textures the first time they are used. Faster in some games; needed for texture packs",
+	rows.push_back(hw(list("Texture preloading", "Uploads full textures to the GPU on use, rather than only the utilized regions. Can improve performance in "
+		"some games.",
 		GS, "texture_preloading", 2, {"Off", "Partial", "Full (hash cache)"}, 0, ADV)));
-	rows.push_back(hw(toggle("Extended upscaling multipliers", "Internal resolutions above 12x: far beyond what a 4K screen shows, and very demanding", GS,
+	rows.push_back(hw(toggle("Extended upscaling multipliers", "Displays additional, very high upscaling multipliers dependent on GPU and driver capability.", GS,
 		"ExtendedUpscalingMultipliers", false, ADV)));
 	{
 		Names names;
@@ -994,24 +988,28 @@ Page graphicsPage(int layer, bool forGame)
 			names.push_back(std::to_string(times) + "x");
 			values.push_back(static_cast<float>(times));
 		}
-		Option o = floats("Internal resolution above 12x", "Takes the place of the internal resolution under Rendering", GS, "upscale_multiplier", 1.f,
+		Option o = floats("Internal resolution above 12x", "Multiplies the render resolution by the specified factor (upscaling).", GS, "upscale_multiplier", 1.f,
 			names, values, ADV);
 		o.enabled = [hardware](int l) { return hardware(l) && effective(l, GS, "ExtendedUpscalingMultipliers", false); };
 		rows.push_back(std::move(o));
 	}
-	rows.push_back(list("Override texture barriers", "For draws that read their own target", GS, "OverrideTextureBarriers", -1, {"Automatic", "Off", "On"}, -1, ADV));
-	rows.push_back(toggle("Extra barriers with the ordered view", "For games with glitches under Rasterizer ordered view", GS, "HWROVBarriersVK", false, ADV));
-	rows.push_back(toggle("Disable shader cache", "Shaders are not kept on disk: every start compiles them again", GS, "DisableShaderCache", false,
+	rows.push_back(list("Override texture barriers", "Forces texture barrier functionality to the specified value.", GS, "OverrideTextureBarriers", -1, {"Automatic", "Off", "On"}, -1, ADV));
+	rows.push_back(toggle("Extra barriers with the ordered view", "Forces extra barriers when using ROV with Vulkan to fix graphical issues present in some games and hardware "
+		"configurations.", GS, "HWROVBarriersVK", false, ADV));
+	rows.push_back(toggle("Disable shader cache", "Prevents the loading and saving of shaders/pipelines to disk.", GS, "DisableShaderCache", false,
 		ADV | Option::Restart));
-	rows.push_back(toggle("Disable vertex shader expand", "Sprites are expanded on the processor, not in a vertex shader", GS, "DisableVertexShaderExpand",
+	rows.push_back(toggle("Disable vertex shader expand", "Falls back to the CPU for expanding sprites/lines.", GS, "DisableVertexShaderExpand",
 		false, ADV | Option::Restart));
-	rows.push_back(toggle("Spin CPU during readbacks", "Stops the processor lowering its clock while it waits", GS, "HWSpinCPUForReadbacks", false, ADV));
-	rows.push_back(toggle("Spin GPU during readbacks", "The same, for the graphics chip", GS, "HWSpinGPUForReadbacks", false, ADV));
-	rows.push_back(toggle("Disable framebuffer fetch", "For a driver that gets it wrong", GS, "DisableFramebufferFetch", false,
+	rows.push_back(toggle("Spin CPU during readbacks", "Does useless work on the CPU during readbacks to prevent it from going into powersave modes. May improve "
+		"performance during readbacks but with a significant increase in power usage.", GS, "HWSpinCPUForReadbacks", false, ADV));
+	rows.push_back(toggle("Spin GPU during readbacks", "Submits useless work to the GPU during readbacks to prevent it from going into powersave modes. May improve "
+		"performance during readbacks but with a significant increase in power usage.", GS, "HWSpinGPUForReadbacks", false, ADV));
+	rows.push_back(toggle("Disable framebuffer fetch", "Prevents the usage of framebuffer fetch when supported by host GPU.", GS, "DisableFramebufferFetch", false,
 		ADV | Option::AllGames | Option::Restart));
-	rows.push_back(toggle("Use blit swap chain", "For a driver that gets it wrong", GS, "UseBlitSwapChain", false, ADV | Option::AllGames | Option::Restart));
-	rows.push_back(frange("NTSC frame rate", "The rate NTSC games run at", GS, "FramerateNTSC", 59.94f, 10, 300, 0.01, 2, " Hz", ADV));
-	rows.push_back(frange("PAL frame rate", "The rate PAL games run at", GS, "FrameratePAL", 50.f, 10, 300, 0.01, 2, " Hz", ADV));
+	rows.push_back(toggle("Use blit swap chain", "Uses a blit presentation model instead of flipping when using the Direct3D 11 graphics API. Has no effect on "
+		"the PS5.", GS, "UseBlitSwapChain", false, ADV | Option::AllGames | Option::Restart));
+	rows.push_back(frange("NTSC frame rate", "The frame rate used for NTSC games.", GS, "FramerateNTSC", 59.94f, 10, 300, 0.01, 2, " Hz", ADV));
+	rows.push_back(frange("PAL frame rate", "The frame rate used for PAL games.", GS, "FrameratePAL", 50.f, 10, 300, 0.01, 2, " Hz", ADV));
 	return page;
 }
 
@@ -1026,33 +1024,33 @@ Page osdPage()
 	const Names places = {"Not shown", "Top left", "Top centre", "Top right", "Centre left", "Centre", "Centre right", "Bottom left", "Bottom centre",
 		"Bottom right"};
 	rows.push_back(heading("ON-SCREEN DISPLAY"));
-	rows.push_back(range("OSD scale", "The size of the figures and messages", GS, "OsdScale", 100, 50, 500, 5, "%", A));
-	rows.push_back(adv(frange("OSD margin", "How far from the screen's edges they are", GS, "OsdMargin", 10.f, 0, 100, 1, 0, " px", A)));
-	rows.push_back(adv(list("OSD messages position", "Where the emulator's messages are shown", GS, "OsdMessagesPos", 0, places, 0, A)));
-	rows.push_back(adv(list("OSD performance position", "Where the figures chosen below are shown", GS, "OsdPerformancePos", 3, places, 0, A)));
-	rows.push_back(toggle("Bold figures", "Heavier letters, easier to read from a sofa", GS, "OsdBoldText", true, A));
-	rows.push_back(toggle("Move the figures from corner to corner", "The figures over a game go to another corner every five minutes", FRONT, "OsdMove",
+	rows.push_back(range("OSD scale", "Scales the size of the onscreen OSD from 50% to 500%.", GS, "OsdScale", 100, 50, 500, 5, "%", A));
+	rows.push_back(adv(frange("OSD margin", "Sets the distance in pixels from the edges of the screen for OSD elements.", GS, "OsdMargin", 10.f, 0, 100, 1, 0, " px", A)));
+	rows.push_back(adv(list("OSD messages position", "Determines where on-screen display messages are positioned.", GS, "OsdMessagesPos", 0, places, 0, A)));
+	rows.push_back(adv(list("OSD performance position", "Position of a variety of on-screen performance data points as selected by the user.", GS, "OsdPerformancePos", 3, places, 0, A)));
+	rows.push_back(toggle("Bold figures", "Draws OSD text with heavier weight for improved readability.", GS, "OsdBoldText", true, A));
+	rows.push_back(toggle("Move the figures from corner to corner", "Moves the on-screen figures to another corner every five minutes to prevent burn-in.", FRONT, "OsdMove",
 		false, F));
-	rows.push_back(list("Style", "Crux2's panel: the figures in sections (graphics chip, processor, frames) with a graph of the frame times. "
-		"PCSX2's: its own lines of text", "PS5", "OsdStyle", 0, {"Crux2's panel", "PCSX2's lines"}, 0, A));
+	rows.push_back(list("Style", "Crux2: one panel with sections and a frame-time graph. PCSX2: PCSX2's own lines of text.", "PS5", "OsdStyle", 0, {"Crux2's panel", "PCSX2's lines"}, 0, A));
 	rows.push_back(heading("SHOW"));
-	rows.push_back(toggle("Speed percentages", "The speed of the emulation, in percent", GS, "OsdShowSpeed", false, A));
-	rows.push_back(toggle("FPS", "The frames the game itself shows (and the pictures shown, where frame generation makes more)", GS,
+	rows.push_back(toggle("Speed percentages", "Shows the current emulation speed of the system as a percentage.", GS, "OsdShowSpeed", false, A));
+	rows.push_back(toggle("FPS", "Shows the number of internal video frames displayed per second by the system.", GS,
 		"OsdShowFPS", false, A));
-	rows.push_back(adv(toggle("VPS", "The console's own refreshes a second", GS, "OsdShowVPS", false, A)));
-	rows.push_back(toggle("Resolution", "The resolution the game is drawn at", GS, "OsdShowResolution", false, A));
-	rows.push_back(toggle("CPU usage", "How busy the emulation, graphics and VU threads are", GS, "OsdShowCPU", false, A));
-	rows.push_back(toggle("GPU usage", "", GS, "OsdShowGPU", false, A));
-	rows.push_back(toggle("Frame times", "A graph of how long frames take", GS, "OsdShowFrameTimes", false, A));
-	rows.push_back(adv(toggle("Hardware info", "The processor and graphics chip", GS, "OsdShowHardwareInfo", false, A)));
-	rows.push_back(adv(toggle("Statistics", "Draws, primitives and the like of a frame", GS, "OsdShowGSStats", false, A)));
-	rows.push_back(adv(toggle("GPU statistics", "What the graphics chip did in a frame", GS, "OsdShowGPUStats", false, A)));
-	rows.push_back(toggle("Indicators", "Marks for pause, fast forward and slow motion", GS, "OsdShowIndicators", false, A));
-	rows.push_back(adv(toggle("Settings", "The settings in effect, in the bottom right corner", GS, "OsdShowSettings", false, A)));
-	rows.push_back(adv(toggle("Patches", "The patches in effect, with the settings", GS, "OsdshowPatches", false, A)));
-	rows.push_back(adv(toggle("Inputs", "What is pressed, in the bottom left corner", GS, "OsdShowInputs", false, A)));
-	rows.push_back(adv(toggle("Texture replacements", "How many were loaded and dumped", GS, "OsdShowTextureReplacements", true, A)));
-	rows.push_back(toggle("Crux2 version", "Crux2's version and build, and the PCSX2 it is built on, beside the other figures", GS,
+	rows.push_back(adv(toggle("VPS", "Shows the number of Vsyncs performed per second by the system.", GS, "OsdShowVPS", false, A)));
+	rows.push_back(toggle("Resolution", "Shows the internal resolution of the game.", GS, "OsdShowResolution", false, A));
+	rows.push_back(toggle("CPU usage", "Shows the host's CPU utilization based on threads.", GS, "OsdShowCPU", false, A));
+	rows.push_back(toggle("GPU usage", "Shows the host's GPU utilization.", GS, "OsdShowGPU", false, A));
+	rows.push_back(toggle("Frame times", "Displays a graph showing the average frametimes.", GS, "OsdShowFrameTimes", false, A));
+	rows.push_back(adv(toggle("Hardware info", "Shows the current system CPU and GPU information.", GS, "OsdShowHardwareInfo", false, A)));
+	rows.push_back(adv(toggle("Statistics", "Shows statistics about the emulated GS such as primitives and draw calls.", GS, "OsdShowGSStats", false, A)));
+	rows.push_back(adv(toggle("GPU statistics", "Shows GPU vertex shader and pixels shader invocations.", GS, "OsdShowGPUStats", false, A)));
+	rows.push_back(toggle("Indicators", "Shows icon indicators for emulation states such as Pausing, Turbo, Fast-Forward, and Slow-Motion.", GS, "OsdShowIndicators", false, A));
+	rows.push_back(adv(toggle("Settings", "Displays various settings and the current values of those settings in the bottom-right corner of the display.", GS, "OsdShowSettings", false, A)));
+	rows.push_back(adv(toggle("Patches", "Shows the amount of currently active patches/cheats in the bottom-right corner of the display.", GS, "OsdshowPatches", false, A)));
+	rows.push_back(adv(toggle("Inputs", "Shows the current controller state of the system in the bottom-left corner of the display.", GS, "OsdShowInputs", false, A)));
+	rows.push_back(adv(toggle("Texture replacements", "Shows the status of the number of dumped and loaded texture replacements in the top-right corner of the "
+		"display.", GS, "OsdShowTextureReplacements", true, A)));
+	rows.push_back(toggle("Crux2 version", "Shows the current Crux2 version.", GS,
 		"OsdShowVersion", false, A));
 	return page;
 }
@@ -1068,25 +1066,24 @@ Page audioPage(int layer)
 	const unsigned ADV = Option::Expert | A; // the stretcher's and expansion's tuning
 	rows.push_back(heading("CONFIGURATION"));
 	rows.push_back(adv(strings("Synchronization",
-		"Time stretching plays the sound slower or faster with the game, without changing its pitch: no crackling when a game slows down", OUT,
+		"When the emulation isn't running at 100% speed, adjusts the tempo of the audio which produces much nicer sound "
+			"during fast-forward/slowdown.", OUT,
 		"SyncMode", "TimeStretch", {"None (the sound breaks up)", "Time stretching"}, {"Disabled", "TimeStretch"})));
 	rows.push_back(strings("Expansion",
-		"Makes more channels out of a game's stereo sound for a 5.1 or 7.1 set. Needs the console's sound output set to that many channels; "
-		"if the console refuses, the sound stays stereo",
+		"Determines how audio is expanded from stereo to surround for supported games.",
 		OUT, "ExpansionMode", "Disabled", {"Off (stereo)", "Stereo with bass channel", "Four channels", "Four channels with bass", "5.1", "7.1"},
 		{"Disabled", "StereoLFE", "Quadraphonic", "QuadraphonicLFE", "Surround51", "Surround71"}, A | Option::NextStart));
-	rows.push_back(adv(range("Buffer size", "How much sound is held ready. More is safer against crackling and adds delay", OUT, "BufferMS", 50, 10, 500, 5, " ms",
+	rows.push_back(adv(range("Buffer size", "Determines the amount of audio buffered before being pulled by the host API.", OUT, "BufferMS", 50, 10, 500, 5, " ms",
 		A)));
 	rows.push_back(listOf("Output latency",
-		"How much sound the console is handed at a time. The smallest is the least delay; more can help where the sound crackles though the "
-		"game holds its speed",
+		"How much audio is sent to the console at once. Lower means less delay; raise it if the sound crackles.",
 		"PS5", "AudioGrain", 256, {"Smallest (5 ms)", "11 ms", "16 ms", "21 ms", "32 ms", "43 ms"}, {256, 512, 768, 1024, 1536, 2048},
 		A | Option::NextStart));
 
 	rows.push_back(heading("CONTROLS"));
-	rows.push_back(range("Standard volume", "The volume at normal speed", OUT, "StandardVolume", 100, 0, 200, 5, "%"));
-	rows.push_back(range("Fast forward volume", "", OUT, "FastForwardVolume", 100, 0, 200, 5, "%"));
-	rows.push_back(toggle("Mute all sound", "No sound at all", OUT, "OutputMuted", false));
+	rows.push_back(range("Standard volume", "Controls the volume of the audio played on the host at normal speed.", OUT, "StandardVolume", 100, 0, 200, 5, "%"));
+	rows.push_back(range("Fast forward volume", "Controls the volume of the audio played on the host when fast forwarding.", OUT, "FastForwardVolume", 100, 0, 200, 5, "%"));
+	rows.push_back(toggle("Mute all sound", "Prevents the emulator from producing any audible sound.", OUT, "OutputMuted", false));
 
 	// PCSX2's two dialogs ("Stretch settings", "Expansion settings"), as rows: advanced.
 	const auto stretch = [](Option o) {
@@ -1149,52 +1146,55 @@ Page advancedPage(int layer)
 	const Names rounding = {"Nearest", "Negative", "Positive", "Chop / zero"};
 
 	rows.push_back(heading("EMOTIONENGINE (MIPS-IV)", f));
-	rows.push_back(list("Rounding mode", "Chop is the PS2's; some games need another", CPU, "FPU.Roundmode", 3, rounding, 0, f));
-	rows.push_back(list("Division rounding mode", "Nearest suits most games", CPU, "FPUDiv.Roundmode", 0, rounding, 0, f));
+	rows.push_back(list("Rounding mode", "Determines how the results of floating-point operations are rounded. Some games need specific settings.", CPU, "FPU.Roundmode", 3, rounding, 0, f));
+	rows.push_back(list("Division rounding mode", "Determines how the results of floating-point division is rounded. Some games need specific settings.", CPU, "FPUDiv.Roundmode", 0, rounding, 0, f));
 	rows.push_back(clamping("Clamping mode", "How numbers out of range are handled. Normal suits most games", "fpuOverflow", "fpuExtraOverflow",
 		"fpuFullMode", {"None", "Normal", "Extra, keep the sign", "Full"}, f));
-	rows.push_back(toggle("Enable recompiler", "Off is many times slower", REC, "EnableEE", true, f));
-	rows.push_back(toggle("Enable cache (slow)", "With the interpreter only; for diagnostics", REC, "EnableEECache", false, f));
-	rows.push_back(toggle("INTC spin detection", "A large speed-up in some games, with next to no side effects", SPEED, "IntcStat", true, f));
-	rows.push_back(toggle("Wait loop detection", "A moderate speed-up in some games, with no known side effects", SPEED, "WaitLoop", true, f));
-	rows.push_back(toggle("Enable fast memory access", "", REC, "EnableFastmem", true, f));
-	rows.push_back(toggle("Pause on TLB miss", "Pauses where the game would otherwise carry on", REC, "PauseOnTLBMiss", false, f));
-	rows.push_back(toggle("Enable 128MB RAM (dev console)", "128 MB, as a development console had", CPU, "ExtraMemory", false, f | Option::NextStart));
+	rows.push_back(toggle("Enable recompiler", "Performs just-in-time binary translation of 64-bit MIPS-IV machine code to native code.", REC, "EnableEE", true, f));
+	rows.push_back(toggle("Enable cache (slow)", "Enables emulation of the EE's hardware cache. Interpreter only, provided for diagnostics.", REC, "EnableEECache", false, f));
+	rows.push_back(toggle("INTC spin detection", "Huge speedup for some games, with almost no compatibility side effects.", SPEED, "IntcStat", true, f));
+	rows.push_back(toggle("Wait loop detection", "Moderate speedup for some games, with no known side effects.", SPEED, "WaitLoop", true, f));
+	rows.push_back(toggle("Enable fast memory access", "Uses backpatching to avoid register flushing on every memory access.", REC, "EnableFastmem", true, f));
+	rows.push_back(toggle("Pause on TLB miss", "Pauses the virtual machine when a TLB miss occurs, instead of ignoring it and continuing.", REC, "PauseOnTLBMiss", false, f));
+	rows.push_back(toggle("Enable 128MB RAM (dev console)", "Exposes additional memory to the virtual machine, expanding the EE and IOP memory to 128MB and 8MB "
+		"respectively.", CPU, "ExtraMemory", false, f | Option::NextStart));
 
 	rows.push_back(heading("VECTOR UNITS (VU)", f));
-	rows.push_back(list("VU0 rounding mode", "", CPU, "VU0.Roundmode", 3, rounding, 0, f));
+	rows.push_back(list("VU0 rounding mode", "Determines how the results of floating-point operations are rounded. Some games need specific settings.", CPU, "VU0.Roundmode", 3, rounding, 0, f));
 	rows.push_back(clamping("VU0 clamping mode", "", "vu0Overflow", "vu0ExtraOverflow", "vu0SignOverflow", {"None", "Normal", "Extra", "Extra, keep the sign"}, f));
-	rows.push_back(list("VU1 rounding mode", "", CPU, "VU1.Roundmode", 3, rounding, 0, f));
+	rows.push_back(list("VU1 rounding mode", "Determines how the results of floating-point operations are rounded. Some games need specific settings.", CPU, "VU1.Roundmode", 3, rounding, 0, f));
 	rows.push_back(clamping("VU1 clamping mode", "", "vu1Overflow", "vu1ExtraOverflow", "vu1SignOverflow", {"None", "Normal", "Extra", "Extra, keep the sign"}, f));
-	rows.push_back(toggle("Enable VU0 recompiler (micro mode)", "", REC, "EnableVU0", true, f));
-	rows.push_back(toggle("Enable VU1 recompiler", "", REC, "EnableVU1", true, f));
-	rows.push_back(toggle("mVU flag hack", "A good speed-up that suits nearly all games", SPEED, "vuFlagHack", true, f));
-	rows.push_back(toggle("Instant VU1", "A modest speed-up; a few games show glitches", SPEED, "vu1Instant", true, f));
+	rows.push_back(toggle("Enable VU0 recompiler (micro mode)", "Performs just-in-time binary translation of Vector Unit 0 (VU0) microprograms to native code.", REC, "EnableVU0", true, f));
+	rows.push_back(toggle("Enable VU1 recompiler", "Performs just-in-time binary translation of Vector Unit 1 (VU1) microprograms to native code.", REC, "EnableVU1", true, f));
+	rows.push_back(toggle("mVU flag hack", "Good speedup and high compatibility, may cause graphical errors.", SPEED, "vuFlagHack", true, f));
+	rows.push_back(toggle("Instant VU1", "Runs VU1 instantly. Provides a modest speed improvement in most games. Safe for most games, but a few games "
+		"may exhibit graphical errors.", SPEED, "vu1Instant", true, f));
 
 	rows.push_back(heading("I/O PROCESSOR (IOP, MIPS-I)", f));
-	rows.push_back(toggle("Enable IOP recompiler", "", REC, "EnableIOP", true, f));
+	rows.push_back(toggle("Enable IOP recompiler", "Performs just-in-time binary translation of 32-bit MIPS-I machine code to native code.", REC, "EnableIOP", true, f));
 
 	rows.push_back(heading("GAME SETTINGS", f));
-	rows.push_back(toggle("Enable game fixes", "The fixes known for each game, applied when it starts", CORE, "EnableGameFixes", true, f));
-	rows.push_back(toggle("Enable compatibility patches", "The patches known for each game, applied when it starts", CORE, "EnablePatches", true, f));
+	rows.push_back(toggle("Enable game fixes", "Automatically loads and applies fixes to known problematic games on game start.", CORE, "EnableGameFixes", true, f));
+	rows.push_back(toggle("Enable compatibility patches", "Automatically loads and applies compatibility patches to known problematic games.", CORE, "EnablePatches", true, f));
 	rows.push_back(toggle("Recommended picture settings",
-		"Games the database marks as needing a higher blending accuracy, accurate alpha test or AA1 get it. A value set in a game's own "
-		"options wins",
+		"Applies the higher blending accuracy, accurate alpha test or AA1 that the game database recommends. Settings "
+			"made in a game's own options take priority.",
 		"PS5", "GameDbRecommended", true, f | A));
 
 	rows.push_back(heading("SAVESTATE SETTINGS"));
 	rows.push_back(toggle("Create save state backups",
-		"When a state is saved to a slot that has one, the old one is kept as that slot's backup", CORE, "BackupSavestate", true, A));
+		"Creates a backup copy of a save state if it already exists when the save is created. The backup copy has a "
+			".backup suffix", CORE, "BackupSavestate", true, A));
 	rows.push_back(listOf("Save a state by itself",
-		"While a game is played its state is saved every so often, to a place of its own beside the slots (\"Load the auto-save\" in the "
-		"quick menu). The game may stand still for a moment each time",
+		"Automatically saves the game's state at this interval. Load it from the quick menu with \"Load the "
+			"auto-save\". The game may pause briefly while saving.",
 		"PS5", "AutoSaveMinutes", 0, {"Off", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes"}, {0, 2, 5, 10, 15}, A));
 	rows.push_back(toggle("Undo for a loaded state",
-		"Before a state is loaded into a running game, the game as it is, is kept: \"Undo the last load\" in the quick menu brings it back", "PS5",
+		"Keeps the game's current state before you load a save state, so you can undo the load from the quick menu.", "PS5",
 		"UndoLoad", true, A));
 	addRows(rows, be->extraRows("saves", layer));
-	rows.push_back(list("Compression method", "", CORE, "SavestateCompressionType", 2, {"Uncompressed", "Deflate64", "Zstandard"}, 0, A | f));
-	rows.push_back(list("Compression level", "", CORE, "SavestateCompressionRatio", 1, {"Low (fast)", "Medium", "High", "Very high (slow)"}, 0, A | f));
+	rows.push_back(list("Compression method", "Sets the compression algorithm for savestate.", CORE, "SavestateCompressionType", 2, {"Uncompressed", "Deflate64", "Zstandard"}, 0, A | f));
+	rows.push_back(list("Compression level", "Sets the compression level for savestate.", CORE, "SavestateCompressionRatio", 1, {"Low (fast)", "Medium", "High", "Very high (slow)"}, 0, A | f));
 	return page;
 }
 
@@ -1207,17 +1207,17 @@ Page debugPage()
 	const unsigned f = Option::Expert | Option::AllGames;
 	addPageRows(rows, be->logPage(), "LOGGING");
 	rows.push_back(heading("LOGGING IN DETAIL", f));
-	rows.push_back(toggle("Log to a file", "The emulator's log, logs/emulog.txt in the title folder", "Logging", "EnableFileLogging", true, f));
-	rows.push_back(toggle("Verbose", "Developer messages too", "Logging", "EnableVerbose", false, f));
-	rows.push_back(toggle("Timestamps", "A time before each line", "Logging", "EnableTimestamps", true, f));
-	rows.push_back(toggle("EE console", "The game's own messages from the Emotion Engine", "Logging", "EnableEEConsole", true, f));
-	rows.push_back(toggle("IOP console", "The game's own messages from the I/O processor", "Logging", "EnableIOPConsole", true, f));
-	rows.push_back(toggle("CDVD verbose reads", "Every read a game makes of its disc", CORE, "CdvdVerboseReads", false, f));
+	rows.push_back(toggle("Log to a file", "Writes log messages to emulog.txt.", "Logging", "EnableFileLogging", true, f));
+	rows.push_back(toggle("Verbose", "Writes dev log messages to log sinks.", "Logging", "EnableVerbose", false, f));
+	rows.push_back(toggle("Timestamps", "Writes timestamps alongside log messages.", "Logging", "EnableTimestamps", true, f));
+	rows.push_back(toggle("EE console", "Writes debug messages from the game's EE code to the console.", "Logging", "EnableEEConsole", true, f));
+	rows.push_back(toggle("IOP console", "Writes debug messages from the game's IOP code to the console.", "Logging", "EnableIOPConsole", true, f));
+	rows.push_back(toggle("CDVD verbose reads", "Logs disc reads from games.", CORE, "CdvdVerboseReads", false, f));
 
 	// PCSX2's trace log: every kind of event, into the log. Very slow, very large.
 	constexpr const char* TRACE = "EmuCore/TraceLog";
 	rows.push_back(heading("TRACE LOGGING", f));
-	rows.push_back(toggle("Enable trace logging", "The kinds chosen below go into the log as they happen. Slow, and the log grows fast", TRACE, "Enabled",
+	rows.push_back(toggle("Enable trace logging", "Writes the selected kinds of events to the log. Slow, and the log grows quickly.", TRACE, "Enabled",
 		false, f));
 	const auto trace = [](const char* label, const char* key) {
 		return when(toggle(label, "", TRACE, key, false, f), TRACE, "Enabled", false);
@@ -1238,10 +1238,10 @@ Page debugPage()
 
 	// The graphics side's debugging (PCSX2's Debug > GS tab and Graphics > Advanced > Debugging).
 	rows.push_back(heading("GRAPHICS DEBUGGING", f));
-	rows.push_back(toggle("Use debug blend", "Shows how blending was done, for finding faults", GS, "UseDebugBlend", false, f));
-	rows.push_back(list("GS dump compression", "How a GS dump (the hotkey) is packed", GS, "GSDumpCompression", 2,
+	rows.push_back(toggle("Use debug blend", "Forces SW blending and disables several optimizations.", GS, "UseDebugBlend", false, f));
+	rows.push_back(list("GS dump compression", "Change the compression algorithm used when creating a GS dump.", GS, "GSDumpCompression", 2,
 		{"Uncompressed", "LZMA (xz)", "Zstandard (zst)"}, 0, f));
-	rows.push_back(toggle("Dump GS draws", "Writes what each draw used and made, into the snapshots folder. Very slow, very large", GS, "DumpGSData",
+	rows.push_back(toggle("Dump GS draws", "Dumps information about every draw to the snapshots folder. Very slow and very large.", GS, "DumpGSData",
 		false, f));
 	const auto dump = [](const char* label, const char* key) { return when(toggle(label, "", GS, key, false, f), GS, "DumpGSData", false); };
 	rows.push_back(dump("Save render target", "SaveRT"));
@@ -1257,7 +1257,7 @@ Page debugPage()
 	rows.push_back(when(range("Save draw start", "", GS, "SaveDrawStart", 0, 0, 100000, 1, "", f), GS, "DumpGSData", false));
 	rows.push_back(when(range("Save draw count", "", GS, "SaveDrawCount", 5000, 0, 100000, 1, "", f), GS, "DumpGSData", false));
 	rows.push_back(when(range("Save frame start", "", GS, "SaveFrameStart", 0, 0, 100000, 1, "", f), GS, "DumpGSData", false));
-	rows.push_back(when(range("Save frame count", "-1: every frame", GS, "SaveFrameCount", -1, -1, 100000, 1, "", f), GS, "DumpGSData", false));
+	rows.push_back(when(range("Save frame count", "-1 saves every frame.", GS, "SaveFrameCount", -1, -1, 100000, 1, "", f), GS, "DumpGSData", false));
 	return page;
 }
 
@@ -1271,30 +1271,28 @@ Page ps5Page(int layer)
 	const unsigned A = Option::Expert | Option::AllGames;
 	rows.push_back(heading("PS5 TUNING", A));
 	rows.push_back(toggle("Sound and controls before the emulator",
-		"The console runs sound, the controllers and the menus ahead of the emulator's threads, and downloads, copies and unpacking "
-		"after them: no crackle or late buttons while the emulator is busy. Off: every thread is equal",
+		"Gives sound, controllers and menus priority over the emulator, and runs downloads and copies after it. "
+			"Prevents crackling and late button presses.",
 		"PS5", "ThreadPriorities", false, A | Option::Restart));
 	rows.push_back(toggle("Build shaders quickly first",
-		"A new effect is first drawn with a quickly built shader, swapped for the optimised one a frame later: fewer hitches the first "
-		"time an effect is seen",
+		"Draws new effects with a quickly built shader first, then switches to the optimised one. Reduces stutter the "
+			"first time an effect appears.",
 		"PS5", "FastPipelines", true, A | Option::Restart));
 
 	rows.push_back(heading("NATIVE CODE MODULES (EXPERIMENTAL)", A));
 	rows.push_back(toggle("Use native code modules",
-		"Runs a game's code from a module you built on your PC from your own copy of the game (the recomp kit), put in the data "
-		"folder's native folder or on the share. Code the module lacks runs as usual",
+		"Runs a game's code from a native module built with the recomp kit from your own copy of the game. "
+			"Experimental.",
 		"PS5", "NativeModules", true, A | Option::NextStart));
 	const auto native = [](Option o) { return when(std::move(o), "PS5", "NativeModules", true); };
 	rows.push_back(native(toggle("Put executables on the share",
-		"A game started without a module copies its executable to Crux2-native/executables on its share, for the kit's native-batch.sh; "
-		"the next start picks up the new module from Crux2-native/modules",
+		"Copies a game's executable to the network share when no module exists, so the recomp kit can build one.",
 		"PS5", "NativeExport", true, A | Option::NextStart)));
 	rows.push_back(native(toggle("Native code may use hardware",
-		"Off: module code that talks to the console's hardware is left to PCSX2. For a game that hangs with its module", "PS5", "NativeHardware",
+		"Lets native modules access the console's hardware directly. Turn off if a game hangs with its module.", "PS5", "NativeHardware",
 		true, A | Option::NextStart)));
 	rows.push_back(native(toggle("Check native code",
-		"Runs everything twice and compares with PCSX2's interpreter, naming each function that differs in the log. Slow: for finding "
-		"faults, not for playing",
+		"Runs every function twice and compares the result with PCSX2's interpreter. Very slow; for finding bugs only.",
 		"PS5", "NativeCheck", false, A | Option::NextStart)));
 
 	addRows(rows, be->extraRows("system", layer));

@@ -15,6 +15,10 @@
 #include <deque>
 #include <unordered_map>
 
+// The title's build stamp (ps5_build_stamp.cpp); weak, as the PC preview builds this file without it.
+extern "C" const char* ps5px_build_version(void) __attribute__((weak));
+extern "C" const char* ps5px_build_number(void) __attribute__((weak));
+
 namespace bp
 {
 
@@ -1657,7 +1661,18 @@ void topBar(ImDrawList* dl, int active_tab, bool inGame, Reach reach)
 	if (reach == Reach::All)
 		glyph(dl, Glyph::R1, x + 10, 48, 30);
 
-	text(dl, bold(), 30, W - 48 - cs.x, 48 - cs.y / 2, col::text, clock);
+	// Under the clock: the version, that this is a work in progress, the build number and the author.
+	text(dl, bold(), 28, W - 48 - cs.x, 36 - cs.y / 2, col::text, clock);
+	{
+		static const std::string stamp = [] {
+			const char* version = ps5px_build_version ? ps5px_build_version() : "";
+			const char* number = ps5px_build_number ? ps5px_build_number() : "0";
+			std::string s = (*version != '\0') ? std::string(version) + " WIP" : std::string("WIP");
+			return s + "  \xC2\xB7  build " + number + "  \xC2\xB7  by Press5elect";
+		}();
+		const ImVec2 ss = textSize(regular(), 17, stamp.c_str());
+		text(dl, regular(), 17, W - 48 - ss.x, 72 - ss.y / 2, col::dim, stamp.c_str());
+	}
 	text(dl, regular(), 28, padX, 48 - ps.y / 2, pads > 0 ? col::text : col::faint, padText.c_str());
 	if (inGame)
 	{

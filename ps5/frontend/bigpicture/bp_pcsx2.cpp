@@ -1659,7 +1659,7 @@ public:
 				bp::Option use;
 				use.kind = bp::Option::StringList;
 				use.label = "This game's controls";
-				use.desc = "A profile of your own for this game: the buttons as they were saved in it. As in Settings: the controls of every game";
+				use.desc = "Uses a saved controller profile for this game.";
 				use.section = "EmuCore";
 				use.key = "InputProfileName";
 				use.defString = "";
@@ -1674,13 +1674,12 @@ public:
 				page.rows.push_back(std::move(use));
 			}
 			page.rows.push_back(Action("Save the controls as a profile...",
-				"The buttons of every port as they are now, kept under a name: for a game whose options choose it, or to load back later",
+				"Saves the current button mappings as a profile.",
 				[this] { SaveControlsProfile(); }, bp::Option::AllGames));
-			page.rows.push_back(Action("Load a profile into the controls...", "A profile's buttons become those of every game (the ones now are replaced)",
+			page.rows.push_back(Action("Load a profile into the controls...", "Loads a profile's button mappings, replacing the current ones.",
 				[this] { LoadControlsProfile(); }, bp::Option::AllGames));
 			page.rows.push_back(Action("Make a profile with Cross and Circle swapped",
-				"Saved as \"Cross and Circle swapped\": the controls as they are now with the two buttons changed round on every port, as "
-				"many Japanese games expect. Choose it in such a game's options",
+				"Saves a profile with Cross and Circle swapped, for Japanese games.",
 				[this] { SwappedProfile(); }, bp::Option::AllGames));
 			if (!profiles.empty())
 			{
@@ -1690,9 +1689,9 @@ public:
 
 		page.rows.push_back(Heading("ALL PORTS"));
 		page.rows.push_back(Action("Put the buttons back as they were",
-			"Every port and every hotkey gets the buttons this title starts out with",
+			"Resets all controller ports and hotkeys to their default buttons.",
 			[this] {
-				bp::confirm("Put the buttons back?", "Every controller port and every hotkey gets the buttons this title starts out with.",
+				bp::confirm("Put the buttons back?", "All controller ports and hotkeys will be reset to their default buttons.",
 					[this](bool yes) {
 						if (!yes)
 							return;
@@ -1716,8 +1715,8 @@ public:
 			bp::Option mics;
 			mics.kind = bp::Option::IntList;
 			mics.label = "SingStar microphones";
-			mics.desc = "The game's USB microphones (in USB port 2) are the console's: player 1's controller or the headset plugged into "
-			            "it, and for the second microphone player 2's. For SingStar and the other games that sing or talk";
+			mics.desc = "Uses the controller's microphone or a headset as the PS2's USB microphones, for SingStar and other singing "
+				"games.";
 			mics.section = "PS5";
 			mics.key = "SingStar";
 			mics.defInt = 0;
@@ -1736,17 +1735,16 @@ public:
 		// Who plays on what: each signed-in user's controller is a player (the one who started the
 		// title is the first), put on the PlayStation 2's ports in one of the three ways games expect.
 		page.rows.push_back(Heading("PLAYERS"));
-		page.rows.push_back(Action("One or two players", "Player 1 on port 1, player 2 on port 2, no multitap: what most games expect",
+		page.rows.push_back(Action("One or two players", "Player 1 on port 1, player 2 on port 2, no multitap.",
 			[this] { SetUpPlayers(0); }, bp::Option::AllGames));
 		page.rows.push_back(Action("Up to four players, multitap in port 1",
-			"Players 1 to 4 on ports 1A, 1B, 1C and 1D: what most games for three or four players expect", [this] { SetUpPlayers(1); },
+			"Players 1 to 4 on a multitap in port 1, for most games with three or four players.", [this] { SetUpPlayers(1); },
 			bp::Option::AllGames));
 		page.rows.push_back(Action("Up to four players, multitap in port 2",
-			"Player 1 on port 1, players 2 to 4 on ports 2A, 2B and 2C: for the games that want their multitap in the second port",
+			"Player 1 on port 1, players 2 to 4 on a multitap in port 2, for games that need it there.",
 			[this] { SetUpPlayers(2); }, bp::Option::AllGames));
 		page.rows.push_back(Toggle("Light bar in the player's colour",
-			"Each controller's light bar says which player it is: blue, red, green, pink. Off: the bars are left as the console has them (one "
-			"that was coloured keeps its colour until the controller is next connected)",
+			"Sets each controller's light bar to its player colour: blue, red, green, pink.",
 			"PS5", "LightBars", false, bp::Option::AllGames));
 		{
 			bp::Option now;
@@ -1757,9 +1755,9 @@ public:
 			page.rows.push_back(std::move(now));
 		}
 		page.rows.push_back(Heading("BY HAND"));
-		page.rows.push_back(Toggle("Multitap in port 1", "Three more controllers on the console's first port, for the games that know it", "Pad",
+		page.rows.push_back(Toggle("Multitap in port 1", "Enables an additional three controller slots. Not supported in all games.", "Pad",
 			"MultitapPort1", false, bp::Option::AllGames));
-		page.rows.push_back(Toggle("Multitap in port 2", "Three more controllers on the console's second port, for the games that know it", "Pad",
+		page.rows.push_back(Toggle("Multitap in port 2", "Enables an additional three controller slots. Not supported in all games.", "Pad",
 			"MultitapPort2", false, bp::Option::AllGames));
 
 		const bool multitap[2] = {si->GetBoolValue("Pad", "MultitapPort1", false), si->GetBoolValue("Pad", "MultitapPort2", false)};
@@ -1781,7 +1779,7 @@ public:
 				bp::Option type;
 				type.kind = bp::Option::StringList;
 				type.label = "Controller";
-				type.desc = "What is plugged into this port of the PlayStation 2";
+				type.desc = "The controller plugged into this port.";
 				type.section = section;
 				type.key = "Type";
 				type.defString = ci != nullptr ? ci->name : "";
@@ -1803,8 +1801,7 @@ public:
 			if (si->GetBoolValue("PS5", "USBPads", false))
 			{
 				page.rows.push_back(Action("Map it to a USB controller",
-					"Every button of this port goes on a controller in the console's USB port (a DualShock 3, an Xbox 360 pad, a guitar...): "
-					"the first one for port 1, the second for port 2, and so on",
+					"Maps this port to a controller plugged into the console's USB port.",
 					[this, global] { AutomaticMapping(global, true); }, bp::Option::AllGames));
 			}
 
@@ -1912,8 +1909,7 @@ public:
 			// v1.6.0: the cards and their saves are the card manager's (bp_cards.cpp), a sheet of its own.
 			page.rows.push_back(Heading("CARD MANAGER"));
 			bp::Option manager = Action("Open the card manager",
-				"Every card, by game (its cover and title), with its saves: copy a save to another card or out as a file, delete it, bring "
-				"saves in from a PlayStation 2, a USB drive or a share, make, format, rename, copy and delete cards",
+				"Manage memory cards and saves: copy, delete, import and export saves, and create, format or rename cards.",
 				[this] { bp::openCardManager(this); }, bp::Option::AllGames);
 			manager.info = [] {
 				const size_t n = FileMcd_GetAvailableCards(true).size();
@@ -1925,13 +1921,13 @@ public:
 		for (u32 slot = 0; slot < 2; slot++)
 		{
 			page.rows.push_back(Heading(fmt::format("SLOT {}", slot + 1)));
-			page.rows.push_back(Toggle("A card in the slot", "Off: the game finds the slot empty", "MemoryCards", fmt::format("Slot{}_Enable", slot + 1),
+			page.rows.push_back(Toggle("A card in the slot", "Inserts a memory card into this slot. Off: the slot is empty.", "MemoryCards", fmt::format("Slot{}_Enable", slot + 1),
 				true));
 
 			bp::Option card;
 			card.kind = bp::Option::StringList;
 			card.label = "Card";
-			card.desc = "The memory card file this slot holds; a running game sees a change as the card being swapped";
+			card.desc = "The memory card file in this slot.";
 			card.section = "MemoryCards";
 			card.key = fmt::format("Slot{}_Filename", slot + 1);
 			card.defString = FileMcd_GetDefaultName(slot);
@@ -1979,13 +1975,11 @@ public:
 		if (!own)
 		{
 			page.rows.push_back(Toggle("A memory card for each game",
-				"Slot 1 holds a card of the game's own, named by its serial and made when the game first starts; games that read each "
-				"other's saves share one. Saves made before stay on the card chosen above: with that card in slot 2, the PlayStation 2's "
-				"browser copies them over",
+				"Gives every game its own memory card in slot 1, created when the game first starts.",
 				"PS5", "CardPerGame", true, bp::Option::AllGames | bp::Option::NextStart));
 		}
 		page.rows.push_back(Toggle("A folder card shows only the running game's saves",
-			"A card that is a folder holds any number of saves; the game is shown its own, as a card of 8 MB", "EmuCore", "McdFolderAutoManage", true));
+			"Simulates a larger memory card by filtering saves only to the current game.", "EmuCore", "McdFolderAutoManage", true));
 		return page;
 	}
 
@@ -2297,8 +2291,7 @@ public:
 		bp::Page page{"\xef\x9b\xbf", "Network", {}};
 		page.rows.push_back(Heading("NETWORK ADAPTER"));
 		page.rows.push_back(Toggle("Network adapter",
-			"The PlayStation 2's network adapter, for games that go online or play over the local network. The game is given an address of its "
-			"own; its traffic goes out through the console's connection",
+			"Enables the network adapter for online functionality and LAN play.",
 			"DEV9/Eth", "EthEnable", false));
 		{
 			bp::Option now;
@@ -2328,9 +2321,8 @@ public:
 			// The first name server, chosen in one step: a service that keeps games' online play
 			// going (its address comes with the title), the console's own, or an address typed in.
 			bp::Option first = Action("First name server",
-				"Where the game asks for the addresses of the servers it plays on. PS2 Online and PS Rewired keep the online play of many "
-				"games going (ps2online.com and psrewired.com list which); choose the one that has your game. A game with a name server "
-				"set by hand in its own network settings uses that one instead",
+				"The DNS server games use to find their online servers. PS2 Online and PS Rewired keep many games online; check "
+					"their websites to see which supports your game.",
 				{}, bp::Option::AllGames);
 			first.info = [this] {
 				const std::string mode = getString(bp::Shared, "DEV9/Eth", "ModeDNS1").value_or(std::string("Auto"));
@@ -2391,9 +2383,8 @@ public:
 			bp::Option mode;
 			mode.kind = bp::Option::StringList;
 			mode.label = (i == 1) ? "First name server" : "Second name server";
-			mode.desc = (i == 1) ? "Where the game asks for the addresses of the servers it plays on. The servers that keep a game's online play "
-								   "going today usually ask for an address of theirs to be set here" :
-								   "Asked when the first does not answer";
+			mode.desc = (i == 1) ? "The DNS server games use to find their online servers. Most revival servers ask you to set their address here." :
+								   "Used when the first DNS server doesn't answer.";
 			mode.section = "DEV9/Eth";
 			mode.key = mode_key;
 			mode.defString = "Auto";
@@ -2422,7 +2413,7 @@ public:
 		}
 
 		page.rows.push_back(Heading("HARD DRIVE"));
-		page.rows.push_back(Toggle("Hard drive", "The PlayStation 2's hard drive, for the games that install to it or need it to go online. It is one file, inis/DEV9hdd.raw",
+		page.rows.push_back(Toggle("Hard drive", "Enables the internal Hard Disk Drive for expanded storage.",
 			"DEV9/Hdd", "HddEnable", false));
 		if (layer == bp::Shared)
 		{
@@ -2481,7 +2472,7 @@ public:
 		bp::Option bios;
 		bios.kind = bp::Option::StringList;
 		bios.label = "BIOS";
-		bios.desc = "The console's own program, which every game needs: a dump of your own console";
+		bios.desc = "The PS2 BIOS, which every game needs. Use a dump from your own console.";
 		bios.section = "Filenames";
 		bios.key = "BIOS";
 		bios.flags = bp::Option::NextStart;
@@ -2507,9 +2498,8 @@ public:
 		page.rows.push_back(Line("Folder", Shown(EmuFolders::Bios)));
 		// OpenPS2BIOS (ps5_free_bios.h): only ever when the folder above has no BIOS.
 		page.rows.push_back(Toggle("Free BIOS when none of my own is found",
-			"OpenPS2BIOS, an open-source BIOS (MIT, no Sony code) that comes with Crux2, starts games when the folder above has no BIOS. "
-			"Experimental: many games reach their menus and go no further, and some start no further at all. Your own BIOS is always "
-			"used first and plays far more games",
+			"Uses OpenPS2BIOS, an open-source BIOS included with Crux2, when no BIOS of your own is found. Experimental: "
+				"many games don't get past their menus.",
 			"PS5", "FreeBios", true, bp::Option::AllGames | bp::Option::NextStart));
 		return page;
 	}
@@ -2620,27 +2610,26 @@ public:
 		const char* const section = cheats ? Patch::CHEATS_CONFIG_SECTION : Patch::PATCHES_CONFIG_SECTION;
 		const std::vector<Patch::PatchInfo>& list = cheats ? m_cheats : m_patches;
 		if (cheats)
-			page.rows.push_back(Toggle("Use cheats", "Off: none of the cheats below is applied", "EmuCore", "EnableCheats", false));
+			page.rows.push_back(Toggle("Use cheats", "Enables loading cheats from pnach files.", "EmuCore", "EnableCheats", false));
 		page.rows.push_back(Toggle("Those of other versions of the game too",
-			"Lists what is known for the game's serial whatever the version of the disc; made for another version, it may not work", "EmuCore",
+			"Also lists cheats and patches made for other versions of the game. They may not work.", "EmuCore",
 			cheats ? "ShowCheatsForAllCRCs" : "ShowPatchesForAllCRCs", false));
 
 		if (cheats)
 		{
 			page.rows.push_back(Action("Download cheats for this game",
-				"Looks in the cheat collections on GitHub (and the addresses of cheat-sources.txt) for this game's files and saves them in cheats/",
+				"Downloads cheats for this game from the cheat collections on GitHub.",
 				[this] {
 					bp::toast("Looking for this game's cheats...");
 					ps5px_download_cheats(m_game_serial.c_str(), m_game.crc);
 				},
 				bp::Option::OneGame));
 			page.rows.push_back(Action("Type a cheat in",
-				"A raw code, line by line: first its name, then each line as the lists print it (2034A5B0 00000001); a line with nothing typed "
-				"ends it. A code scrambled for a cheat device does nothing. Kept in cheats/, in a file of its own",
+				"Enter a raw cheat code: a name first, then one code line at a time. Encrypted codes won't work.",
 				[this] { TypeCheat(); }, bp::Option::OneGame));
 			if (!TypedCheats().empty())
 			{
-				page.rows.push_back(Action("Take a typed cheat out", "Removes one of the cheats that were typed in here", [this] {
+				page.rows.push_back(Action("Take a typed cheat out", "Removes a cheat you typed in.", [this] {
 					const std::vector<std::string> names = TypedCheats();
 					bp::pick("Take out which?", names, -1, [this, names](int choice) {
 						if (choice < 0 || choice >= static_cast<int>(names.size()))
@@ -2781,7 +2770,7 @@ public:
 			bp::Option where;
 			where.kind = bp::Option::StringList;
 			where.label = "Backups go to";
-			where.desc = "Kept there in a folder named Crux2-backup, one folder for each backup. A share has to let the account of network.cfg write to it";
+			where.desc = "Where backups are saved. A network share must allow writing.";
 			where.section = "PS5";
 			where.key = "BackupPlace";
 			where.defString = places.front().path;
@@ -2793,18 +2782,16 @@ public:
 			}
 			page.rows.push_back(std::move(where));
 		}
-		page.rows.push_back(Toggle("Saved states too", "Off: a backup holds the memory cards only, and is made in a moment", "PS5", "BackupStates", true,
+		page.rows.push_back(Toggle("Saved states too", "Includes save states in backups. Off: only memory cards are backed up, which is much faster.", "PS5", "BackupStates", true,
 			bp::Option::AllGames));
 		page.rows.push_back(Toggle("Back up the memory cards when a game is closed",
-			"Whenever a card was written to since the last time. The newest 10 of these are kept; the backups you make yourself are never taken away, "
-			"unless the switch below is on", "PS5", "AutoBackup", false, bp::Option::AllGames));
+			"Backs up memory cards that changed when you close a game. The 10 newest automatic backups are kept.", "PS5", "AutoBackup", false, bp::Option::AllGames));
 		page.rows.push_back(Toggle("Each backup replaces the one before it",
-			"So that the place does not fill up: a backup that was made whole takes away the older ones of its kind. The place then holds two at "
-			"most, the last made when a game was closed and the last you made yourself. Off: the newest 10 of the first kind and all of the second are kept",
+			"Deletes older backups when a new one is made, so the backup folder doesn't fill up.",
 			"PS5", "BackupReplace", false, bp::Option::AllGames));
 		{
 			bp::Option now = Action("Back up now",
-				"Copies every memory card and saved state to the place above, into a folder of its own named by the date and the time",
+				"Backs up all memory cards and save states now.",
 				[] { PS5Jobs::BackupNow(); }, bp::Option::AllGames | bp::Option::NoGame);
 			now.info = [] { return PS5Backup::Doing(); };
 			page.rows.push_back(std::move(now));
@@ -2813,11 +2800,11 @@ public:
 		// Both ways, unlike the backups (ps5_card_sync.h).
 		page.rows.push_back(Heading("MEMORY CARDS IN SYNC"));
 		page.rows.push_back(Toggle("Keep the memory cards in sync",
-			"The cards here and in Crux2/memory cards at the place above are kept the same, when Crux2 starts and after each game: a "
-			"card changed on one side goes to the other; changed on both, the newer is kept and the other put aside, never lost. "
-			"PCSX2 on a PC or ARMSX2 on Android can use the same folder (.ps2 cards). Save states stay here",
+			"Keeps memory cards in sync with the backup location each time Crux2 starts and after each game. If a card "
+				"changed on both sides, the newer one is kept and the other is set aside. PCSX2 on PC and ARMSX2 on Android can "
+				"use the same folder.",
 			"PS5", "CardSync", false, bp::Option::AllGames));
-		page.rows.push_back(Action("Sync the memory cards now", "The same, at once",
+		page.rows.push_back(Action("Sync the memory cards now", "Syncs the memory cards now.",
 			[] { PS5Jobs::SyncCards(false); }, bp::Option::AllGames | bp::Option::NoGame));
 
 		std::string upper = place.name;
@@ -2886,7 +2873,7 @@ public:
 			if (state.snapshots.size() > 40)
 				page.rows.push_back(Line(fmt::format("And {} older ones", state.snapshots.size() - 40), "the place has them all"));
 		}
-		page.rows.push_back(Action("Look again", "Reads the list of backups of the place once more",
+		page.rows.push_back(Action("Look again", "Refreshes the list of backups.",
 			[this] {
 				m_backup_asked.clear();
 				m_pages++;
@@ -2917,7 +2904,7 @@ public:
 		page.rows.push_back(Line("Account", signed_in ? user : std::string("Not signed in")));
 		if (signed_in)
 		{
-			page.rows.push_back(Action("Sign out", "Forgets the account on this console",
+			page.rows.push_back(Action("Sign out", "Signs out of RetroAchievements on this console.",
 				[] {
 					Host::RunOnCPUThread([]() {
 						Achievements::Logout();
@@ -2931,8 +2918,7 @@ public:
 		else
 		{
 			page.rows.push_back(Action("Sign in",
-				"With the name and the password of your account at retroachievements.org, typed on a keyboard on the screen. The password is "
-				"not kept: RetroAchievements answers with a key, and that is",
+				"Sign in with your retroachievements.org username and password. Your password is not stored.",
 				[] {
 					if (s_signing_in.load(std::memory_order_acquire))
 					{
@@ -2954,18 +2940,18 @@ public:
 				bp::Option::AllGames | bp::Option::NoGame));
 		}
 		page.rows.push_back(Toggle("Achievements",
-			"Games you start are looked up at RetroAchievements, and what you earn in them is sent there. Needs the account above", "Achievements",
+			"When enabled and logged in, PCSX2 will scan for achievements on startup.", "Achievements",
 			"Enabled", false, bp::Option::AllGames | bp::Option::NoGame));
 
 		page.rows.push_back(Heading("WHILE PLAYING"));
-		page.rows.push_back(Toggle("Say when an achievement is earned", "A notice in a corner of the picture", "Achievements", "Notifications", true,
+		page.rows.push_back(Toggle("Say when an achievement is earned", "Displays popup messages on events such as achievement unlocks and game completion.", "Achievements", "Notifications", true,
 			bp::Option::AllGames));
-		page.rows.push_back(Toggle("Say when a leaderboard attempt starts and ends", "", "Achievements", "LeaderboardNotifications", true,
+		page.rows.push_back(Toggle("Say when a leaderboard attempt starts and ends", "Displays popup messages when starting, submitting, or failing a leaderboard challenge.", "Achievements", "LeaderboardNotifications", true,
 			bp::Option::AllGames));
 		page.rows.push_back(Toggle("Show achievements in progress",
-			"Small pictures in a corner for the challenges under way and for those measured (\"12 of 50\")", "Achievements", "Overlays", true,
+			"Shows icons in the screen when a challenge/primed achievement is active.", "Achievements", "Overlays", true,
 			bp::Option::AllGames));
-		page.rows.push_back(Toggle("Show a leaderboard's time or score as it runs", "", "Achievements", "LBOverlays", true, bp::Option::AllGames));
+		page.rows.push_back(Toggle("Show a leaderboard's time or score as it runs", "Shows icons in the screen when leaderboard tracking is active.", "Achievements", "LBOverlays", true, bp::Option::AllGames));
 		{
 			bp::Option o;
 			o.kind = bp::Option::IntRange;
@@ -2992,7 +2978,7 @@ public:
 			bp::Option o;
 			o.kind = bp::Option::IntList;
 			o.label = "Where the notices are shown";
-			o.desc = "The corner or edge an earned achievement and a leaderboard's notice come up in";
+			o.desc = "Where achievement and leaderboard notifications appear on screen.";
 			o.section = "Achievements";
 			o.key = "NotificationPosition";
 			o.names = places;
@@ -3001,7 +2987,7 @@ public:
 			o.flags = bp::Option::AllGames;
 			page.rows.push_back(o);
 			o.label = "Where the small pictures are shown";
-			o.desc = "The achievements in progress and a leaderboard's time or score";
+			o.desc = "Where achievement progress and leaderboard trackers appear on screen.";
 			o.key = "OverlayPosition";
 			o.ints = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 			o.defInt = 8;
@@ -3009,14 +2995,16 @@ public:
 		}
 
 		page.rows.push_back(Heading("MORE"));
-		page.rows.push_back(Toggle("Encore mode", "Achievements you have already can be earned again, to see them; nothing is counted twice",
+		page.rows.push_back(Toggle("Encore mode", "When enabled, each session will behave as if no achievements have been unlocked.",
 			"Achievements", "EncoreMode", false, bp::Option::AllGames | bp::Option::NoGame));
-		page.rows.push_back(Toggle("Spectator mode", "Achievements are shown as they are met, and nothing is sent to RetroAchievements",
+		page.rows.push_back(Toggle("Spectator mode", "When enabled, PCSX2 will assume all achievements are locked and not send any unlock notifications to the "
+			"server.",
 			"Achievements", "SpectatorMode", false, bp::Option::AllGames | bp::Option::NoGame));
-		page.rows.push_back(Toggle("Unofficial achievements", "Also those RetroAchievements has not accepted yet", "Achievements",
+		page.rows.push_back(Toggle("Unofficial achievements", "When enabled, PCSX2 will list achievements from unofficial sets. Please note that these achievements are not "
+			"tracked by RetroAchievements, so they unlock every time.", "Achievements",
 			"UnofficialTestMode", false, bp::Option::AllGames | bp::Option::NoGame));
 		page.rows.push_back(Heading("SOUND EFFECTS"));
-		page.rows.push_back(Toggle("Sound effects", "A short sound when an achievement is earned, a leaderboard attempt is sent, or a notice comes",
+		page.rows.push_back(Toggle("Sound effects", "Plays sound effects for events such as achievement unlocks and leaderboard submissions.",
 			"Achievements", "SoundEffects", true, bp::Option::AllGames));
 		page.rows.push_back(Toggle("Achievement unlock sound", "", "Achievements", "UnlockSound", true, bp::Option::AllGames));
 		page.rows.push_back(Toggle("Leaderboard submit sound", "", "Achievements", "LBSubmitSound", true, bp::Option::AllGames));
@@ -3039,17 +3027,17 @@ public:
 		};
 		const PS5Logs::Files files = PS5Jobs::LogFiles();
 		page.rows.push_back(Action("This run",
-			"What Crux2 has noted since it was started: what it found, what did not work, the emulator's warnings and errors. Opens at its end",
+			"Shows the log of this session.",
 			show("The log of this run", files.now), bp::Option::AllGames));
 		{
 			bp::Option before = Action("The run before",
-				"The same of the run before this one; when that run ended in a crash, the report of it is the last thing in it",
+				"Shows the log of the previous session, including a crash report if it crashed.",
 				show("The log of the run before", files.previous), bp::Option::AllGames);
 			if (!m_crash_notice.empty())
 				before.info = [] { return std::string("Ended in a crash"); };
 			page.rows.push_back(std::move(before));
 		}
-		page.rows.push_back(Action("The emulator's own log", "Everything PCSX2 itself wrote in this run (logs/emulog.txt), its newest lines",
+		page.rows.push_back(Action("The emulator's own log", "Shows the newest lines of PCSX2's own log (logs/emulog.txt).",
 			show("PCSX2's log of this run", files.emulator), bp::Option::AllGames));
 
 		page.rows.push_back(Heading("TAKING THEM ALONG"));
@@ -3095,8 +3083,8 @@ public:
 			bp::Option pack;
 			pack.kind = bp::Option::Info;
 			pack.label = "Texture pack";
-			pack.desc = fmt::format("Replacement textures for this game go in textures/{}/replacements: in the title folder, or in a folder "
-									"named Crux2 or PS2 on a USB drive or a network share. \"Load replacement textures\" in Graphics uses them",
+			pack.desc = fmt::format("Put replacement textures for this game in textures/{}/replacements, in the title folder or in a Crux2 or "
+									"PS2 folder on a USB drive or network share. Turn on \"Load textures\" in Graphics to use them.",
 				m_game_serial);
 			std::string text = place.empty() ? std::string("None found (a share is looked at when the game starts)") :
 			                   on            ? "Found: " + Shown(place) :
@@ -3125,7 +3113,7 @@ public:
 		page.rows.push_back(Line("Crux2's files", PS5Platform::OutsideFolder().empty() ?
 			fmt::format("{} (a folder /data/crux2 is used in its place when there is one)", Shown(EmuFolders::DataRoot)) :
 			fmt::format("{}, outside the title folder", Shown(EmuFolders::DataRoot))));
-		page.rows.push_back(Action("Quit Crux2", "Closes the title; a running game is closed first", [this] { quit(); }));
+		page.rows.push_back(Action("Quit Crux2", "Closes Crux2. A running game is closed first.", [this] { quit(); }));
 		return page;
 	}
 
@@ -3142,63 +3130,57 @@ public:
 		{
 			rows.push_back(Heading("WHERE GAMES ARE"));
 			rows.push_back(Toggle("USB drives",
-				"A USB tab for games in a folder named Crux2 or PS2 at the top of a drive. The title leaves its sandbox for it when it starts", "PS5",
+				"Shows a USB tab for games in a folder named Crux2 or PS2 on a USB drive.", "PS5",
 				"USBDrives", true, A | bp::Option::Restart));
 			rows.push_back(Toggle("Disc drives",
-				"Looks every two seconds whether a PlayStation 2 game is in a disc drive, the console's own or a USB DVD drive plugged in at any "
-				"time, and shows it on a tab of its own. A USB DVD drive also reads PlayStation 2 CDs (blue underside), which the console's own "
-				"drive cannot. Off: the drives are left alone",
+				"Checks the console's disc drive and USB DVD drives for PS2 discs and shows them on their own tab. USB DVD "
+					"drives can also read PS2 CDs.",
 				"PS5", "DiscDrive", true, A | bp::Option::Restart));
 			rows.push_back(Toggle("Read the disc into memory while playing",
-				"A disc in the drive is read far ahead of the game and then all of it, while you play; once it is in memory the drive is no longer "
-				"used, and nothing waits for it. Off: the parts read last are kept, 512 MB of them",
+				"Copies the whole disc into memory while you play, so the drive is no longer needed. Off: only recently read "
+					"data is kept.",
 				"PS5", "DiscToMemory", true, A | bp::Option::NextStart));
 			rows.push_back(Toggle("Keep the disc turning",
-				"Reads a little from the disc every 20 seconds while a game plays from it, so the drive does not stop and take seconds to start again",
+				"Reads from the disc every 20 seconds so the drive doesn't spin down during play.",
 				"PS5", "DiscKeepSpinning", true, A | bp::Option::NextStart));
 			{
 				bp::Option image = Action("Make an image of the disc",
-					"Copies your disc in a drive into an image, to play from without the drive (quicker loading, no noise): an ISO, a CHD "
-					"(compressed, often half the size) or a CSO, on the internal storage, a USB drive or a network share (SMB or NFS), as you "
-					"choose. With games in two drives, asks which. The Disc tab's Square does the same",
+					"Copies your disc to an ISO, CHD or CSO image on the console, a USB drive or a network share.",
 					[this] { CopyDiscToImage(); }, A | bp::Option::NoGame);
 				image.enabled = [](int) { return PS5Disc::Current().ps2 && !s_disc_copying.load(std::memory_order_acquire); };
 				rows.push_back(std::move(image));
 			}
 			rows.push_back(Action("Eject a disc",
-				"Opens a drive's tray, after unlocking it: the console locks a USB drive's tray when it starts with a disc it does not play "
-				"(without a jailbreak), and its eject button then does nothing. Crux2 also unlocks every drive's tray when it first sees it",
+				"Unlocks and opens a disc drive's tray.",
 				[this] { EjectDisc(); }, A | bp::Option::NoGame));
 			rows.push_back(Action("Share the covers",
-				"With the place backups go to (a share or a USB drive), in its folder Crux2/covers, both ways: what is only here goes there, what "
-				"is only there comes here. Every console and PC that uses the place then has all of them",
+				"Syncs covers both ways with the backup location, so all your devices have them.",
 				[] { PS5Jobs::ShareCovers(); }, A | bp::Option::NoGame));
 			rows.push_back(Heading("FROM THE INTERNET"));
 			rows.push_back(Toggle("Download covers automatically",
-				"After each scan, fetches the cover of every game that has none from libretro's collection of box arts on GitHub", "PS5", "AutoCovers",
+				"Downloads missing covers from libretro's collection after each scan.", "PS5", "AutoCovers",
 				true, A));
 			rows.push_back(Toggle("Fetch game pictures automatically",
-				"After each scan, fetches each game's title screen and a picture of it being played, from the same collection", "PS5", "AutoPictures",
+				"Downloads title screens and screenshots for your games after each scan.", "PS5", "AutoPictures",
 				true, A));
 			rows.push_back(Toggle("Look up what each game is",
-				"The Disc tab shows a few sentences of the game in the drive, who made it, when and what kind of game it is: looked up on "
-				"Wikipedia and Wikidata the first time, then kept in the data folder's about/",
+				"Shows a short description of the game in the drive, looked up on Wikipedia.",
 				"PS5", "FetchAbout", true, A));
-			rows.push_back(Action("Look the games up again", "Forgets what was looked up of every game; each is looked up again when it is shown",
+			rows.push_back(Action("Look the games up again", "Clears the stored game descriptions so they are looked up again.",
 				[] {
 					PS5About::Forget();
 					bp::toast("Each game is looked up again when it is shown.");
 				},
 				A | bp::Option::NoGame));
-			rows.push_back(Action("Download the missing covers now", "Looks again for every game without a cover, also those nothing was found for before",
+			rows.push_back(Action("Download the missing covers now", "Tries again to download covers for every game without one.",
 				[] {
 					bp::toast("Looking for games without a cover...");
 					ps5px_download_covers_now();
 				},
 				A | bp::Option::NoGame));
 			rows.push_back(Action("Download cheats for all games",
-				"Fetches the cheat files the collections on GitHub have for your games into cheats/. Cheats stay off until switched on in a game's "
-				"options",
+				"Downloads cheats for all your games from the cheat collections on GitHub. Cheats stay off until you enable "
+					"them for a game.",
 				[] {
 					bp::toast("Looking for your games' cheats...");
 					ps5px_download_all_cheats();
@@ -3206,8 +3188,7 @@ public:
 				A | bp::Option::NoGame));
 			{
 				bp::Option patches = Action("Download PCSX2's patches",
-					"Fetches PCSX2's own collection of game patches from GitHub (widescreen, no-interlacing, 60 fps and others); each game's are then "
-					"in its options",
+					"Downloads PCSX2's game patches (widescreen, no-interlacing, 60 fps and more) from GitHub.",
 					[] {
 						bp::toast("Downloading PCSX2's patches...");
 						PS5Jobs::DownloadPatches();
@@ -3224,8 +3205,7 @@ public:
 				bp::Option set;
 				set.kind = bp::Option::IntList;
 				set.label = "Interface sounds";
-				set.desc = "A sound for each move and choice in the menus: Glass is soft and airy, Paper warm and wooden (the sounds of the PS5 "
-						   "homebrew UI kit)";
+				set.desc = "Plays sounds when you move and select in the menus.";
 				set.section = "PS5UI";
 				set.key = "SoundSet";
 				set.names = {"Off", "Glass", "Paper"};
@@ -3241,7 +3221,7 @@ public:
 				rows.push_back(std::move(v));
 			}
 			rows.push_back(Toggle("Music",
-				"Plays while no game is loaded: your own files in the folder \"music\" of the title folder (WAV, MP3, OGG, FLAC). The folder comes empty",
+				"Plays your own music in the menus. Put WAV, MP3, OGG or FLAC files in the \"music\" folder.",
 				"PS5", "BackgroundSound", true, A));
 			rows.push_back(Volume("Music's volume", "BackgroundVolume", 40));
 			{
@@ -3258,7 +3238,7 @@ public:
 			}
 			rows.push_back(Action("Next track", "", [] { PS5UIAudio::NextTrack(); }, A));
 			rows.push_back(Toggle("Start-up sound",
-				"The sound of the start-up animation. A startup.wav of your own in the title folder is played in its place", "PS5", "StartupSound",
+				"Plays a sound with the start-up animation. Put your own startup.wav in the title folder to replace it.", "PS5", "StartupSound",
 				true, A));
 			rows.push_back(Volume("Start-up sound's volume", "StartupVolume", 80));
 		}
@@ -3267,9 +3247,8 @@ public:
 			bp::Option rate;
 			rate.kind = bp::Option::IntList;
 			rate.label = "Refresh rate";
-			rate.desc = "120 Hz when the television takes it (the console falls back to 60 by itself when it does not): frame generation can "
-						"double a game to 120, black frame insertion works, and the menus move at 120. Holding L1 and R1 while Crux2 starts "
-						"gives 60 Hz for that start";
+			rate.desc = "Sends 120 Hz to the TV if it supports it. Needed for frame generation to 120 fps and black frame insertion. "
+				"Hold L1 and R1 while Crux2 starts to use 60 Hz once.";
 			rate.section = "PS5";
 			rate.key = "OutputRefresh";
 			rate.names = {"120 Hz when the television has it", "60 Hz"};
@@ -3284,8 +3263,7 @@ public:
 				bp::Option size;
 				size.kind = bp::Option::IntList;
 				size.label = "Output resolution";
-				size.desc = "The size of the picture Crux2 sends to the television. Lower is less work for the graphics chip on a 1080p or 1440p "
-							"television; how sharp the game itself is drawn is the internal resolution";
+				size.desc = "The resolution sent to the TV. Lower it on a 1080p or 1440p TV to save GPU power.";
 				size.section = "PS5";
 				size.key = "OutputHeight";
 				size.names = {"4K (3840 x 2160)", "1440p (2560 x 1440)", "1080p (1920 x 1080)"};
@@ -3298,8 +3276,7 @@ public:
 		else if (w == "picture")
 		{
 			rows.push_back(Action("A look of your own",
-				"A libretro shader preset (.slangp with its .slang files) from a folder \"shaders\" in a folder named Crux2 or PS2 on a USB drive, or "
-				"in the title folder",
+				"Loads a libretro shader preset (.slangp) from a \"shaders\" folder on a USB drive or in the title folder.",
 				[this, layer] { PickOwnLook(layer); }));
 		}
 		else if (w == "controllers")
@@ -3309,7 +3286,7 @@ public:
 				bp::Option combo;
 				combo.kind = bp::Option::StringList;
 				combo.label = "Leave a game by holding";
-				combo.desc = "Held for the time below, these leave the game (as the quick menu's Leave does); a double buzz says it was taken";
+				combo.desc = "Hold these buttons to leave the game.";
 				combo.section = "PS5";
 				combo.key = "LeaveGameCombo";
 				combo.names = {"L3 and R3", "L1, R1, L3 and R3", "Nothing (off)"};
@@ -3331,18 +3308,17 @@ public:
 				rows.push_back(std::move(hold));
 			}
 			rows.push_back(Toggle("Pressure from R2",
-				"For games that read how hard a button is pressed: the face buttons and the directions press as hard as R2 is pulled (and R2 itself "
-				"does not reach the game). Best set for one game",
+				"For games that use pressure-sensitive buttons: how far you pull R2 sets how hard the face buttons and D-pad "
+					"are pressed.",
 				"PS5", "PressureFromR2", false));
 			rows.push_back(Toggle("Aim with motion",
-				"The controller's movement aims the GunCon 2 light gun (in a USB port of the PlayStation 2's below); R3 centres the aim. On by "
-				"itself while a GunCon 2 is plugged in",
+				"Aims the GunCon 2 light gun by moving the controller. Press R3 to recentre.",
 				"PS5", "MotionAim", false));
 			{
 				bp::Option sens;
 				sens.kind = bp::Option::IntRange;
 				sens.label = "Aiming: how far to turn to the edge";
-				sens.desc = "Degrees from the middle of the screen to its edge";
+				sens.desc = "How far you need to turn the controller to aim at the edge of the screen.";
 				sens.section = "PS5";
 				sens.key = "MotionAimSensitivity";
 				sens.defInt = 20;
@@ -3354,31 +3330,29 @@ public:
 				rows.push_back(std::move(sens));
 			}
 			rows.push_back(Toggle("USB keyboard",
-				"A keyboard in the console's USB port types into the menus' text fields, and is the PlayStation 2's keyboard for a game that has one "
-				"(\"HID Keyboard\" in a USB port below)",
+				"Lets a USB keyboard type in the menus, and act as a PS2 keyboard in games that support one.",
 				"PS5", "USBKeyboard", true, A | bp::Option::Restart));
 			rows.push_back(Toggle("USB controllers (experimental)",
-				"Controllers the console does not take itself, plugged into its USB ports: a DualShock 3 or SIXAXIS (with its pressure-sensitive "
-				"buttons), Xbox 360 pads, guitars, drums and other USB pads. They are players 5 to 8 here: choose them for a port under "
-				"Controllers. New, and not yet tried on many consoles: the boot log says how it went (usb pads)",
+				"Lets you use controllers plugged into the console's USB ports, such as a DualShock 3, Xbox 360 pads, guitars "
+					"and drums. Experimental.",
 				"PS5", "USBPads", false, A));
 		}
 		else if (w == "saves")
 		{
 			rows.push_back(Toggle("Sleep-safe saving",
-				"When the console's menu comes over a game (where it may be put to rest, or the title closed), and every five minutes, the game's "
-				"state is saved; the next start offers to go on from it",
+				"Saves the game's state when you open the PS5 menu and every five minutes, so you can continue after the "
+					"console goes to rest mode.",
 				"PS5", "SleepSafe", true, A));
 		}
 		else if (w == "network")
 		{
 			rows.push_back(Heading("A PHONE OR A COMPUTER"));
 			rows.push_back(Toggle("Control from a phone",
-				"A page on the network (port 3311) to start games, save and load states, type text and fetch the logs from a "
-				"phone or a computer. Only who has its key gets in: the code below has it",
+				"Opens a web page (port 3311) where you can start games, manage save states and type text from your phone or "
+					"computer.",
 				"PS5", "PhoneControl", false, A));
 			{
-				bp::Option code = Action("Show the code", "The page's address, with its key, as a QR code for the phone's camera", [] {
+				bp::Option code = Action("Show the code", "Shows the page's address as a QR code to scan with your phone.", [] {
 					const std::string url = PS5Web::url();
 					if (url.empty())
 					{
@@ -3395,7 +3369,7 @@ public:
 				rows.push_back(std::move(code));
 			}
 			{
-				bp::Option renew = Action("A new key", "The address shown before stops working", [] {
+				bp::Option renew = Action("A new key", "Creates a new key. The old address stops working.", [] {
 					PS5Web::newKey();
 					bp::toast("A new key: show the code again for the new address.");
 				});
@@ -3407,7 +3381,7 @@ public:
 		{
 			rows.push_back(Heading("UPDATES"));
 			{
-				bp::Option look = Action("Look for a newer Crux2", "Asks the releases on GitHub; nothing is downloaded without asking", [] {
+				bp::Option look = Action("Look for a newer Crux2", "Checks GitHub for a newer version. Nothing is downloaded without asking.", [] {
 					s_update_asked_by_hand.store(true, std::memory_order_release);
 					PS5Update::Check();
 					bp::toast("Looking for a newer Crux2...", 3.f);
@@ -3416,10 +3390,10 @@ public:
 				rows.push_back(std::move(look));
 			}
 			rows.push_back(Toggle("Look for a newer Crux2 at start-up",
-				"Each start asks the releases on GitHub once and offers a newer one; nothing is downloaded without asking", "PS5",
+				"Checks GitHub for a newer version each time Crux2 starts. Nothing is downloaded without asking.", "PS5",
 				"UpdateAtStart", true, A));
 			{
-				bp::Option news = Action("What's new", "What each release after this one brought", [] {
+				bp::Option news = Action("What's new", "Shows what changed in newer versions.", [] {
 					const PS5Update::Status st = PS5Update::GetStatus();
 					if (st.notes.empty())
 					{
@@ -3443,10 +3417,9 @@ public:
 			}
 			{
 				bp::Option again = Action("Install this version again",
-					"Downloads the newest release and puts its files in place again, for a title folder that lost or broke some. Your settings, "
-					"memory cards, states and games stay",
+					"Reinstalls the newest version to repair missing or broken files. Your settings, saves and games are kept.",
 					[] {
-						bp::confirm("Install again?", "The newest release is downloaded and its files put in place of the title's own. Crux2 then closes.",
+						bp::confirm("Install again?", "The newest version will be downloaded and installed, then Crux2 will close.",
 							[](bool yes) {
 								if (yes)
 								{
@@ -3465,19 +3438,16 @@ public:
 			}
 			rows.push_back(Heading("THE CONSOLE"));
 			rows.push_back(Toggle("Graphics driver on its own thread",
-				"The driver records the renderer's commands on a second thread, taking its share of the work off the GS thread: in a scene "
-				"with the GS thread near 100%, 40 frames a second became 48. Off: one thread less", "PS5",
+				"Runs the graphics driver on its own CPU thread. Usually faster in demanding games.", "PS5",
 				"ThreadedRecording", true, A | bp::Option::Advanced | bp::Option::Restart));
 			rows.push_back(Range("Wait for the GPU: checking for",
-				"When the emulator waits for the GPU, the driver checks whether it is done in a loop for this long, then sleeps between "
-				"checks. Longer: no late wake-up for longer waits, one processor busy meanwhile", "PS5", "GpuWaitSpinUs", 1500, 0, 5000, 250,
+				"How long the driver keeps checking whether the GPU is done before it starts sleeping between checks.", "PS5", "GpuWaitSpinUs", 1500, 0, 5000, 250,
 				" us", A | bp::Option::Advanced | bp::Option::Restart));
 			rows.push_back(Range("Wait for the GPU: sleeps of",
-				"How long the driver sleeps between checks once the loop above is over: a wait ends up to this much after the GPU was "
-				"done. 1000 is the driver's own", "PS5", "GpuWaitSleepUs", 1000, 50, 2000, 50, " us", A | bp::Option::Advanced | bp::Option::Restart));
+				"How long the driver sleeps between checks while waiting for the GPU.", "PS5", "GpuWaitSleepUs", 1000, 50, 2000, 50, " us", A | bp::Option::Advanced | bp::Option::Restart));
 			rows.push_back(Action("Profile the next start",
-				"For finding out why a game is slow: the next start measures where each thread's time goes, how long each frame took and every wait "
-				"of more than 2 ms, and writes it to crux2-boot.log. That start only",
+				"Records detailed performance data on the next start and writes it to crux2-boot.log. Useful for finding out "
+					"why a game is slow.",
 				[] {
 					bp::toast(ps5px_arm_profiled_start(0) ? "The next start is a profiled one. Quit Crux2 and start it again." :
 															"The file for it could not be written to the title folder.",
@@ -3643,7 +3613,7 @@ public:
 				{
 					if (PS5Update::Install())
 					{
-						bp::message("Crux2 was updated", "The new version is in place. Crux2 closes now: start it again.", [this] { quit(); });
+						bp::message("Crux2 was updated", "The update is installed. Crux2 will now close; start it again.", [this] { quit(); });
 					}
 					else
 					{

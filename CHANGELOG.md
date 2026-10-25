@@ -1,5 +1,15 @@
 # Crux2 - what changed
 
+## v1.0.15 (2026-10-25)
+
+- Changed: every setting's description rewritten in plain English; settings PCSX2 also has use
+  PCSX2's own description.
+- Added: the version, WIP, the build number and the author in the top bar, under the clock.
+- Fixed (to be confirmed on the console): a game could freeze a few seconds after it started (a lost wake-up between the emulation
+  and GS threads when the frame queue changed; v1.0.14).
+- Changed: the content version in param.json goes up with each release (01.015.000), so the
+  console and the homebrew catalog see updates.
+
 ## v1.0.14 (2026-10-24)
 
 - Changed: while a game runs below full speed, up to 2 frames may wait for the GS thread, so the

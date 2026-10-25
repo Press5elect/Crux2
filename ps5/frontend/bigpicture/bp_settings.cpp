@@ -533,7 +533,7 @@ Page summaryPage()
 		Option o;
 		o.kind = Option::Action;
 		o.label = "Back to the Settings for everything";
-		o.desc = "Takes away every option this game has of its own, its patches and cheats included";
+		o.desc = "Removes all of this game's own settings, including its patches and cheats.";
 		o.action = [] {
 			confirm("Take away this game's own options?",
 				"Every option, patch and cheat chosen for this game goes; it follows the Settings again.\nThis cannot be undone.",
@@ -944,7 +944,37 @@ void settingsScreen()
 		// (What does not fit slides sideways by itself while the focus is on the row.)
 		textIn(dl, bold(), 28, tx, y + 16, labelColour, o.label, pw * 0.56f, on);
 		if (!o.desc.empty())
-			textIn(dl, regular(), 22, tx, y + 56, on ? col::dim : col::faint, o.desc, pw * 0.62f, on);
+		{
+			// The description stops short of the value on the right, which reaches down into its line when
+			// it is long ("As in Settings: ...", a slider and its value).
+			float valueLeft = right;
+			switch (o.kind)
+			{
+				case Option::Bool:
+					valueLeft = right - 84 - (follows ? 20 + textSize(regular(), 22, "As in Settings").x : 0.f);
+					break;
+				case Option::IntList:
+				case Option::FloatList:
+				case Option::StringList:
+				case Option::Combo:
+				case Option::IntRange:
+				case Option::FloatRange:
+				case Option::Bind:
+				{
+					const std::string v = follows ? "As in Settings: " + valueText(o) : valueText(o);
+					const float vw = std::min(textSize(bold(), 26, v.c_str()).x, pw * 0.36f);
+					valueLeft = right - vw;
+					if (o.kind == Option::IntRange || o.kind == Option::FloatRange)
+						valueLeft -= 240 + 28;
+					break;
+				}
+				default:
+					valueLeft = right - pw * 0.36f;
+					break;
+			}
+			const float descRoom = std::max(pw * 0.3f, std::min(pw * 0.62f, valueLeft - 32 - tx));
+			textIn(dl, regular(), 22, tx, y + 56, on ? col::dim : col::faint, o.desc, descRoom, on);
+		}
 
 		switch (o.kind)
 		{

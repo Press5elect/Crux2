@@ -8471,7 +8471,7 @@ index 4faad6c..d1cb291 100644
 +}
 +#endif
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa0..8df4c11 100644
+index 59f5aa0..1daf235 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
 @@ -1,6 +1,9 @@
@@ -8519,7 +8519,7 @@ index 59f5aa0..8df4c11 100644
  	}
  
  	MTGS_LOG("MTGS: Sending Reset...");
-@@ -236,6 +253,152 @@ struct RingCmdPacket_Vsync
+@@ -236,6 +253,151 @@ struct RingCmdPacket_Vsync
  	u32 pad[3];
  };
  
@@ -8544,13 +8544,15 @@ index 59f5aa0..8df4c11 100644
 +	static constexpr u32 MAX_LOGGED = 30;
 +
 +	static int s_depth = 0;
-+	static bool s_enabled = true;
++	static int s_depth_for_wait = 0; // the limit the EE waits for at this vsync (EE thread only)
++	// Set from the host when settings are applied (PS5SetAutoFrameQueue): no settings read here, on the EE
++	// thread, where the settings lock could be held by a thread that is waiting for the EE.
++	static std::atomic<bool> s_enabled{true};
 +	static u64 s_window_start = 0;
 +	static u32 s_window_frames = 0;
 +	static u32 s_window_behind = 0; // vsyncs that found the frame before still with the GS thread
 +	static u32 s_slow_windows = 0;
 +	static u32 s_fast_windows = 0;
-+	static u32 s_settings_age = 0;
 +	static u32 s_logged = 0;
 +	static u32 s_opened = 0;
 +
@@ -8562,8 +8564,6 @@ index 59f5aa0..8df4c11 100644
 +		s_window_behind = 0;
 +		s_slow_windows = 0;
 +		s_fast_windows = 0;
-+		s_settings_age = 0;
-+		s_enabled = Host::GetBoolSettingValue("EmuCore/GS", "PS5AutoFrameQueue", true);
 +	}
 +
 +	static void SetDepth(int depth, double speed, double behind)
@@ -8618,15 +8618,9 @@ index 59f5aa0..8df4c11 100644
 +		s_window_frames = 0;
 +		s_window_behind = 0;
 +
-+		if (++s_settings_age >= 4)
-+		{
-+			s_settings_age = 0;
-+			s_enabled = Host::GetBoolSettingValue("EmuCore/GS", "PS5AutoFrameQueue", true);
-+		}
-+
 +		const double target = static_cast<double>(VMManager::GetTargetSpeed());
 +		const double rate = static_cast<double>(VMManager::GetFrameRate());
-+		if (!s_enabled)
++		if (!s_enabled.load(std::memory_order_relaxed))
 +		{
 +			SetDepth(0, 0.0, 0.0);
 +			return 0;
@@ -8663,6 +8657,11 @@ index 59f5aa0..8df4c11 100644
 +	PS5FrameQueue::Reset();
 +}
 +
++void MTGS::PS5SetAutoFrameQueue(bool enabled)
++{
++	PS5FrameQueue::s_enabled.store(enabled, std::memory_order_relaxed);
++}
++
 +int MTGS::PS5FrameQueueDepth()
 +{
 +	return PS5FrameQueue::s_depth;
@@ -8672,14 +8671,16 @@ index 59f5aa0..8df4c11 100644
  void MTGS::PostVsyncStart(bool registers_written)
  {
  	// Optimization note: Typically regset1 isn't needed.  The regs in that area are typically
-@@ -271,8 +434,14 @@ void MTGS::PostVsyncStart(bool registers_written)
+@@ -271,18 +433,48 @@ void MTGS::PostVsyncStart(bool registers_written)
  	// If those are needed back, it's better to increase the VsyncQueueSize via PCSX_vm.ini.
  	// (The Xenosaga engine is known to run into this, due to it throwing bulks of data in one frame followed by 2 empty frames.)
  
 +#ifdef __PROSPERO__
 +	const int ps5_queued = s_QueuedFrameCount.fetch_add(1);
-+	if (ps5_queued < PS5FrameQueue::Limit(ps5_queued, EmuConfig.GS.VsyncQueueSize))
++	const int ps5_limit = PS5FrameQueue::Limit(ps5_queued, EmuConfig.GS.VsyncQueueSize);
++	if (ps5_queued < ps5_limit)
 +		return;
++	PS5FrameQueue::s_depth_for_wait = ps5_limit;
 +#else
  	if ((s_QueuedFrameCount.fetch_add(1) < EmuConfig.GS.VsyncQueueSize) /*|| (!EmuConfig.GS.VsyncEnable && !EmuConfig.GS.FrameLimitEnable)*/)
  		return;
@@ -8687,7 +8688,24 @@ index 59f5aa0..8df4c11 100644
  
  	s_VsyncSignalListener.store(true, std::memory_order_release);
  	//Console.WriteLn( Color_Blue, "(EEcore Sleep) Vsync\t\tringpos=0x%06x, writepos=0x%06x", m_ReadPos.load(), m_WritePos.load() );
-@@ -282,7 +451,14 @@ void MTGS::PostVsyncStart(bool registers_written)
+ 
++#ifdef __PROSPERO__
++	// Crux2: the GS thread posts only when it finds the listener flag set after a vsync. If it worked through
++	// every queued vsync between the count above and the flag being set (the EE thread descheduled there,
++	// or the queue limit just lowered by PS5FrameQueue while frames were queued), nothing would post and
++	// both threads would wait for each other: the game frozen. So look once more after setting the flag:
++	// with the queue already within the limit, take the flag back and go on; if the GS thread took it first,
++	// its post is on the way. Needs proper testing on the console. (The fence keeps the flag's store ahead of the
++	// count's load: the GS thread's fetch_sub and exchange are sequentially consistent.)
++	std::atomic_thread_fence(std::memory_order_seq_cst);
++	if (s_QueuedFrameCount.load(std::memory_order_acquire) <= PS5FrameQueue::s_depth_for_wait)
++	{
++		if (s_VsyncSignalListener.exchange(false, std::memory_order_acq_rel))
++			return;
++	}
++#endif
+ 	s_sem_Vsync.Wait();
+ }
  
  void MTGS::InitAndReadFIFO(u8* mem, u32 qwc)
  {
@@ -8702,7 +8720,7 @@ index 59f5aa0..8df4c11 100644
  	{
  		if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
  			GSReadLocalMemoryUnsync(mem, qwc, vif1.BITBLTBUF._u64, vif1.TRXPOS._u64, vif1.TRXREG._u64);
-@@ -335,7 +511,16 @@ void MTGS::MainLoop()
+@@ -335,7 +527,16 @@ void MTGS::MainLoop()
  		else
  		{
  			mtvu_lock.unlock();
@@ -8720,16 +8738,17 @@ index 59f5aa0..8df4c11 100644
  		}
  
 diff --git a/pcsx2/MTGS.h b/pcsx2/MTGS.h
-index ccd9f27..fd8cec4 100644
+index ccd9f27..e6429e2 100644
 --- a/pcsx2/MTGS.h
 +++ b/pcsx2/MTGS.h
-@@ -64,6 +64,11 @@ namespace MTGS
+@@ -64,6 +64,12 @@ namespace MTGS
  
  	int GetCurrentVsyncQueueSize();
  	void PostVsyncStart(bool registers_written);
 +#ifdef __PROSPERO__
 +	/// Crux2: frames the EE may run ahead of the GS thread while a game is behind (PS5AutoFrameQueue).
 +	void PS5ResetFrameQueue();
++	void PS5SetAutoFrameQueue(bool enabled);
 +	int PS5FrameQueueDepth();
 +#endif
  	void InitAndReadFIFO(u8* mem, u32 qwc);

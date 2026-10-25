@@ -743,8 +743,16 @@ void Host::LoadSettings(SettingsInterface& si, std::unique_lock<std::mutex>& loc
 {
 }
 
+// Crux2: settings the emulation thread uses but must not read itself (it can be waited for by a thread
+// that holds the settings lock), handed over where settings are applied, with the lock released.
+static void PS5HandOverEmulationSettings()
+{
+	MTGS::PS5SetAutoFrameQueue(Host::GetBoolSettingValue("EmuCore/GS", "PS5AutoFrameQueue", true));
+}
+
 void Host::CheckForSettingsChanges(const Pcsx2Config& old_config)
 {
+	PS5HandOverEmulationSettings();
 }
 
 bool Host::RequestResetSettings(bool folders, bool core, bool controllers, bool hotkeys, bool ui)
@@ -1269,6 +1277,7 @@ namespace
 
 void Host::OnVMStarting()
 {
+	PS5HandOverEmulationSettings();
 	// The console's main output takes one port of a title: the interface's sound gives its own
 	// up before the game's stream opens (this returns when the port is closed).
 	PS5UIAudio::Stop();
@@ -1375,6 +1384,7 @@ void Host::OnVMResumed()
 void Host::OnGameChanged(const std::string& title, const std::string& elf_override, const std::string& disc_path,
 	const std::string& disc_serial, u32 disc_crc, u32 current_crc)
 {
+	PS5HandOverEmulationSettings(); // a game's own settings are in effect now
 	if (!disc_path.empty() || !title.empty())
 	{
 		ps5px_log("game: %s [%s, CRC %08X] %s", title.c_str(), disc_serial.c_str(), disc_crc, disc_path.c_str());
