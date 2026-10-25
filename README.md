@@ -1,4 +1,6 @@
 # Crux2
+<img width="1920" height="1080" alt="Bez nazwy" src="https://github.com/user-attachments/assets/25fe5dd6-4552-4993-bc68-d25dc65e510d" />
+
 
 [PCSX2](https://github.com/PCSX2/pcsx2), the PlayStation 2 emulator, as a native PS5 homebrew
 title (`PPSA99249`). It starts straight into a Big Picture style interface on the TV, is driven
