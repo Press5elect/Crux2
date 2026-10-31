@@ -743,6 +743,21 @@ void Host::LoadSettings(SettingsInterface& si, std::unique_lock<std::mutex>& loc
 {
 }
 
+// The graphics driver's variable refresh (PS5_Mesa patch 0017): sceVideoOutVrrUnpegFromFixedRate is looked up
+// while the title runs, by its NID, since not every firmware's libSceVideoOut exports it, and a title that
+// imports what the console lacks does not start. -1 when the console has none: the driver then refuses VRR.
+extern "C" int ps5_title_videoout_vrr_unpeg(int32_t handle)
+{
+	using UnpegFn = int (*)(int32_t);
+	static const UnpegFn unpeg = [] {
+		const UnpegFn found =
+			reinterpret_cast<UnpegFn>(PS5SystemModules::FindFunction("libSceVideoOut", "sceVideoOutVrrUnpegFromFixedRate", "T4ucGB8CsnM"));
+		ps5px_log("display: sceVideoOutVrrUnpegFromFixedRate %s", found ? "found" : "not on this console: no variable refresh");
+		return found;
+	}();
+	return unpeg ? unpeg(handle) : -1;
+}
+
 // Crux2: settings the emulation thread uses but must not read itself (it can be waited for by a thread
 // that holds the settings lock), handed over where settings are applied, with the lock released.
 static void PS5HandOverEmulationSettings()
