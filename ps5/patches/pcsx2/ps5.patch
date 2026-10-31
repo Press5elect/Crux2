@@ -3935,7 +3935,7 @@ index 70f171df7..85b0312f0 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65b3..1cb97715a 100644
+index b3c8d65b3..eb4be0679 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
@@ -3966,7 +3966,7 @@ index b3c8d65b3..1cb97715a 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1445,386 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1445,403 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4091,8 +4091,25 @@ index b3c8d65b3..1cb97715a 100644
 +
 +bool GSDevice::FrameGenPush(GSTexture* tex, const GSVector4& src_uv, const GSVector4& draw_rect, bool linear)
 +{
-+	const int width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
-+	const int height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
++	int width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
++	int height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
++#ifdef __PROSPERO__
++	// Crux2: the pictures are kept and made at the game picture's own size when the screen shows it
++	// larger by a plain stretch (no FSR or NIS made it the screen's size already): the copies, the
++	// search and every picture made then cost what that size costs, not the screen's, and the
++	// screen stretches the made pictures as it does the game's. When an upscaler ran first, its
++	// picture is the one interpolated, at its size, as before.
++	if (tex)
++	{
++		const int own_w = static_cast<int>(std::ceil((src_uv.z - src_uv.x) * static_cast<float>(tex->GetWidth())));
++		const int own_h = static_cast<int>(std::ceil((src_uv.w - src_uv.y) * static_cast<float>(tex->GetHeight())));
++		if (own_w > 0 && own_h > 0 && own_w < width && own_h < height)
++		{
++			width = own_w;
++			height = own_h;
++		}
++	}
++#endif
 +	// (A picture too small to halve six times is not one this is for.)
 +	if (!HasFrameGen() || !tex || width < 256 || height < 128)
 +	{

@@ -16,6 +16,8 @@
 - Fixed: frame generation sped up and slowed down every few seconds in games at 30 frames a
   second: one late or early frame changed how every following frame was made. It now keeps the
   game's rate until the game really changes it.
+- Changed: frame generation works at the game picture's own size when the screen only stretches
+  it (no FSR or NIS): less work for each picture it makes.
 - Fixed: What's new (Settings > System) only said whether a newer version was out. It now shows
   what was added, changed and fixed in each version, newest first, and opens by itself once after
   an update with the changes since the version that ran before.

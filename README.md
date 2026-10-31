@@ -501,6 +501,11 @@ Fixed:
   none, then thirds, several times a second. It now settles on the game's rate from the last eight
   frames and changes it only when the game really does (the same rate twice in a row, or most of
   the eight).
+- **Frame generation is lighter without an upscaler**: when the game's picture reaches the screen by
+  a plain stretch (Upscaling off, or a picture already near the screen's size), the pictures are
+  kept, searched and made at the game picture's own size instead of the screen's. With FSR or NIS
+  (the default is FSR) the upscaled picture is interpolated as before: making the pictures before
+  the upscaler would mean upscaling every made picture as well, which costs more than it saves.
 - **What's new** (Settings > System) only said whether a newer Crux2 was out. It now shows what was
   added, changed and fixed in each version, newest first, from the `CHANGELOG.md` the title folder
   now holds. After an update it opens by itself once, with the changes since the version that ran
