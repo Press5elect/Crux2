@@ -468,6 +468,20 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.16 changed
+
+Changed:
+- **Built on PCSX2 v2.9.148** (was v2.9.142): game database fixes, empty per-game settings files
+  removed when saved, and PCSX2's own debugging fixes.
+- **GS dumps record 1 second by default** (*GS dump length*: 1, 2 or 5 seconds), and PCSX2's
+  dumps are compressed on worker threads, so recording slows the game less. The "dump saved"
+  message says the file's size.
+- **The content version is 01.016.000.**
+
+Fixed:
+- **The README's list of what does not work** still named texture pack downloads, microphones and
+  trigger pressure, which Crux2 has.
+
 ## What v1.0.15 changed
 
 Added:
@@ -1169,18 +1183,15 @@ title closed from the console's own menu is not a crash and is not reported as o
   the only kind a console can have, gives the game its address itself and always answers its
   DHCP; PCSX2's own settings grey those rows out for it. The two name servers can be set.
 - **Pressure-sensitive buttons:** PCSX2's "pressure modifier" is on the Controllers page (a
-  button held to press the others lightly). Pressure from how far a trigger is pulled is not
-  built.
-- **Texture packs are not downloaded.** They are read from `textures/`, a USB drive or a
-  share ([Texture packs](#texture-packs)); there is no collection of them the title could
-  fetch from by a game's serial as it does covers and cheats.
+  button held to press the others lightly), and *Pressure from R2* presses the face buttons and
+  directions as hard as R2 is pulled.
 - The memory card manager does not look into folder cards or PlayStation 1 cards, writes
   `.psu` files only, and keeps one step of undo for each card.
 - A game's picture is not moved by a few pixels as the menus are (Screen care): that would
   blur it or cut its edge.
 - RetroAchievements' sounds are not played (the notices are shown).
-- No video capture, no microphone, no USB devices passed to games (wheels, guns, cameras), no
-  network adapter emulation through a packet capture library.
+- No video capture, no USB wheels or cameras passed to games (USB pads, microphones, the GunCon 2
+  and a keyboard are), no network adapter emulation through a packet capture library.
 - English only: the translations are part of the desktop interface and are not in this build.
 - The performance overlay's EE, GS and VU percentages are what each thread reports of itself
   (whether a title may read another thread's processor time is not yet measured on the

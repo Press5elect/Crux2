@@ -1381,6 +1381,12 @@ void Host::OnVMResumed()
 {
 }
 
+// PCSX2 v2.9.145: per-game settings were saved or removed. Crux2's interface reads a game's own
+// settings when it shows them, so it has nothing to update here.
+void Host::OnGameSettingsChanged(const std::string& path)
+{
+}
+
 void Host::OnGameChanged(const std::string& title, const std::string& elf_override, const std::string& disc_path,
 	const std::string& disc_serial, u32 disc_crc, u32 current_crc)
 {

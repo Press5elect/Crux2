@@ -1,5 +1,13 @@
 # Crux2 - what changed
 
+## v1.0.16 (2026-10-31)
+
+- Changed: built on PCSX2 v2.9.148 (was v2.9.142).
+- Changed: GS dumps record 1 second by default (a setting: 1, 2 or 5), are compressed on worker
+  threads, and the saved message gives their size.
+- Changed: the content version in param.json is 01.016.000.
+- Fixed: the README's list of what does not work was out of date.
+
 ## v1.0.15 (2026-10-25)
 
 - Changed: every setting's description rewritten in plain English; settings PCSX2 also has use

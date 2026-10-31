@@ -1104,7 +1104,8 @@ public:
 			if (!VMManager::HasValidVM())
 				return;
 			MTGS::RunOnGSThread([]() {
-				constexpr u32 presents = 300; // 5 seconds of vsyncs
+				// [PS5] GsDumpSeconds (1, 2 or 5; 1 by default): how long the dump records, in vsyncs at 60 a second.
+				const u32 presents = 60u * static_cast<u32>(std::clamp(Host::GetBaseIntSettingValue("PS5", "GsDumpSeconds", 1), 1, 5));
 				if (PS5PGS::Active())
 				{
 					// paraLLEl-GS draws: PCSX2's GS is not fed, its dump would be empty. The renderer records it.

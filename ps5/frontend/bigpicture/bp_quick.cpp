@@ -210,9 +210,11 @@ void quickScreen()
 		items.push_back(std::move(item));
 	}
 	{
-		// For a graphics problem's report: the GS's input of the next 5 seconds as the game plays on, in a file that
-		// replays it (PCSX2's GS dump), with whichever renderer draws.
-		QuickItem item{ICON_FA_BUG, "Record a GS dump", "5 seconds, to snaps/", running.valid, [] {
+		// For a graphics problem's report: the GS's input of the next seconds as the game plays on ([PS5] GsDumpSeconds,
+		// 1 by default: a heavy scene gives about 10 MB a frame before compression), in a file that replays it (PCSX2's
+		// GS dump), with whichever renderer draws.
+		const int seconds = std::clamp(be->getInt(Shared, "PS5", "GsDumpSeconds").value_or(1), 1, 5);
+		QuickItem item{ICON_FA_BUG, "Record a GS dump", std::to_string(seconds) + (seconds == 1 ? " second, to snaps/" : " seconds, to snaps/"), running.valid, [] {
 						   be->recordGsDump();
 						   resumeGame();
 					   }};

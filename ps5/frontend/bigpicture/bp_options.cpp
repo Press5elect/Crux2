@@ -1239,6 +1239,8 @@ Page debugPage()
 	// The graphics side's debugging (PCSX2's Debug > GS tab and Graphics > Advanced > Debugging).
 	rows.push_back(heading("GRAPHICS DEBUGGING", f));
 	rows.push_back(toggle("Use debug blend", "Forces SW blending and disables several optimizations.", GS, "UseDebugBlend", false, f));
+	rows.push_back(listOf("GS dump length", "How long \"Record a GS dump\" in the quick menu records. A heavy scene gives several hundred "
+		"MB a second, even compressed.", "PS5", "GsDumpSeconds", 1, {"1 second", "2 seconds", "5 seconds"}, {1, 2, 5}, f));
 	rows.push_back(list("GS dump compression", "Change the compression algorithm used when creating a GS dump.", GS, "GSDumpCompression", 2,
 		{"Uncompressed", "LZMA (xz)", "Zstandard (zst)"}, 0, f));
 	rows.push_back(toggle("Dump GS draws", "Dumps information about every draw to the snapshots folder. Very slow and very large.", GS, "DumpGSData",
