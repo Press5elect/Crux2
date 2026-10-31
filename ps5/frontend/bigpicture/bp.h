@@ -354,6 +354,9 @@ public:
 	virtual Page hotkeysPage() = 0;
 	virtual Page memoryCardsPage(int layer) = 0;
 	virtual Page biosPage(int layer) = 0;
+	/// Where games are looked for and where Crux2 keeps its files (BIOS, memory cards, save states...),
+	/// after Game List in the settings of all games. No rows: no such page.
+	virtual Page foldersPage() { return {}; }
 	/// The PlayStation 2's network adapter and hard drive, after BIOS in the settings of all games
 	/// and of one game. No rows: no such page. No icon or name: the network's, "Network".
 	virtual Page networkPage(int layer) = 0;

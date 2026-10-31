@@ -2,6 +2,10 @@
 
 ## v1.0.18 (2026-10-31)
 
+- Added: Settings > Folders: game folders anywhere (USB drives, network shares, the console's
+  storage), picked with a folder browser and searched with their sub-folders; and a folder of your
+  choice for the BIOS, memory cards, save states, screenshots, cheats, covers and texture packs.
+
 - Added: Accurate floating point for the EE's FPU, VU0 and VU1 (Settings > Advanced for all games,
   a game's own Emulation page for one; three switches, off), from PCSX2 Reliquary: the PS2's exact floating-point results, done in
   the recompilers.

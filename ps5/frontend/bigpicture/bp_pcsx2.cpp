@@ -2470,6 +2470,265 @@ public:
 		return Path::IsAbsolute(file) ? file : Path::Combine(EmuFolders::Settings, file);
 	}
 
+	// ---- Folders (Settings > Folders): game folders anywhere, and where Crux2 keeps its files.
+	// PCSX2's own settings do the work: [GameList] RecursivePaths for the games, [Folders] for the
+	// rest (EmuFolders::LoadConfig reads them), so a path set here is the one PCSX2 uses.
+
+	// The places a folder can be chosen from: USB drives, network shares and the console's storage.
+	static std::vector<std::pair<std::string, std::string>> FolderPlaces()
+	{
+		std::vector<std::pair<std::string, std::string>> places;
+		if (PS5Platform::IsElevated())
+		{
+			for (unsigned drive = 0; drive < 8; drive++)
+			{
+				const std::string root = "/mnt/usb" + std::to_string(drive);
+				if (FileSystem::DirectoryExists(root.c_str()))
+					places.emplace_back(fmt::format("USB drive {} ({})", drive + 1, root), root);
+			}
+		}
+		for (unsigned i = 0;; i++)
+		{
+			const char* const point = ps5vfs_mount_point(i);
+			if (!point)
+				break;
+			if (std::strncmp(point, "/smb/", 5) == 0)
+				places.emplace_back(fmt::format("Network share {}", point + 5), point);
+		}
+		if (FileSystem::DirectoryExists("/data"))
+			places.emplace_back("The console's storage (/data)", "/data");
+		return places;
+	}
+
+	// The folders in `path`, sorted by name (hidden ones left out; at most 1000).
+	static std::vector<std::string> SubFolders(const std::string& path)
+	{
+		FileSystem::FindResultsArray entries;
+		FileSystem::FindFiles(path.c_str(), "*", FILESYSTEM_FIND_FOLDERS | FILESYSTEM_FIND_RELATIVE_PATHS, &entries);
+		std::vector<std::string> names;
+		for (const FILESYSTEM_FIND_DATA& entry : entries)
+		{
+			if (entry.FileName.empty() || entry.FileName[0] == '.' || entry.FileName.find('/') != std::string::npos)
+				continue;
+			names.push_back(entry.FileName);
+			if (names.size() >= 1000)
+				break;
+		}
+		std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) {
+			return StringUtil::Strcasecmp(a.c_str(), b.c_str()) < 0;
+		});
+		return names;
+	}
+
+	// A folder browser made of lists: the places first, then each folder's folders, with "Choose this
+	// folder" and "Up one folder" on top. `chosen` gets the folder picked; nothing happens on Circle.
+	static void BrowseFolder(std::string title, std::string path, std::function<void(const std::string&)> chosen)
+	{
+		if (path.empty())
+		{
+			std::vector<std::pair<std::string, std::string>> places = FolderPlaces();
+			if (places.empty())
+			{
+				bp::toast("No USB drive, network share or console storage to choose a folder from.");
+				return;
+			}
+			std::vector<std::string> names;
+			for (const auto& place : places)
+				names.push_back(place.first);
+			bp::pick(title, std::move(names), -1,
+				[title, places = std::move(places), chosen = std::move(chosen)](int i) {
+					BrowseFolder(title, places[static_cast<size_t>(i)].second, chosen);
+				});
+			return;
+		}
+		std::vector<std::string> folders = SubFolders(path);
+		std::vector<std::string> names;
+		names.push_back("Choose this folder: " + path);
+		names.push_back("Up one folder");
+		for (const std::string& folder : folders)
+			names.push_back(folder + "/");
+		bp::pick(title, std::move(names), -1,
+			[title, path, folders = std::move(folders), chosen = std::move(chosen)](int i) {
+				if (i == 0)
+				{
+					chosen(path);
+					return;
+				}
+				if (i == 1)
+				{
+					// Above a place (a drive's top, a share, /data) is the list of places.
+					bool place = false;
+					for (const auto& p : FolderPlaces())
+						place |= (p.second == path);
+					const std::string up = place ? std::string() : std::string(Path::GetDirectory(path));
+					BrowseFolder(title, (up.empty() || up == "/") ? std::string() : up, chosen);
+					return;
+				}
+				BrowseFolder(title, Path::Combine(path, folders[static_cast<size_t>(i - 2)]), chosen);
+			});
+	}
+
+	// Whether Crux2 can write in `folder` (memory cards and save states are written there).
+	static bool CanWriteIn(const std::string& folder)
+	{
+		const std::string probe = Path::Combine(folder, ".crux2-write-test");
+		auto fp = FileSystem::OpenManagedCFile(probe.c_str(), "wb");
+		if (!fp)
+			return false;
+		fp.reset();
+		FileSystem::DeleteFilePath(probe.c_str());
+		return true;
+	}
+
+	// The game folders the player added, and those Crux2 found by itself.
+	static void GameFolderLists(std::vector<std::string>* mine, std::vector<std::string>* found)
+	{
+		const auto lock = Host::GetSettingsLock();
+		SettingsInterface& si = *Host::Internal::GetBaseSettingsLayer();
+		*found = si.GetStringList("PS5", "AutoGamePaths");
+		for (const char* key : {"RecursivePaths", "Paths"})
+		{
+			for (std::string& path : si.GetStringList("GameList", key))
+			{
+				if (std::find(found->begin(), found->end(), path) == found->end() &&
+					std::find(mine->begin(), mine->end(), path) == mine->end())
+					mine->push_back(std::move(path));
+			}
+		}
+	}
+
+	struct KeptFolder
+	{
+		const char* key;   // in [Folders]
+		const char* label;
+		const char* fallback; // the default, under the data folder
+		bool written;      // Crux2 writes there (it must be writable)
+		std::string* now;  // EmuFolders' value
+	};
+
+	static std::vector<KeptFolder> KeptFolders()
+	{
+		return {
+			{"Bios", "BIOS", "bios", false, &EmuFolders::Bios},
+			{"MemoryCards", "Memory cards", "memcards", true, &EmuFolders::MemoryCards},
+			{"Savestates", "Save states", "sstates", true, &EmuFolders::Savestates},
+			{"Snapshots", "Screenshots and GS dumps", "snaps", true, &EmuFolders::Snapshots},
+			{"Cheats", "Cheats", "cheats", false, &EmuFolders::Cheats},
+			{"Covers", "Covers", "covers", true, &EmuFolders::Covers},
+			{"Textures", "Texture replacements", "textures", false, &EmuFolders::Textures},
+		};
+	}
+
+	void SetKeptFolder(const KeptFolder& kept, const std::string& path)
+	{
+		{
+			const auto lock = Host::GetSettingsLock();
+			SettingsInterface& si = *Host::Internal::GetBaseSettingsLayer();
+			if (path.empty())
+				si.DeleteValue("Folders", kept.key);
+			else
+				si.SetStringValue("Folders", kept.key, path.c_str());
+			EmuFolders::LoadConfig(si);
+			EmuFolders::EnsureFoldersExist();
+		}
+		Host::CommitBaseSettingChanges();
+		m_cover_paths.clear();
+		m_pages++;
+		ps5px_log("folders: %s now %s", kept.label, kept.now->c_str());
+	}
+
+	bp::Page foldersPage() override
+	{
+		bp::Page page;
+		std::vector<std::string> mine, found;
+		GameFolderLists(&mine, &found);
+
+		page.rows.push_back(Heading("GAME FOLDERS"));
+		page.rows.push_back(Action("Add a game folder",
+			"Pick any folder on a USB drive, a network share or the console. Its games, and those in the folders inside it, "
+			"join the library where they are: nothing is moved or copied.",
+			[this] {
+				BrowseFolder("Add a game folder", std::string(), [this](const std::string& path) {
+					std::vector<std::string> mine, found;
+					GameFolderLists(&mine, &found);
+					if (std::find(mine.begin(), mine.end(), path) != mine.end() ||
+						std::find(found.begin(), found.end(), path) != found.end())
+					{
+						bp::toast("That folder is already looked in.");
+						return;
+					}
+					{
+						const auto lock = Host::GetSettingsLock();
+						Host::Internal::GetBaseSettingsLayer()->AddToStringList("GameList", "RecursivePaths", path.c_str());
+					}
+					Host::CommitBaseSettingChanges();
+					ps5px_log("folders: game folder added: %s", path.c_str());
+					m_pages++;
+					scan(false);
+					bp::toast("Added " + path + ". Looking for its games...", 4.f);
+				});
+			},
+			bp::Option::NoGame));
+		for (const std::string& path : mine)
+		{
+			page.rows.push_back(Action(path,
+				"A game folder you added. Press to take it off the list: its games leave the library, the files stay where they are.",
+				[this, path] {
+					bp::confirm("Take this folder off the list?", path + "\n\nThe games in it are not deleted.",
+						[this, path](bool yes) {
+							if (!yes)
+								return;
+							{
+								const auto lock = Host::GetSettingsLock();
+								SettingsInterface& si = *Host::Internal::GetBaseSettingsLayer();
+								si.RemoveFromStringList("GameList", "RecursivePaths", path.c_str());
+								si.RemoveFromStringList("GameList", "Paths", path.c_str());
+							}
+							Host::CommitBaseSettingChanges();
+							ps5px_log("folders: game folder removed: %s", path.c_str());
+							m_pages++;
+							scan(false);
+						},
+						"Take it off", "Keep it");
+				},
+				bp::Option::NoGame));
+		}
+		for (const std::string& path : found)
+			page.rows.push_back(Line("Found by Crux2", Shown(path)));
+
+		page.rows.push_back(Heading("WHERE CRUX2 KEEPS ITS FILES"));
+		for (const KeptFolder& kept : KeptFolders())
+		{
+			bp::Option o = Action(kept.label,
+				std::string("Choose the folder for ") + kept.label + ", or go back to the default. Takes effect for the next game started.",
+				[this, kept] {
+					const std::string fallback = Path::Combine(EmuFolders::DataRoot, kept.fallback);
+					bp::pick(kept.label, {"Choose a folder", "Use the default (" + Shown(fallback) + ")"}, -1,
+						[this, kept](int i) {
+							if (i == 1)
+							{
+								SetKeptFolder(kept, std::string());
+								bp::toast(std::string(kept.label) + ": back to the default folder.");
+								return;
+							}
+							BrowseFolder(kept.label, std::string(), [this, kept](const std::string& path) {
+								if (kept.written && !CanWriteIn(path))
+								{
+									bp::toast(std::string("Crux2 cannot write in ") + path + ", so it cannot keep " + kept.label + " there.", 6.f);
+									return;
+								}
+								SetKeptFolder(kept, path);
+								bp::toast(std::string(kept.label) + ": " + path, 4.f);
+							});
+						});
+				},
+				bp::Option::NoGame);
+			o.info = [now = kept.now] { return Shown(*now); };
+			page.rows.push_back(std::move(o));
+		}
+		return page;
+	}
+
 	bp::Page biosPage(int) override
 	{
 		bp::Page page{"\xef\x8b\x9b", "BIOS", {}};

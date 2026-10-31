@@ -473,6 +473,15 @@ TCP or UDP.
 ## What v1.0.18 changed
 
 Added:
+- **Settings > Folders**: games and files where you keep them.
+  - *Add a game folder* opens a folder browser (USB drives, network shares, the console's
+    storage). The folder and the folders inside it are searched for games, which stay where they
+    are. Each folder added is listed there and can be taken off the list again; the folders Crux2
+    finds by itself (a `PS2`, `ps2iso`, `PCSX2`... folder at the top of a USB drive) are shown too.
+  - *Where Crux2 keeps its files*: a folder of your choice, or the default, for the BIOS, memory
+    cards, save states, screenshots and GS dumps, cheats, covers and texture replacements. Folders
+    Crux2 writes to are checked for writing first. These are PCSX2's own folder settings
+    (`[Folders]` in `inis/PCSX2.ini`), and take effect for the next game started.
 - **Accurate floating point** (Settings > Advanced, expert level, for all games; and a game's own
   Settings > Emulation, for that game: *Accurate floating point (FPU)*, *(VU0)* and *(VU1)*, off). The PS2's floating-point units do
   not round like a PC's or the PS5's, and a few games' AI or physics depend on the PS2's exact

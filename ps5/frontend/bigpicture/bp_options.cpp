@@ -1455,6 +1455,15 @@ std::vector<Page> settingsPages(bool forGame)
 
 	pages.push_back(interfacePage());
 	pages.push_back(gameListPage());
+	{
+		Page folders = be->foldersPage();
+		if (!folders.rows.empty())
+		{
+			folders.icon = ICON_FA_FOLDER_TREE;
+			folders.name = "Folders";
+			pages.push_back(std::move(folders));
+		}
+	}
 	pages.push_back(biosPageOf(layer, false));
 	pages.push_back(emulationPage(layer, false));
 	pages.push_back(graphicsPage(layer, false));
