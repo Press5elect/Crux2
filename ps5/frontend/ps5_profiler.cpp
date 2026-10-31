@@ -493,6 +493,14 @@ extern "C" void ps5_title_thread_named(const char* name)
 	// threads do: started from the GS thread, it would otherwise share the GS's core.
 	if (pgs && PS5ThreadLayout::Wanted())
 		PS5ThreadLayout::PinCallingThread(PS5ThreadLayout::kParallelGsMask, "paraLLEl-GS's thread");
+	// The driver's recording thread, started from the GS thread, would share the GS's core. It looks
+	// for work between batches (a spin of up to 50 us, more than half its time in a lit scene), and a
+	// Zen 2 core running two threads splits its queues between them, so the GS thread ran on half a
+	// core's queues for most of the frame. [PS5] DriverOwnCore gives it core 3 instead (paraLLEl-GS's
+	// core: under paraLLEl-GS it shares that core, as before).
+	const bool recorder = name && std::strcmp(name, "RADV recorder") == 0;
+	if (recorder && PS5ThreadLayout::Wanted() && PS5ThreadLayout::DriverOwnCore())
+		PS5ThreadLayout::PinCallingThread(PS5ThreadLayout::kParallelGsMask, "the driver's recording thread");
 	ps5px_profile_thread_named(name);
 }
 

@@ -1,5 +1,14 @@
 # Crux2 - what changed
 
+## v1.0.17 (2026-10-31)
+
+- Changed: less work on the GS thread: the graphics driver's thread gets a core of its own
+  (Settings > Emulation, "Graphics driver on a core of its own", on), the auto-flush test is no
+  longer repeated at every vertex in vertex formats other than the two PCSX2 handles in one
+  piece, and a texture upload no longer checks every mipmapped texture level by level.
+- Changed: the boot log names the vertex formats each game draws in.
+- Changed: the content version in param.json is 01.017.000.
+
 ## v1.0.16 (2026-10-31)
 
 - Added: Variable refresh (VRR) at 120 Hz (a setting, off; experimental).

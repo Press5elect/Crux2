@@ -2780,7 +2780,7 @@ index d4defa812..d74eb9288 100644
  
  		// Reused counters for HW.
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 88fdbb3fb..ccf0e1ff6 100644
+index 88fdbb3fb..6b19de0e8 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
 @@ -1494,6 +1494,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
@@ -2853,7 +2853,83 @@ index 88fdbb3fb..ccf0e1ff6 100644
  	FlushWrite();
  
  	if (m_index->tail > 0)
-@@ -5460,7 +5488,49 @@ __forceinline void GSState::HandleAutoFlush()
+@@ -3348,6 +3376,44 @@ void GSState::ReadbackTextureCache()
+ {
+ }
+ 
++#ifdef __PROSPERO__
++// PS5: whether a packed tag's registers are vertex data only (RGBAQ 1, STQ 2, UV 3, XYZF2 4, XYZ2 5,
++// FOG 10, XYZF3 12, XYZ3 13, NOP 15). The formats seen are named in the log once each (the first 32),
++// which says which ones a game draws in.
++bool GSState::PS5PackedVertexOnly(const GIFPath& path)
++{
++	constexpr u32 vertex_regs = (1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 10) | (1u << 12) | (1u << 13) | (1u << 15);
++	u32 used = 0;
++	for (u32 i = 0; i < path.nreg; i++)
++		used |= 1u << path.GetReg(i);
++	const bool vertex_only = (used & ~vertex_regs) == 0;
++
++	static u64 s_seen[32];
++	static u8 s_seen_nreg[32];
++	static u32 s_seen_count = 0;
++	if (s_seen_count < std::size(s_seen))
++	{
++		u64 key = 0;
++		for (u32 i = 0; i < path.nreg; i++)
++			key |= static_cast<u64>(path.GetReg(i)) << (4 * i);
++		bool seen = false;
++		for (u32 i = 0; i < s_seen_count && !seen; i++)
++			seen = (s_seen[i] == key && s_seen_nreg[i] == path.nreg);
++		if (!seen)
++		{
++			s_seen[s_seen_count] = key;
++			s_seen_nreg[s_seen_count++] = static_cast<u8>(path.nreg);
++			char regs[33] = {};
++			for (u32 i = 0; i < path.nreg; i++)
++				regs[i] = "0123456789ABCDEF"[path.GetReg(i)];
++			Console.WriteLn("GS: PS5: packed format %s (%u registers) %s", regs, path.nreg,
++				vertex_only ? "is vertex data only: the auto-flush answer is kept across it" : "writes registers: tested at every vertex");
++		}
++	}
++	return vertex_only;
++}
++#endif
++
+ template void GSState::Transfer<0>(const u8* mem, u32 size);
+ template void GSState::Transfer<1>(const u8* mem, u32 size);
+ template void GSState::Transfer<2>(const u8* mem, u32 size);
+@@ -3412,6 +3478,19 @@ void GSState::Transfer(const u8* mem, u32 size)
+ 						{
+ 							case GIFPath::TYPE_UNKNOWN:
+ 							{
++#ifdef __PROSPERO__
++								// PS5: a loop of nothing but vertex data (RGBAQ, ST, UV, FOG, XYZ and NOP; no PRIM,
++								// TEX0, CLAMP or A+D) changes no drawing register between its vertices, as the
++								// combined handlers' loops do not, so the auto-flush answer is kept across it the
++								// same way (HandleAutoFlush; checked every 32nd vertex). Only those two formats
++								// had it, and a game drawing in any other paid the whole test at every vertex.
++								const bool ps5_vertex_only = PS5PackedVertexOnly(path);
++								if (ps5_vertex_only)
++								{
++									m_ps5_autoflush_scope = true;
++									m_ps5_autoflush_known = false;
++								}
++#endif
+ 								u32 reg = 0;
+ 
+ 								do
+@@ -3422,6 +3501,10 @@ void GSState::Transfer(const u8* mem, u32 size)
+ 
+ 									reg = reg & ((int)(reg - path.nreg) >> 31); // resets reg back to 0 when it becomes equal to path.nreg
+ 								} while (--total > 0);
++#ifdef __PROSPERO__
++								if (ps5_vertex_only)
++									m_ps5_autoflush_scope = false;
++#endif
+ 							}
+ 							break;
+ 							case GIFPath::TYPE_ADONLY: // very common
+@@ -5460,7 +5543,49 @@ __forceinline void GSState::HandleAutoFlush()
  	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
  	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
  	int tex_layer = 0;
@@ -2904,10 +2980,10 @@ index 88fdbb3fb..ccf0e1ff6 100644
  		int  n = 1;
  		u32 buff[3];
 diff --git a/pcsx2/GS/GSState.h b/pcsx2/GS/GSState.h
-index 3e0b3548d..a38a94c3c 100644
+index 3e0b3548d..242543005 100644
 --- a/pcsx2/GS/GSState.h
 +++ b/pcsx2/GS/GSState.h
-@@ -299,6 +299,17 @@ public:
+@@ -299,6 +299,18 @@ public:
  	bool m_nativeres = false;
  	bool m_mipmap = false;
  	bool m_texflush_flag = false;
@@ -2915,6 +2991,7 @@ index 3e0b3548d..a38a94c3c 100644
 +	// PS5: IsAutoFlushDraw's answer, kept for the vertices of one packed-handler call (GSState.cpp,
 +	// HandleAutoFlush). `scope` is set while such a handler runs its loop, `known` once the answer
 +	// has been worked out in it; any flush clears `known`.
++	bool PS5PackedVertexOnly(const GIFPath& path);
 +	bool m_ps5_autoflush_scope = false;
 +	bool m_ps5_autoflush_known = false;
 +	bool m_ps5_autoflush_result = false;
@@ -4392,7 +4469,7 @@ index 6adcc67e0..5ac11a5f4 100644
  	std::vector<GSVertexSW> m_sw_vertex_buffer;
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index 6da649813..573bb644d 100644
+index 6da649813..6459ccd82 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 @@ -17,6 +17,7 @@
@@ -4403,7 +4480,7 @@ index 6da649813..573bb644d 100644
  #include <cinttypes>
  #include <math.h>
  
-@@ -4758,6 +4759,51 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
+@@ -4758,6 +4759,55 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
  
  // Goal: invalidate data sent to the GPU when the source (GS memory) is modified
  // Called each time you want to write to the GS memory
@@ -4421,6 +4498,10 @@ index 6da649813..573bb644d 100644
 +	for (Source* s : m_src.m_mip_sources)
 +	{
 +		if (s->m_target || !GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
++			continue;
++		// None of the pages its levels were read from written: nothing to look at level by level
++		// (the page loops below run for every source with levels at every upload otherwise).
++		if ((s->m_ps5_mip_pages & written).none())
 +			continue;
 +		for (int layer = 1; layer < 7; layer++)
 +		{
@@ -4455,7 +4536,7 @@ index 6da649813..573bb644d 100644
  void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target)
  {
  	const u32 bp = off.bp();
-@@ -4878,6 +4924,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4878,6 +4928,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  		}
  	});
  
@@ -4467,7 +4548,7 @@ index 6da649813..573bb644d 100644
  	if (!target)
  		return;
  
-@@ -7736,8 +7787,21 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
+@@ -7736,14 +7791,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
  	if (m_target) // Yeah keep dreaming
  		return;
  
@@ -4489,7 +4570,21 @@ index 6da649813..573bb644d 100644
  
  	const GIFRegTEX0 old_TEX0 = m_TEX0;
  
-@@ -8477,6 +8541,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+ 	m_layer_TEX0[layer] = TEX0;
+ 	m_TEX0 = TEX0;
+ 
++#ifdef __PROSPERO__
++	if (layer > 0)
++	{
++		const GSOffset loff = g_gs_renderer->m_mem.GetOffset(TEX0.TBP0, TEX0.TBW, TEX0.PSM);
++		loff.loopPages(GSVector4i(0, 0, 1 << TEX0.TW, 1 << TEX0.TH), [this](u32 page) { m_ps5_mip_pages.set(page); });
++	}
++#endif
++
+ 	Update(rect, layer);
+ 
+ 	m_TEX0 = old_TEX0;
+@@ -8477,6 +8553,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  	}
  
  	m_surfaces.clear();
@@ -4499,7 +4594,7 @@ index 6da649813..573bb644d 100644
  
  	for (FastList<Source*>& item : m_map)
  	{
-@@ -8487,6 +8554,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8487,6 +8566,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  void GSTextureCache::SourceMap::RemoveAt(Source* s)
  {
  	m_surfaces.erase(s);
@@ -4510,20 +4605,32 @@ index 6da649813..573bb644d 100644
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.h b/pcsx2/GS/Renderers/HW/GSTextureCache.h
-index a4d9256cb..b0029f6d1 100644
+index a4d9256cb..f67dcf848 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.h
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.h
-@@ -326,6 +326,9 @@ public:
+@@ -7,6 +7,7 @@
+ #include "GS/Renderers/Common/GSFastList.h"
+ #include "GS/Renderers/Common/GSDirtyRect.h"
+ 
++#include <bitset>
+ #include <unordered_set>
+ #include <utility>
+ #include <limits>
+@@ -326,6 +327,13 @@ public:
  		GIFRegTEX0 m_from_target_TEX0 = {}; // TEX0 of the target texture, if any, else equal to texture TEX0
  		GIFRegTEX0 m_layer_TEX0[7] = {}; // Detect already loaded value
  		HashType m_layer_hash[7] = {};
 +#ifdef __PROSPERO__
 +		u8 m_layers_seen = 0; // Crux2: the mip levels (1-6) uploaded, whose memory is watched for writes
++		// Crux2: every page any of those levels has been read from (a level's TEX0 can change, so
++		// this only grows until the source goes): a write that touches none of them is passed
++		// over without looking at the levels one by one (InvalidateMipLevels).
++		std::bitset<GS_MAX_PAGES> m_ps5_mip_pages;
 +#endif
  		// Keep a GSTextureCache::SourceMap::m_map iterator to allow fast erase
  		// Deliberately not initialized to save cycles.
  		std::array<u16, GS_MAX_PAGES> m_erase_it;
-@@ -377,12 +380,21 @@ public:
+@@ -377,12 +385,21 @@ public:
  	public:
  		std::unordered_set<Source*> m_surfaces;
  		std::array<FastList<Source*>, GS_MAX_PAGES> m_map;

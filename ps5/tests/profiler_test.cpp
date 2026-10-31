@@ -67,6 +67,7 @@ extern "C" void ps5px_log(const char* format, ...)
 namespace PS5ThreadLayout
 {
 	bool Wanted() { return false; }
+	bool DriverOwnCore() { return false; }
 	bool PinCallingThread(uint64_t, const char*) { return false; }
 } // namespace PS5ThreadLayout
 

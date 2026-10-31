@@ -379,6 +379,7 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "GameDbRecommended", true);
 	b("EmuCore", "EnableThreadPinning", false);
 	b("PS5", "ThreadLayout", true); // Thread pinning: cores of their own (Crux2)
+	b("PS5", "DriverOwnCore", true); // the driver's recording thread off the GS thread's core
 	// Memory cards and saving.
 	b("PS5", "CardPerGame", true);
 	b("PS5", "SleepSafe", true);

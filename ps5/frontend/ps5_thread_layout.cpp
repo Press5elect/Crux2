@@ -20,6 +20,11 @@ namespace PS5ThreadLayout
 		return Host::GetBaseBoolSettingValue("PS5", "ThreadLayout", true);
 	}
 
+	bool DriverOwnCore()
+	{
+		return Host::GetBaseBoolSettingValue("PS5", "DriverOwnCore", true);
+	}
+
 	namespace
 	{
 		// The set at the size the console's kernel keeps (a set of sizeof(cpuset_t) can be refused

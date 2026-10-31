@@ -22,6 +22,10 @@ namespace PS5ThreadLayout
 	/// Whether [PS5] ThreadLayout asks for the layout (read on the CPU thread at each game's start).
 	bool Wanted();
 
+	/// Whether [PS5] DriverOwnCore asks for the driver's recording thread on core 3 (kParallelGsMask)
+	/// instead of the GS thread's core, where it starts.
+	bool DriverOwnCore();
+
 	/// Every thread of the title to these processors (FreeBSD's cpuset for the process). Threads
 	/// pinned afterwards keep their own masks; a thread a pinned thread starts inherits its mask.
 	bool RestrictProcess(uint64_t mask);

@@ -468,6 +468,20 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.17 changed
+
+Changed:
+- **Less work on the GS thread**, the thread that limits the heaviest scenes:
+  - the graphics driver's recording thread runs on a core of its own instead of sharing the GS
+    thread's core (Settings > Emulation, *Graphics driver on a core of its own*, on; it needs
+    *Thread pinning* at *Cores of their own*, the default);
+  - the auto-flush test, already worked out once per strip in PCSX2's two packed vertex formats,
+    is worked out once per strip in every format that carries only vertex data;
+  - a texture upload skips mipmapped textures whose levels it does not touch, instead of checking
+    each of their levels.
+- **The boot log names each vertex format a game draws in** (lines starting `GS: PS5: packed format`).
+- **The content version is 01.017.000.**
+
 ## What v1.0.16 changed
 
 Added:

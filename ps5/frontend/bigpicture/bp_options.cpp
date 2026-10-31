@@ -484,6 +484,15 @@ Page emulationPage(int layer, bool forGame)
 		o.flags |= Option::Advanced;
 		rows.push_back(std::move(o));
 	}
+	{
+		Option o = toggle("Graphics driver on a core of its own",
+			"With \"Cores of their own\", moves the graphics driver's thread off the GS thread's core, so the GS thread has "
+				"its core to itself. Turn it off if a game runs slower with it. Takes effect the next time Crux2 starts.",
+			"PS5", "DriverOwnCore", true, Option::Restart);
+		o.flags |= Option::AllGames | Option::Advanced;
+		o.enabled = [](int) { return be->getBool(Shared, "PS5", "ThreadLayout").value_or(true); };
+		rows.push_back(std::move(o));
+	}
 	rows.push_back(toggle("Fast disc access", "Fast disc access, shorter loading times. Check HDLoader compatibility lists for games that are known to have "
 		"issues with this.", SPEED, "fastCDVD", false));
 	rows.push_back(toggle("Load the whole disc into memory",
