@@ -1319,6 +1319,63 @@ public:
 	}
 	bool systemCard(const std::string& card) override { return card == "Mcd001.ps2" || card == "Mcd002.ps2"; }
 	int bringInCount = 0, formatCount = 0;
+	// Settings > Folders as the title has it, with made-up folders: a browser of lists (places,
+	// then folders), a game folder of the player's, one found by Crux2, and the kept folders.
+	void PreviewBrowse(const std::string& title, int depth)
+	{
+		std::vector<std::string> names;
+		if (depth == 0)
+			names = {"USB drive 1 (/mnt/usb0)", "Network share nas", "The console's storage (/data)"};
+		else
+			names = {"Choose this folder: /mnt/usb0/Games" + std::string(static_cast<size_t>(depth), '/'), "Up one folder", "PS2/", "PS2 Arcade/", "Saves/"};
+		bp::pick(title, std::move(names), -1, [this, title, depth](int i) {
+			if (depth > 0 && i == 0)
+			{
+				bp::toast("Added /mnt/usb0/Games. Looking for its games...", 4.f);
+				return;
+			}
+			PreviewBrowse(title, (depth > 0 && i == 1) ? depth - 1 : std::min(depth + 1, 3));
+		});
+	}
+
+	bp::Page foldersPage() override
+	{
+		bp::Page page;
+		auto heading = [](const char* label) {
+			bp::Option o;
+			o.kind = bp::Option::Heading;
+			o.label = label;
+			return o;
+		};
+		auto act = [](std::string label, std::string desc, std::function<void()> run) {
+			bp::Option o;
+			o.kind = bp::Option::Action;
+			o.label = std::move(label);
+			o.desc = std::move(desc);
+			o.action = std::move(run);
+			return o;
+		};
+		page.rows.push_back(heading("GAME FOLDERS"));
+		page.rows.push_back(act("Add a game folder", "Pick any folder on a USB drive, a network share or the console.",
+			[this] { PreviewBrowse("Add a game folder", 0); }));
+		page.rows.push_back(act("/mnt/usb0/My Games/PlayStation 2", "A game folder you added. Press to take it off the list.",
+			[] { bp::confirm("Take this folder off the list?", "/mnt/usb0/My Games/PlayStation 2", [](bool) {}, "Take it off", "Keep it"); }));
+		bp::Option found;
+		found.kind = bp::Option::Info;
+		found.label = "Found by Crux2";
+		found.info = [] { return std::string("/mnt/usb0/PS2/"); };
+		page.rows.push_back(found);
+		page.rows.push_back(heading("WHERE CRUX2 KEEPS ITS FILES"));
+		for (const char* label : {"BIOS", "Memory cards", "Save states", "Screenshots and GS dumps", "Cheats", "Covers", "Texture replacements"})
+		{
+			bp::Option o = act(label, std::string("Choose the folder for ") + label + ", or go back to the default.",
+				[label] { bp::pick(label, {"Choose a folder", "Use the default (/data/homebrew/PPSA99249/)"}, -1, [](int) {}); });
+			o.info = [] { return std::string("/data/homebrew/PPSA99249/"); };
+			page.rows.push_back(std::move(o));
+		}
+		return page;
+	}
+
 	bp::Page biosPage(int) override
 	{
 		bp::Page page{"\xef\x8b\x9b", "BIOS", {}};
