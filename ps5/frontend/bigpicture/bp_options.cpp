@@ -1159,6 +1159,9 @@ Page advancedPage(int layer)
 	rows.push_back(list("Division rounding mode", "Determines how the results of floating-point division is rounded. Some games need specific settings.", CPU, "FPUDiv.Roundmode", 0, rounding, 0, f));
 	rows.push_back(clamping("Clamping mode", "How numbers out of range are handled. Normal suits most games", "fpuOverflow", "fpuExtraOverflow",
 		"fpuFullMode", {"None", "Normal", "Extra, keep the sign", "Full"}, f));
+	rows.push_back(toggle("Accurate floating point (FPU)",
+		"Does the FPU's maths exactly as the PS2 does, for games whose physics or AI go wrong otherwise. Slower. From PCSX2 Reliquary.",
+		CPU, "FPU.SoftFloat", false, f));
 	rows.push_back(toggle("Enable recompiler", "Performs just-in-time binary translation of 64-bit MIPS-IV machine code to native code.", REC, "EnableEE", true, f));
 	rows.push_back(toggle("Enable cache (slow)", "Enables emulation of the EE's hardware cache. Interpreter only, provided for diagnostics.", REC, "EnableEECache", false, f));
 	rows.push_back(toggle("INTC spin detection", "Huge speedup for some games, with almost no compatibility side effects.", SPEED, "IntcStat", true, f));
@@ -1173,6 +1176,12 @@ Page advancedPage(int layer)
 	rows.push_back(clamping("VU0 clamping mode", "", "vu0Overflow", "vu0ExtraOverflow", "vu0SignOverflow", {"None", "Normal", "Extra", "Extra, keep the sign"}, f));
 	rows.push_back(list("VU1 rounding mode", "Determines how the results of floating-point operations are rounded. Some games need specific settings.", CPU, "VU1.Roundmode", 3, rounding, 0, f));
 	rows.push_back(clamping("VU1 clamping mode", "", "vu1Overflow", "vu1ExtraOverflow", "vu1SignOverflow", {"None", "Normal", "Extra", "Extra, keep the sign"}, f));
+	rows.push_back(toggle("Accurate floating point (VU0)",
+		"Does VU0's maths exactly as the PS2 does. Usually needed with the FPU one. Slower. From PCSX2 Reliquary.",
+		CPU, "VU0.SoftFloat", false, f));
+	rows.push_back(toggle("Accurate floating point (VU1)",
+		"Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary.",
+		CPU, "VU1.SoftFloat", false, f));
 	rows.push_back(toggle("Enable VU0 recompiler (micro mode)", "Performs just-in-time binary translation of Vector Unit 0 (VU0) microprograms to native code.", REC, "EnableVU0", true, f));
 	rows.push_back(toggle("Enable VU1 recompiler", "Performs just-in-time binary translation of Vector Unit 1 (VU1) microprograms to native code.", REC, "EnableVU1", true, f));
 	rows.push_back(toggle("mVU flag hack", "Good speedup and high compatibility, may cause graphical errors.", SPEED, "vuFlagHack", true, f));

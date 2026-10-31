@@ -470,6 +470,22 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.18 changed
+
+Added:
+- **Accurate floating point** (Settings > Advanced, expert level: *Accurate floating point
+  (FPU)*, *(VU0)* and *(VU1)*, off; each can be set per game). The PS2's floating-point units do
+  not round like a PC's or the PS5's, and a few games' AI or physics depend on the PS2's exact
+  results. These switches do the PS2's arithmetic exactly, inside the recompilers (from PCSX2
+  Reliquary). FPU and VU0 cost some speed; VU1 costs a lot and is only for games that need it.
+
+Changed:
+- **Accurate floating point is switched on for the FPU and VU0** in the two games known to need
+  it, unless a game's own settings name the switch. The boot log's `game fixes:` line says when it
+  is on.
+- **Save states keep their format**: states from v1.0.17 load in v1.0.18 and the other way round.
+- **The content version is 01.018.000.**
+
 ## What v1.0.17 changed
 
 Changed:

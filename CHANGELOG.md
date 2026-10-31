@@ -1,5 +1,15 @@
 # Crux2 - what changed
 
+## v1.0.18 (2026-10-31)
+
+- Added: Accurate floating point for the EE's FPU, VU0 and VU1 (Settings > Advanced, three
+  switches, off; per game), from PCSX2 Reliquary: the PS2's exact floating-point results, done in
+  the recompilers.
+- Changed: accurate floating point is on for the FPU and VU0 in the two games known to need it
+  (their AI or physics go wrong without it), unless the game's own settings say otherwise.
+- Changed: x86 emitter encoding fixes from PCSX2 Reliquary.
+- Changed: the content version in param.json is 01.018.000.
+
 ## v1.0.17 (2026-10-31)
 
 - Changed: less work on the GS thread: the graphics driver's thread gets a core of its own

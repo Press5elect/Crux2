@@ -20,6 +20,23 @@
 			}
 		},
 		{
+			"id": "reliquary-softfloat",
+			"name": "Accurate floating point (soft-float) for the EE's FPU, VU0 and VU1: the interpreters' PS2 floating-point arithmetic (PS2Float) and the soft-float recompilers, from PCSX2 Reliquary",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "DiscoStarslayer, GitHubProUser67 and the PCSX2 Dev Team and contributors",
+			"modifications": "brought onto Crux2's PCSX2 by Press5elect (Copyright (C) 2026): part of ps5/patches/pcsx2/ps5.patch (iFPU.h's declarations moved to iR5900.h as upstream PCSX2 did; that history's XGKICK change left out)",
+			"texts": {
+				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/DiscoStarslayer/pcsx2-reliquary",
+				"revision": "030ea8c733525306ba1cc7f836f933fc018b738a"
+			}
+		},
+		{
 			"id": "port",
 			"name": "Crux2 (named PSPCSX2 before v0.6.0): the port layer, host, tools and tests",
 			"licence": "GPL-3.0-or-later",
