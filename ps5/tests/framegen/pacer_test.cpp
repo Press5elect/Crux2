@@ -32,6 +32,7 @@ struct Shown
 {
 	int picture;
 	float time;
+	uint32_t period; // the rate the pacer had settled on when the newest picture came
 };
 
 // `pattern`: one letter a vsync, N a new picture, - the same picture again.
@@ -46,7 +47,7 @@ static std::vector<Shown> Run(const std::string& pattern, uint32_t presents)
 		picture += fresh ? 1 : 0;
 		pacer.Vsync(fresh);
 		for (uint32_t shown = 0; shown < presents; shown++)
-			out.push_back({picture, (picture >= 1 && pacer.Makes(presents)) ? pacer.Time(shown, presents) : 1.0f});
+			out.push_back({picture, (picture >= 1 && pacer.Makes(presents)) ? pacer.Time(shown, presents) : 1.0f, pacer.period});
 	}
 	return out;
 }
@@ -111,8 +112,8 @@ int main()
 	}
 
 	// Whatever the game does, what is on the screen never goes back in the game's time, the
-	// picture itself is reached whenever a picture stays as long as the one before it did, and
-	// a time is always above 0 and at most 1.
+	// picture itself is reached whenever a picture stays as long as the rate the pacer had settled
+	// on when it came, and a time is always above 0 and at most 1.
 	for (const uint32_t presents : {1u, 2u})
 	{
 		for (const std::string& pattern : {Repeat("N-", 6) + Repeat("N", 6) + Repeat("N-", 6), Repeat("N--", 4) + Repeat("N-", 4) + Repeat("N--", 4),
@@ -125,22 +126,38 @@ int main()
 				CHECK(shown[i].time > 0.0f && shown[i].time <= 1.0f);
 				CHECK(Place(shown[i]) >= Place(shown[i - 1]) - 1e-5f || shown[i].picture < 1);
 			}
-			// The last refresh of a picture that stays at least as long as the one before: itself.
+			// The last refresh of a picture that stays at least as long as the settled rate: itself.
 			for (size_t i = presents; i < shown.size(); i++)
 			{
 				const bool last_of_its = (i + 1 == shown.size()) || (shown[i + 1].picture != shown[i].picture);
 				if (!last_of_its || shown[i].picture < 2)
 					continue;
-				size_t stay = 0, stay_before = 0;
+				size_t stay = 0;
 				for (const Shown& s : shown)
-				{
 					stay += (s.picture == shown[i].picture);
-					stay_before += (s.picture == shown[i].picture - 1);
-				}
-				if (stay >= stay_before && stay_before <= PS5FrameGen::Pacer::LONGEST * presents)
+				if (stay >= shown[i].period * presents)
 					CHECK(shown[i].time == 1.0f);
 			}
 		}
+	}
+
+	// A game at 30 a second that drops or doubles a picture now and then keeps its rate: one
+	// picture early or late does not change how the ones after it are made (up to v1.0.17 it did,
+	// and what moved sped up and slowed down every few seconds).
+	for (const uint32_t presents : {1u, 2u})
+	{
+		const std::string pattern = Repeat("N-", 6) + "N" + Repeat("N-", 6) + "N--" + Repeat("N-", 6) + "N" + Repeat("N-", 6);
+		const std::vector<Shown> shown = Run(pattern, presents);
+		for (size_t i = 6 * presents; i < shown.size(); i++)
+			CHECK(shown[i].period == 2);
+	}
+
+	// A game that really changes its rate is followed after two pictures at the new one.
+	{
+		const std::vector<Shown> shown = Run(Repeat("N-", 8) + Repeat("N--", 8), 1);
+		CHECK(shown.back().period == 3);
+		const std::vector<Shown> back = Run(Repeat("N--", 8) + Repeat("N-", 8), 1);
+		CHECK(back.back().period == 2);
 	}
 
 	// A picture that stood for longer than a game draws at (a loading screen): nothing is made

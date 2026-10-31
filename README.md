@@ -495,6 +495,12 @@ Changed:
 - **Save states keep their format**: states from v1.0.17 load in v1.0.18 and the other way round.
 
 Fixed:
+- **Frame generation sped up and slowed down every few seconds** in games at 30 frames a second.
+  It took the game's rate from the last frame alone, so a single late or early frame (which games
+  have when they load or drop a frame) changed how every following frame was made: halves, then
+  none, then thirds, several times a second. It now settles on the game's rate from the last eight
+  frames and changes it only when the game really does (the same rate twice in a row, or most of
+  the eight).
 - **What's new** (Settings > System) only said whether a newer Crux2 was out. It now shows what was
   added, changed and fixed in each version, newest first, from the `CHANGELOG.md` the title folder
   now holds. After an update it opens by itself once, with the changes since the version that ran
