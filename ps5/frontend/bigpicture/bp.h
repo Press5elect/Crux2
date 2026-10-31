@@ -621,6 +621,9 @@ void editText(const std::string& title, const std::string& now, bool secret, std
 /// (the newest lines); the directions, L1 / R1 (a page) and L2 / R2 (the start, the end) move
 /// through it, Circle closes it. A line too long for the sheet goes on on the next.
 void showText(const std::string& title, std::vector<std::string> lines);
+/// "What's new": like showText, from its top; a line starting \x01 is a version's heading, \x02 a
+/// section's (Added, Changed, Fixed).
+void showNews(const std::string& title, std::vector<std::string> lines);
 
 /// A QR code with lines of text beside it (the address to open on a phone): `modules` is size x
 /// size, one byte a module, non-zero dark. Circle or Cross closes it.

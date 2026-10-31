@@ -347,6 +347,9 @@ rm -f "$app/network.cfg"
 cp "$ps5/package/games.txt" "$app/games/README.txt"
 cp "$ps5/package/bios.txt" "$app/bios/README.txt"
 [[ -f $root/README.md ]] && cp "$root/README.md" "$app/README.md"
+# What changed in each version, read by Settings > System > What's new (and shown by itself once
+# after an update).
+[[ -f $root/CHANGELOG.md ]] && cp "$root/CHANGELOG.md" "$app/CHANGELOG.md"
 
 # The names of the program's functions, for a test run's profiler (frontend/ps5_profiler.cpp):
 # from the ELF just linked and its link map, so they are this eboot.bin's and no other's.

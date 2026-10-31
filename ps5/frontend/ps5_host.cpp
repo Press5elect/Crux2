@@ -569,6 +569,9 @@ bool PS5Host::InitializeConfig()
 
 		VMManager::SetDefaultSettings(si, true, true, true, true, true);
 		SetPS5Defaults(si);
+		// A first start: nothing is new to it ("What's new" opens by itself after an update only).
+		if (*ps5px_build_version() != '\0')
+			si.SetStringValue("PS5", "SeenVersion", ps5px_build_version());
 		// The setup wizard is the desktop interface's: the BIOS and games folders are fixed here.
 		si.SetBoolValue("UI", "SetupWizardIncomplete", false);
 

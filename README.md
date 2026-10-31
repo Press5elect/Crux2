@@ -493,6 +493,12 @@ Changed:
   it, unless a game's own settings name the switch. The boot log's `game fixes:` line says when it
   is on.
 - **Save states keep their format**: states from v1.0.17 load in v1.0.18 and the other way round.
+
+Fixed:
+- **What's new** (Settings > System) only said whether a newer Crux2 was out. It now shows what was
+  added, changed and fixed in each version, newest first, from the `CHANGELOG.md` the title folder
+  now holds. After an update it opens by itself once, with the changes since the version that ran
+  before.
 - **The content version is 01.018.000.**
 
 ## What v1.0.17 changed

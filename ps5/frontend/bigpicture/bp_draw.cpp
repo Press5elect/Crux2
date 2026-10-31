@@ -1698,6 +1698,7 @@ struct Dialog
 	int numbers[4] = {0, 0, 0, 0}; // Address
 	bool set = false;              // Address: there was one when the dialog opened
 	std::vector<std::string> shown; // Text: `names` as lines that fit the sheet
+	bool news = false;              // Text: "What's new": from its top, with headings (\x01 a version, \x02 a section)
 	float shownFor = 0;             // Text: the scale `shown` was made for (0: not yet)
 	float top = -1;                 // Text: the first line that shows (-1: its end, when it opens)
 	std::string value;              // Keyboard: what was typed so far
@@ -1878,6 +1879,17 @@ void showText(const std::string& title, std::vector<std::string> lines)
 {
 	Dialog d;
 	d.kind = Dialog::Text;
+	d.title = title;
+	d.names = std::move(lines);
+	s_dialogs.push_back(std::move(d));
+	holdInput();
+}
+
+void showNews(const std::string& title, std::vector<std::string> lines)
+{
+	Dialog d;
+	d.kind = Dialog::Text;
+	d.news = true;
 	d.title = title;
 	d.names = std::move(lines);
 	s_dialogs.push_back(std::move(d));
@@ -2366,6 +2378,10 @@ void dialogDraw(ImDrawList* dl)
 				const char* const end = at + line.size();
 				if (at == end)
 					d.shown.emplace_back();
+				// News: a heading's mark (\x01, \x02) goes on its first piece only.
+				std::string mark;
+				if (d.news && at < end && (*at == '\x01' || *at == '\x02'))
+					mark.assign(1, *at++);
 				bool first = true;
 				while (at < end)
 				{
@@ -2377,7 +2393,7 @@ void dialogDraw(ImDrawList* dl)
 						while (cut < end && (static_cast<unsigned char>(*cut) & 0xc0) == 0x80)
 							cut++;
 					}
-					d.shown.push_back(first ? std::string(at, cut) : "\t" + std::string(at, cut));
+					d.shown.push_back(first ? mark + std::string(at, cut) : "\t" + std::string(at, cut));
 					at = cut;
 					while (at < end && *at == ' ')
 						at++;
@@ -2388,7 +2404,7 @@ void dialogDraw(ImDrawList* dl)
 		}
 		const float last = std::max(0.f, static_cast<float>(d.shown.size()) - TEXT_ROWS);
 		if (d.top < 0)
-			d.top = last;
+			d.top = d.news ? 0.f : last; // a log opens at its end, the news at its top
 		d.top = std::clamp(d.top, 0.f, last);
 		d.scroll = (d.open < 0.5f) ? d.top : approach(d.scroll, d.top, 22);
 
@@ -2415,6 +2431,17 @@ void dialogDraw(ImDrawList* dl)
 			const std::string& line = d.shown[i];
 			const bool more = !line.empty() && line[0] == '\t';
 			const float ly = listTop + (i - d.scroll) * TEXT_LINE + 2;
+			if (d.news)
+			{
+				// A version in bold, a section (Added, Changed, Fixed) in the accent, the rest plain.
+				if (!line.empty() && line[0] == '\x01')
+					text(dl, bold(), TEXT_SIZE, x + 48, ly, alpha(col::text, t), line.c_str() + 1);
+				else if (!line.empty() && line[0] == '\x02')
+					text(dl, bold(), TEXT_SIZE, x + 48, ly, alpha(col::accent, t), line.c_str() + 1);
+				else
+					text(dl, regular(), TEXT_SIZE, x + 48 + (more ? 60 : 0), ly, alpha(col::text, t), line.c_str() + (more ? 1 : 0));
+				continue;
+			}
 			// What went wrong stands out: an error, a warning, the report of a crash.
 			ImU32 c = col::dim;
 			if (line.find("error") != std::string::npos || line.find("FATAL") != std::string::npos || line.find("====") != std::string::npos ||

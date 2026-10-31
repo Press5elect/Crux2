@@ -227,6 +227,140 @@ int CountValues(const std::string& path)
 	return count;
 }
 
+// ---- What's new: CHANGELOG.md, as the title folder has it.
+
+// "v1.0.18" or "1.0.18" as numbers to compare; empty when it is not a version.
+std::vector<int> VersionParts(std::string_view text)
+{
+	if (!text.empty() && (text[0] == 'v' || text[0] == 'V'))
+		text.remove_prefix(1);
+	std::vector<int> parts;
+	int value = -1;
+	for (const char c : text)
+	{
+		if (c >= '0' && c <= '9')
+			value = (value < 0 ? 0 : value * 10) + (c - '0');
+		else if (c == '.' && value >= 0)
+		{
+			parts.push_back(value);
+			value = -1;
+		}
+		else
+			break;
+	}
+	if (value >= 0)
+		parts.push_back(value);
+	return parts;
+}
+
+// The changes of the versions after `since` (every version when it is empty) up to the one
+// running, newest first, as showNews lines. `versions`: how many versions are in them.
+std::vector<std::string> ChangesSince(const std::string& since, int* versions)
+{
+	*versions = 0;
+	std::vector<std::string> lines;
+	const std::optional<std::string> file = FileSystem::ReadFileToString(Path::Combine(ps5px_title_dir(), "CHANGELOG.md").c_str());
+	if (!file.has_value())
+		return lines;
+	const std::vector<int> running = VersionParts(ps5px_build_version());
+	const std::vector<int> after = VersionParts(since);
+
+	struct Entry
+	{
+		std::string heading;
+		std::vector<std::string> sections[4]; // Added, Changed, Fixed, anything else
+	};
+	std::vector<Entry> entries;
+	bool keep = false;
+	std::string* last = nullptr; // the bullet a wrapped line belongs to
+	size_t at = 0;
+	const std::string& all = *file;
+	while (at < all.size())
+	{
+		size_t end = all.find('\n', at);
+		if (end == std::string::npos)
+			end = all.size();
+		std::string line = all.substr(at, end - at);
+		at = end + 1;
+		if (!line.empty() && line.back() == '\r')
+			line.pop_back();
+		if (line.compare(0, 3, "## ") == 0)
+		{
+			// "## v1.0.18 (2026-10-31)"
+			const std::string title = line.substr(3);
+			const std::vector<int> version = VersionParts(title);
+			keep = !version.empty() && (running.empty() || version <= running) && (after.empty() || version > after);
+			last = nullptr;
+			if (keep)
+			{
+				std::string heading = title;
+				if (const size_t open = title.find(" ("); open != std::string::npos && title.back() == ')')
+					heading = title.substr(0, open) + ", " + title.substr(open + 2, title.size() - open - 3);
+				entries.push_back({"Crux2 " + heading, {}});
+			}
+			continue;
+		}
+		if (!keep)
+			continue;
+		const std::string_view bare = StringUtil::StripWhitespace(line);
+		if (bare.empty())
+		{
+			last = nullptr;
+			continue;
+		}
+		if (bare.compare(0, 2, "- ") == 0)
+		{
+			std::string item(bare.substr(2));
+			int section = 3;
+			static constexpr const char* names[] = {"Added", "Changed", "Fixed"};
+			for (int s = 0; s < 3; s++)
+			{
+				const size_t n = std::strlen(names[s]);
+				if (item.compare(0, n, names[s]) == 0 && item.size() > n && (item[n] == ':' || item[n] == ' '))
+				{
+					section = s;
+					// "Fixed (to be confirmed on the console): ..." keeps its bracket.
+					const size_t colon = item.find(':');
+					std::string note = (item[n] == ' ' && colon != std::string::npos) ? item.substr(n + 1, colon - n - 1) : std::string();
+					item = (colon != std::string::npos) ? std::string(StringUtil::StripWhitespace(std::string_view(item).substr(colon + 1))) : item.substr(n);
+					if (!note.empty())
+						item += " " + note;
+					break;
+				}
+			}
+			if (!item.empty())
+				item[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(item[0])));
+			entries.back().sections[section].push_back(std::move(item));
+			last = &entries.back().sections[section].back();
+			continue;
+		}
+		if (last)
+			*last += " " + std::string(bare);
+	}
+
+	// Newest first (the file has them so; sorted anyway).
+	std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+		return VersionParts(a.heading.substr(6)) > VersionParts(b.heading.substr(6));
+	});
+	static constexpr const char* names[] = {"Added", "Changed", "Fixed", "Also"};
+	for (const Entry& entry : entries)
+	{
+		if (!lines.empty())
+			lines.emplace_back();
+		lines.push_back("\x01" + entry.heading);
+		for (int s = 0; s < 4; s++)
+		{
+			if (entry.sections[s].empty())
+				continue;
+			lines.push_back(std::string("\x02") + names[s]);
+			for (const std::string& item : entry.sections[s])
+				lines.push_back("\xe2\x80\xa2 " + item);
+		}
+		(*versions)++;
+	}
+	return lines;
+}
+
 bp::Option Heading(std::string label)
 {
 	bp::Option o;
@@ -3664,25 +3798,20 @@ public:
 				"Checks GitHub for a newer version each time Crux2 starts. Nothing is downloaded without asking.", "PS5",
 				"UpdateAtStart", true, A));
 			{
-				bp::Option news = Action("What's new", "Shows what changed in newer versions.", [] {
-					const PS5Update::Status st = PS5Update::GetStatus();
-					if (st.notes.empty())
+				bp::Option news = Action("What's new", "What was added, changed and fixed in each version, newest first.", [] {
+					int versions = 0;
+					std::vector<std::string> lines = ChangesSince(std::string(), &versions);
+					if (lines.empty())
 					{
-						bp::message("What's new", st.state == PS5Update::State::UpToDate ? "This is the newest Crux2." :
-																						  "Look for a newer Crux2 first.");
+						bp::message("What's new", "The list of changes (CHANGELOG.md) is missing from the title folder. Install this "
+							"version again to put it back.");
 						return;
 					}
-					std::vector<std::string> lines;
-					size_t at = 0;
-					while (at <= st.notes.size())
-					{
-						const size_t end = st.notes.find('\n', at);
-						lines.push_back(st.notes.substr(at, end == std::string::npos ? std::string::npos : end - at));
-						if (end == std::string::npos)
-							break;
-						at = end + 1;
-					}
-					bp::showText("What's new", std::move(lines));
+					const PS5Update::Status st = PS5Update::GetStatus();
+					if (st.state == PS5Update::State::Available || st.state == PS5Update::State::Ready)
+						lines.insert(lines.begin(), {"\x02" + st.tag + " is out: Look for a newer Crux2 gets it.", ""});
+					bp::showNews(fmt::format("What's new: {} version{}, this is {}", versions, versions == 1 ? "" : "s",
+						ps5px_build_version()), std::move(lines));
 				}, A);
 				rows.push_back(std::move(news));
 			}
@@ -4403,6 +4532,37 @@ public:
 	bool m_phone_started = false;
 	bool m_phone_on = false;
 	bool m_resume_asked = false;
+	bool m_news_looked = false;
+
+	// After an update, the first time the library shows: what changed since the version that ran
+	// before ([PS5] SeenVersion). A first start has nothing new (ps5_host.cpp writes the version);
+	// settings from before v1.0.18, which did not keep it, are taken as v1.0.17's.
+	void ShowNewsAfterUpdate()
+	{
+		const std::string running = ps5px_build_version();
+		if (running.empty())
+			return;
+		std::string seen = Host::GetBaseStringSettingValue("PS5", "SeenVersion", "");
+		if (seen == running)
+			return;
+		{
+			const auto lock = Host::GetSettingsLock();
+			Host::Internal::GetBaseSettingsLayer()->SetStringValue("PS5", "SeenVersion", running.c_str());
+		}
+		Host::CommitBaseSettingChanges();
+		if (seen.empty())
+			seen = "v1.0.17";
+		if (VersionParts(seen) >= VersionParts(running))
+		{
+			ps5px_log("what's new: %s ran before this %s: nothing to show", seen.c_str(), running.c_str());
+			return;
+		}
+		int versions = 0;
+		std::vector<std::string> lines = ChangesSince(seen, &versions);
+		ps5px_log("what's new: updated from %s to %s, %d version(s) of changes shown", seen.c_str(), running.c_str(), versions);
+		if (!lines.empty())
+			bp::showNews(fmt::format("What's new since {}", seen), std::move(lines));
+	}
 	bool m_safe_asked = false;
 
 
@@ -4577,6 +4737,11 @@ public:
 					m_crash_notice = PS5Jobs::CrashNotice();
 					if (!m_crash_notice.empty())
 						bp::message("Crux2 stopped unexpectedly last time", m_crash_notice);
+				}
+				if (!m_news_looked)
+				{
+					m_news_looked = true;
+					ShowNewsAfterUpdate();
 				}
 				if (!m_resume_asked)
 				{

@@ -13,6 +13,9 @@
   (their AI or physics go wrong without it), unless the game's own settings say otherwise.
 - Changed: x86 emitter encoding fixes from PCSX2 Reliquary.
 - Changed: the content version in param.json is 01.018.000.
+- Fixed: What's new (Settings > System) only said whether a newer version was out. It now shows
+  what was added, changed and fixed in each version, newest first, and opens by itself once after
+  an update with the changes since the version that ran before.
 
 ## v1.0.17 (2026-10-31)
 
