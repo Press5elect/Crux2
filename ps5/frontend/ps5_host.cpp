@@ -2257,6 +2257,15 @@ int main(int argc, char* argv[])
 	{
 		// (L1 and R1 held while the title starts set 60 Hz for the next start: bp_pcsx2.cpp.)
 		const bool fast = (Host::GetBaseIntSettingValue("PS5", "OutputRefresh", 60) > 60);
+		// The driver's own switches for the same choice (PS5_Mesa patches 0015 and 0016, as PSFlyCast sets them):
+		// 59.94 Hz whatever param.json declares, or, at 120 Hz, variable refresh ([PS5] VariableRefresh, off).
+		if (!fast)
+			setenv("PS5_VIDEOOUT_59HZ", "1", 1);
+		else if (Host::GetBaseBoolSettingValue("PS5", "VariableRefresh", false))
+		{
+			setenv("PS5_VIDEOOUT_VRR", "1", 1);
+			ps5px_log("display: variable refresh is asked for (Settings > Interface > PlayStation 5)");
+		}
 		const std::string declared = fast ? Path::Combine(ps5px_title_dir(), "sce_sys/param.json") : std::string("/dev/null");
 		const bool there = !fast || FileSystem::FileExists(declared.c_str());
 		if (there && setenv("PS5_VIDEOOUT_PARAM_JSON", declared.c_str(), 1) == 0)

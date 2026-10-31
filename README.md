@@ -470,15 +470,24 @@ TCP or UDP.
 
 ## What v1.0.16 changed
 
+Added:
+- **Variable refresh (VRR)** (Settings > Interface > PlayStation 5, off; experimental): at 120 Hz on
+  a TV with VRR, each frame is shown as soon as it is ready.
+
 Changed:
-- **Built on PCSX2 v2.9.148** (was v2.9.142): game database fixes, empty per-game settings files
-  removed when saved, and PCSX2's own debugging fixes.
+- **Built on the newest Mesa main** (27.0.0-devel of 2026-10-31; was 2026-10-23): fixes to the
+  shader compiler and to how graphics pipelines are hashed for the shader cache.
+- **Built on PCSX2 v2.9.150** (was v2.9.142): game database fixes, empty per-game settings files
+  removed when saved, vibration shown in the inputs display.
 - **GS dumps record 1 second by default** (*GS dump length*: 1, 2 or 5 seconds), and PCSX2's
   dumps are compressed on worker threads, so recording slows the game less. The "dump saved"
   message says the file's size.
 - **The content version is 01.016.000.**
 
 Fixed:
+- **120 Hz fell back to 60 Hz on TVs with VRR**: before the first frame such a TV refreshes at
+  48 Hz, which was taken for a TV still at 60 Hz. The boot log now says which rate was chosen
+  and why.
 - **The README's list of what does not work** still named texture pack downloads, microphones and
   trigger pressure, which Crux2 has.
 

@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 1f67c53b6723fcd6a90041a5b296f0e34a6a3222.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 6d5e7daacefef49a0a921fb89730c50b70d9119e.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -7441,7 +7441,7 @@ index 1e8c6eb17..970cefe94 100644
  	// List of fences and the corresponding positions in the buffer
  	std::deque<std::pair<u64, u32>> m_tracked_fences;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
-index 4de995d72..40cddf59e 100644
+index 4de995d72..e710f4cb9 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
 @@ -5,6 +5,11 @@
@@ -7456,7 +7456,16 @@ index 4de995d72..40cddf59e 100644
  
  #include "common/Assertions.h"
  #include "common/CocoaTools.h"
-@@ -124,9 +129,158 @@ VkSurfaceKHR VKSwapChain::CreateVulkanSurface(VkInstance instance, VkPhysicalDev
+@@ -13,6 +18,8 @@
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
++#include <cstdlib>
++#include <cstring>
+ 
+ #if defined(VK_USE_PLATFORM_XLIB_KHR)
+ #include <X11/Xlib.h>
+@@ -124,9 +131,164 @@ VkSurfaceKHR VKSwapChain::CreateVulkanSurface(VkInstance instance, VkPhysicalDev
  	}
  #endif
  
@@ -7608,6 +7617,12 @@ index 4de995d72..40cddf59e 100644
 +			fast_modes += (modes[i].parameters.refreshRate > 61000u) ? 1 : 0;
 +		ps5px_log("display: %ux%u at %.2f Hz (the console offered %u mode(s), %u of them above 60 Hz)", wi->surface_width,
 +			wi->surface_height, wi->surface_refresh_rate, mode_count, fast_modes);
++		// Variable refresh ([PS5] VariableRefresh): the driver answers in the variable it was asked by, "on" when the
++		// output left its fixed rate and "refused" when it did not (PS5_Mesa patch 0016).
++		if (const char* vrr = std::getenv("PS5_VIDEOOUT_VRR"); vrr != nullptr)
++			ps5px_log("display: variable refresh %s", (std::strcmp(vrr, "on") == 0) ? "on" :
++													  (std::strcmp(vrr, "refused") == 0) ? "refused by the output" :
++																						   "asked for, not tried (no 120 Hz output)");
 +	}
 +	return surface;
 +}
@@ -7615,7 +7630,7 @@ index 4de995d72..40cddf59e 100644
  void VKSwapChain::DestroyVulkanSurface(VkInstance instance, WindowInfo* wi, VkSurfaceKHR surface)
  {
  	vkDestroySurfaceKHR(GSDeviceVK::GetInstance()->GetVulkanInstance(), surface, nullptr);
-@@ -325,9 +479,22 @@ bool VKSwapChain::CreateSwapChain()
+@@ -325,9 +487,22 @@ bool VKSwapChain::CreateSwapChain()
  
  	// Select number of images in swap chain, we prefer one buffer in the background to work on in triple-buffered mode.
  	// maxImageCount can be zero, in which case there isn't an upper limit on the number of buffers.
@@ -8254,7 +8269,7 @@ index 53abe0f3f..21a7919a7 100644
  	if (negative_key != GenericInputBinding::Unknown)
  	{
 diff --git a/pcsx2/ImGui/ImGuiOverlays.cpp b/pcsx2/ImGui/ImGuiOverlays.cpp
-index 36696ece1..cf32cdd85 100644
+index a9846132b..7938416f1 100644
 --- a/pcsx2/ImGui/ImGuiOverlays.cpp
 +++ b/pcsx2/ImGui/ImGuiOverlays.cpp
 @@ -1,6 +1,10 @@
@@ -8326,10 +8341,10 @@ index 36696ece1..cf32cdd85 100644
  			if (!s_speed_line.empty())
  			{
 diff --git a/pcsx2/Input/InputManager.cpp b/pcsx2/Input/InputManager.cpp
-index 813b6da7f..fdc4cf626 100644
+index 14bef9944..a4112ec32 100644
 --- a/pcsx2/Input/InputManager.cpp
 +++ b/pcsx2/Input/InputManager.cpp
-@@ -252,7 +252,7 @@ std::optional<InputBindingKey> InputManager::ParseInputBindingKey(const std::str
+@@ -255,7 +255,7 @@ std::optional<InputBindingKey> InputManager::ParseInputBindingKey(const std::str
  	{
  		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  		{
@@ -8338,7 +8353,7 @@ index 813b6da7f..fdc4cf626 100644
  			{
  				std::optional<InputBindingKey> key = s_input_sources[i]->ParseKeyString(source, sub_binding);
  				if (key.has_value())
-@@ -272,7 +272,7 @@ bool InputManager::ParseBindingAndGetSource(const std::string_view binding, Inpu
+@@ -275,7 +275,7 @@ bool InputManager::ParseBindingAndGetSource(const std::string_view binding, Inpu
  
  	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  	{
@@ -8347,7 +8362,7 @@ index 813b6da7f..fdc4cf626 100644
  		{
  			std::optional<InputBindingKey> parsed_key = s_input_sources[i]->ParseKeyString(source_string, sub_binding);
  			if (parsed_key.has_value())
-@@ -1691,7 +1691,7 @@ bool InputManager::ReloadDevices()
+@@ -1708,7 +1708,7 @@ bool InputManager::ReloadDevices()
  
  	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  	{
@@ -8356,7 +8371,7 @@ index 813b6da7f..fdc4cf626 100644
  			changed |= s_input_sources[i]->ReloadDevices();
  	}
  
-@@ -1714,7 +1714,7 @@ void InputManager::PollSources()
+@@ -1731,7 +1731,7 @@ void InputManager::PollSources()
  {
  	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  	{
@@ -8365,7 +8380,7 @@ index 813b6da7f..fdc4cf626 100644
  			s_input_sources[i]->PollEvents();
  	}
  
-@@ -1734,7 +1734,7 @@ std::vector<std::pair<std::string, std::string>> InputManager::EnumerateDevices(
+@@ -1751,7 +1751,7 @@ std::vector<std::pair<std::string, std::string>> InputManager::EnumerateDevices(
  
  	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  	{
@@ -8374,7 +8389,7 @@ index 813b6da7f..fdc4cf626 100644
  		{
  			std::vector<std::pair<std::string, std::string>> devs(s_input_sources[i]->EnumerateDevices());
  			if (ret.empty())
-@@ -1753,7 +1753,7 @@ std::vector<InputBindingKey> InputManager::EnumerateMotors()
+@@ -1770,7 +1770,7 @@ std::vector<InputBindingKey> InputManager::EnumerateMotors()
  
  	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  	{
@@ -8383,7 +8398,7 @@ index 813b6da7f..fdc4cf626 100644
  		{
  			std::vector<InputBindingKey> devs(s_input_sources[i]->EnumerateMotors());
  			if (ret.empty())
-@@ -1813,7 +1813,7 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
+@@ -1830,7 +1830,7 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
  	{
  		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
  		{
@@ -8392,7 +8407,7 @@ index 813b6da7f..fdc4cf626 100644
  				break;
  		}
  	}
-@@ -1823,6 +1823,13 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
+@@ -1840,6 +1840,13 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
  
  bool InputManager::IsInputSourceEnabled(SettingsInterface& si, InputSourceType type)
  {
@@ -8406,7 +8421,7 @@ index 813b6da7f..fdc4cf626 100644
  	return si.GetBoolValue("InputSources", InputManager::InputSourceToString(type), InputManager::GetInputSourceDefaultEnabled(type));
  }
  
-@@ -1861,7 +1868,14 @@ void InputManager::UpdateInputSourceState(SettingsInterface& si, std::unique_loc
+@@ -1878,7 +1885,14 @@ void InputManager::UpdateInputSourceState(SettingsInterface& si, std::unique_loc
  	}
  }
  

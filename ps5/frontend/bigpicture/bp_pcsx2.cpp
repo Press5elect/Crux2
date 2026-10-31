@@ -3257,6 +3257,14 @@ public:
 			rate.defInt = 60;
 			rate.flags = A | bp::Option::Restart;
 			rows.push_back(std::move(rate));
+			{
+				bp::Option vrr = Toggle("Variable refresh (VRR)",
+					"With 120 Hz on a TV that has VRR, each frame is shown as soon as it is ready instead of at the next fixed "
+					"refresh: smoother when a game drops below full speed. Takes effect the next time Crux2 starts. Experimental.",
+					"PS5", "VariableRefresh", false, A | bp::Option::Restart);
+				vrr.enabled = [](int) { return Host::GetBaseIntSettingValue("PS5", "OutputRefresh", 60) > 60; };
+				rows.push_back(std::move(vrr));
+			}
 		}
 		else if (w == "output")
 		{

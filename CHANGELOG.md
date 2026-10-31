@@ -2,10 +2,12 @@
 
 ## v1.0.16 (2026-10-31)
 
-- Changed: built on PCSX2 v2.9.148 (was v2.9.142).
+- Added: Variable refresh (VRR) at 120 Hz (a setting, off; experimental).
+- Changed: built on the newest Mesa main (27.0.0-devel, 2026-10-31) and PCSX2 v2.9.150.
 - Changed: GS dumps record 1 second by default (a setting: 1, 2 or 5), are compressed on worker
   threads, and the saved message gives their size.
 - Changed: the content version in param.json is 01.016.000.
+- Fixed: 120 Hz fell back to 60 Hz on TVs with VRR.
 - Fixed: the README's list of what does not work was out of date.
 
 ## v1.0.15 (2026-10-25)
