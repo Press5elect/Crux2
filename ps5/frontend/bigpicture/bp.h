@@ -187,6 +187,9 @@ struct Option
 	int bindType = 0;
 	/// Shown and changeable only while this says so (an option that depends on another).
 	std::function<bool(int layer)> enabled;
+	/// A switch on a game's own page: its value when the game's settings name none, if this gives one
+	/// (Crux2's defaults for one game, such as accurate floating point), instead of the shared value.
+	std::function<std::optional<bool>()> gameDefault;
 };
 
 /// A page of the settings made by the Backend (the controllers, the memory cards, the patches a
@@ -327,6 +330,8 @@ public:
 	// ---- settings
 	/// Opens a game's own settings as the Own layer. False if they cannot be (no serial and no CRC).
 	virtual bool openGame(const GameInfo& game) = 0;
+	/// Whether Crux2 turns accurate floating point (FPU and VU0) on for this game by default.
+	virtual bool softFloatGame(const std::string& serial) { return false; }
 	virtual void closeGame() = 0;
 	virtual std::optional<bool> getBool(int layer, const char* section, const char* key) = 0;
 	virtual std::optional<int> getInt(int layer, const char* section, const char* key) = 0;

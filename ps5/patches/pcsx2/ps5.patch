@@ -8689,7 +8689,7 @@ index ce43ea689..aa8eddffb 100644
  	static void DestroyVulkanSurface(VkInstance instance, WindowInfo* wi, VkSurfaceKHR surface);
  
 diff --git a/pcsx2/GameDatabase.cpp b/pcsx2/GameDatabase.cpp
-index c49e2989b..43ea23df6 100644
+index c49e2989b..9659a329c 100644
 --- a/pcsx2/GameDatabase.cpp
 +++ b/pcsx2/GameDatabase.cpp
 @@ -12,6 +12,7 @@
@@ -8709,7 +8709,7 @@ index c49e2989b..43ea23df6 100644
 +// accurate floating point (PCSX2 Reliquary's soft-float recompilers) switched on for the EE's
 +// FPU and VU0 unless the game's own settings name it. Driv3r: the AI cars crash or get stuck
 +// (PCSX2 issue 11714, Crux2 issue 3). Stuntman: the same class of problem (PCSX2 issue 2990).
-+static bool Crux2WantsSoftFloat(const std::string& serial)
++bool Crux2WantsSoftFloat(const std::string& serial)
 +{
 +	static constexpr const char* serials[] = {
 +		"SLUS-20587", "SLES-50876", "SLES-52153", "SLPM-65741", "SLPM-61092", // Driv3r

@@ -107,6 +107,11 @@ bool boolNow(const Option& o, const char* section, const char* name, bool def)
 	{
 		if (const std::optional<bool> own = be->getBool(Own, section, name))
 			return *own;
+		if (o.gameDefault)
+		{
+			if (const std::optional<bool> crux2 = o.gameDefault())
+				return *crux2;
+		}
 	}
 	return be->getBool(Shared, section, name).value_or(def);
 }
@@ -654,6 +659,11 @@ bool settingsFocus(const char* page, const char* row)
 		return false;
 	}
 	return false;
+}
+
+const GameInfo& settingsGame()
+{
+	return st.game;
 }
 
 void openSettings(const GameInfo* game, Screen back, const char* page)

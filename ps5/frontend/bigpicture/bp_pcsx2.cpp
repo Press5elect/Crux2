@@ -108,6 +108,7 @@
 
 // The host (ps5_host.cpp).
 extern "C" void ps5px_download_covers_now(void);
+bool Crux2WantsSoftFloat(const std::string& serial); // GameDatabase.cpp (ps5.patch)
 extern "C" void ps5px_download_pictures_now(void);
 extern "C" int ps5px_arm_profiled_start(int threaded_recording);
 // The interface's faces, as the emulator's font atlas has them (ImGui/ImGuiManager.cpp): 0 the
@@ -1995,6 +1996,8 @@ public:
 	}
 
 	// ---- the card manager's grouping: a game's own card is named by its serial (PS5Extras::CardNameFor)
+	bool softFloatGame(const std::string& serial) override { return Crux2WantsSoftFloat(serial); }
+
 	std::string cardSerial(const std::string& card) override
 	{
 		const std::string title(Path::GetFileTitle(card));

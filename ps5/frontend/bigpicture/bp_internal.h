@@ -425,6 +425,8 @@ void startPs2Menu();
 /// return to.
 /// `page`: the page to open on, by its name, with the focus in its rows ("Cheats"); none: the first.
 void openSettings(const GameInfo* game, Screen back, const char* page = nullptr);
+/// The game whose own settings are open (empty when the settings for all games are).
+const GameInfo& settingsGame();
 /// The open settings' page of that name, with the focus on the row of that label (none: on the
 /// page). False when there is no such page or row. For the PC preview's walk through the screens.
 bool settingsFocus(const char* page, const char* row = nullptr);

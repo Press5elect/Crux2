@@ -2,8 +2,8 @@
 
 ## v1.0.18 (2026-10-31)
 
-- Added: Accurate floating point for the EE's FPU, VU0 and VU1 (Settings > Advanced, three
-  switches, off; per game), from PCSX2 Reliquary: the PS2's exact floating-point results, done in
+- Added: Accurate floating point for the EE's FPU, VU0 and VU1 (Settings > Advanced for all games,
+  a game's own Emulation page for one; three switches, off), from PCSX2 Reliquary: the PS2's exact floating-point results, done in
   the recompilers.
 - Changed: accurate floating point is on for the FPU and VU0 in the two games known to need it
   (their AI or physics go wrong without it), unless the game's own settings say otherwise.

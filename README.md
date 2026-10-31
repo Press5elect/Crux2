@@ -473,8 +473,8 @@ TCP or UDP.
 ## What v1.0.18 changed
 
 Added:
-- **Accurate floating point** (Settings > Advanced, expert level: *Accurate floating point
-  (FPU)*, *(VU0)* and *(VU1)*, off; each can be set per game). The PS2's floating-point units do
+- **Accurate floating point** (Settings > Advanced, expert level, for all games; and a game's own
+  Settings > Emulation, for that game: *Accurate floating point (FPU)*, *(VU0)* and *(VU1)*, off). The PS2's floating-point units do
   not round like a PC's or the PS5's, and a few games' AI or physics depend on the PS2's exact
   results. These switches do the PS2's arithmetic exactly, inside the recompilers (from PCSX2
   Reliquary). FPU and VU0 cost some speed; VU1 costs a lot and is only for games that need it.
