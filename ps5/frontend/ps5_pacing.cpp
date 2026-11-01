@@ -10,6 +10,7 @@
 
 #include "common/Timer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <mutex>
@@ -68,7 +69,17 @@ namespace PS5Pacing
 		// while it is behind (a frame waiting for its vblank does not hold the next one back).
 		// Behind: four of the five images may wait (VKSwapChain.cpp), so the GS thread does not wait
 		// in the acquire for frames the graphics chip or the screen has not taken yet.
-		const int depth = s_behind.load(std::memory_order_relaxed) ? 4 : 2;
+		// The depth counts pictures, not the game's frames: where each frame is given two (frame
+		// generation's made one and the game's, or black frame insertion's black one), two images
+		// are one frame, and with them the GS thread waited for each frame to be on the screen
+		// before it began the next. What it records and what the graphics chip draws then came one
+		// after the other instead of side by side, and a frame that took more than one refresh of
+		// the two together missed its turn: a game at 60 a second with frame generation at 120 Hz
+		// went at 67% or 50% (40 or 30 frames a second) while the EE, the GS thread and the graphics
+		// chip were each busy under half the time (a console log, 2026-11-01). So the frames that
+		// may wait are the same with two pictures each as with one, up to the four images there are.
+		const unsigned per_frame = std::clamp<unsigned>(plan.presents, 1, 2);
+		const int depth = std::min(4, (s_behind.load(std::memory_order_relaxed) ? 4 : 2) * static_cast<int>(per_frame));
 		if (depth != s_queue_depth)
 		{
 			if (wsi_videoout_set_queue_depth(depth) != 0)
