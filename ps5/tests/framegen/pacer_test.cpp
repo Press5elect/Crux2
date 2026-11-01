@@ -152,7 +152,16 @@ int main()
 			CHECK(shown[i].period == 2);
 	}
 
-	// A game that really changes its rate is followed after two pictures at the new one.
+	// A game that hands its pictures over unevenly at 30 a second (one vsync, then three; seen in a
+	// console log of a game below full speed) is taken at 2, so that at 120 Hz three are made.
+	for (const uint32_t presents : {1u, 2u})
+	{
+		const std::vector<Shown> shown = Run(Repeat("NN--", 12), presents);
+		for (size_t i = 8 * presents; i < shown.size(); i++)
+			CHECK(shown[i].period == 2);
+	}
+
+	// A game that really changes its rate is followed at the new one.
 	{
 		const std::vector<Shown> shown = Run(Repeat("N-", 8) + Repeat("N--", 8), 1);
 		CHECK(shown.back().period == 3);

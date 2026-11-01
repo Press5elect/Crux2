@@ -514,8 +514,12 @@ Fixed:
   It took the game's rate from the last frame alone, so a single late or early frame (which games
   have when they load or drop a frame) changed how every following frame was made: halves, then
   none, then thirds, several times a second. It now settles on the game's rate from the last eight
-  frames and changes it only when the game really does (the same rate twice in a row, or most of
-  the eight).
+  frames, the average stay rounded, and changes it only when that average moves three quarters of
+  a frame away from it.
+- **Frame generation at 120 Hz made one picture between the game's instead of three** when a game
+  below full speed handed its frames over unevenly (one vsync, then three). It took that as a game
+  at 60 and doubled it, so the screen showed 60 a second. The average of the last eight frames now
+  takes it at its real rate, 30, and three pictures are made between each of its own.
 - **What's new** (Settings > System) only said whether a newer Crux2 was out. It now shows what was
   added, changed and fixed in each version, newest first, from the `CHANGELOG.md` the title folder
   now holds. After an update it opens by itself once, with the changes since the version that ran

@@ -48,10 +48,12 @@ struct Pacer
 	/// Up to v1.0.17 the period was the stay of the picture before alone, so a game at 30 a second
 	/// that once showed a picture for one vsync or for three (which they do, loading or dropping a
 	/// frame) had the next picture made in halves, then nothing, then in thirds: what moved on the
-	/// screen sped up and slowed down every few seconds (seen in a console log as the period
-	/// changing several times a second). The rate now changes only when the same stay comes twice
-	/// in a row, or when it is most of the last eight: one picture early or late is shown as it
-	/// comes and does not change how the ones after it are made.
+	/// screen sped up and slowed down every few seconds. The rate is now the average stay of the last
+	/// eight pictures, rounded, and it changes only when that average is well away from the rate there
+	/// is (by three quarters of a vsync): one picture early or late is shown as it comes and does not
+	/// change how the ones after it are made, and a game that hands pictures over unevenly (one, then
+	/// three vsyncs, a console log of a game below full speed showed it) is still taken at its real
+	/// rate, two, not at one (which made one picture where three were wanted at 120 Hz).
 	void Vsync(bool fresh)
 	{
 		if (fresh)
@@ -79,24 +81,20 @@ struct Pacer
 		gap = (gap < 1000) ? gap + 1 : 1000;
 	}
 
-	/// The rate the last stays settle on: the newest when the one before it was the same, else the
-	/// one most of them had, else the rate there was.
+	/// The rate the last stays settle on: their average, rounded, when it is three quarters of a vsync
+	/// or more from the rate there was (or the first two: their average at once), else that rate.
 	uint32_t Settled() const
 	{
-		const uint32_t newest = stays[(next + HISTORY - 1) % HISTORY];
-		if (kept >= 2 && stays[(next + HISTORY - 2) % HISTORY] == newest)
-			return newest;
-		if (kept == 1)
-			return newest;
-		uint32_t count[LONGEST + 1] = {};
+		uint32_t sum = 0;
 		for (uint32_t i = 0; i < kept; i++)
-			count[stays[i]]++;
-		for (uint32_t value = 1; value <= LONGEST; value++)
-		{
-			if (count[value] * 2 > kept)
-				return value;
-		}
-		return period;
+			sum += stays[i];
+		const float mean = static_cast<float>(sum) / static_cast<float>(kept);
+		uint32_t rounded = static_cast<uint32_t>(mean + 0.5f);
+		rounded = (rounded < 1) ? 1 : (rounded > LONGEST ? LONGEST : rounded);
+		if (kept <= 2)
+			return rounded;
+		const float off = mean - static_cast<float>(period);
+		return (off >= 0.75f || off <= -0.75f) ? rounded : period;
 	}
 
 	/// Whether anything is made at all at this rate: `presents` pictures are shown for a vsync.

@@ -16,6 +16,8 @@
 - Fixed: frame generation sped up and slowed down every few seconds in games at 30 frames a
   second: one late or early frame changed how every following frame was made. It now keeps the
   game's rate until the game really changes it.
+- Fixed: frame generation at 120 Hz made one picture between the game's instead of three when a
+  game handed its frames over unevenly; it now takes the game's average rate.
 - Added: MihawkGen as a third frame generation method (Settings > Graphics, Frame generation
   method): Mihawk's small trained network, from PSSwanStation and PSFlyCast.
 - Added: Show the movement (Settings > Graphics, advanced): AMD FSR 3 optical flow's made frames
