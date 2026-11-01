@@ -2246,7 +2246,7 @@ index 695f4c344..fe72c1585 100644
  	if (m_device == -1)
  		return false;
 diff --git a/pcsx2/CMakeLists.txt b/pcsx2/CMakeLists.txt
-index 4c8ce815d..fa2b94249 100644
+index 4c8ce815d..8233eb4b1 100644
 --- a/pcsx2/CMakeLists.txt
 +++ b/pcsx2/CMakeLists.txt
 @@ -103,6 +103,7 @@ set(pcsx2Sources
@@ -2298,7 +2298,7 @@ index 4c8ce815d..fa2b94249 100644
  # common Sources
  target_sources(PCSX2 PRIVATE
  	${pcsx2CDVDSources}
-@@ -1482,3 +1500,73 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
+@@ -1482,3 +1500,86 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
  source_group(Resources/PAD FILES ${pcsx2PADResources})
  source_group(Resources/Recording FILES ${pcsx2RecordingVirtualPadResources})
  source_group(Resources REGULAR_EXPRESSION ${CMAKE_CURRENT_BINARY_DIR}/*)
@@ -2349,6 +2349,19 @@ index 4c8ce815d..fa2b94249 100644
 +	set_source_files_properties("${PS5PX_ROOT}/frontend/ps5_compute_fx.cpp" GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 +		PROPERTIES COMPILE_DEFINITIONS PS5_COMPUTE_FX_PCSX2)
 +
++	# MihawkGen (Mihawk, GPL-3.0-or-later), the third frame generation method, as it is: its Vulkan
++	# calls through PCSX2's loader. Its trained network is assembled into the title.
++	set(_mihawkgen "${PS5PX_ROOT}/frontend/third_party/mihawkgen")
++	set(_mihawkgen_sources "${_mihawkgen}/src/fg_common.cpp" "${_mihawkgen}/src/fg_vulkan.cpp" "${_mihawkgen}/src/fg_neural.cpp"
++		"${_mihawkgen}/src/fg_splat.cpp")
++	target_sources(PCSX2 PRIVATE ${_mihawkgen_sources} "${PS5PX_ROOT}/frontend/ps5_mihawkgen_model.cpp")
++	target_include_directories(PCSX2 PRIVATE "${_mihawkgen}/include" "${_mihawkgen}/src")
++	set_source_files_properties(${_mihawkgen_sources} PROPERTIES COMPILE_OPTIONS
++		"-w;-include;${CMAKE_CURRENT_SOURCE_DIR}/GS/Renderers/Vulkan/VKLoader.h")
++	set_source_files_properties("${PS5PX_ROOT}/frontend/ps5_mihawkgen_model.cpp" PROPERTIES
++		COMPILE_DEFINITIONS "MIHAWKGEN_MODEL_PATH=\"${_mihawkgen}/model/network.fgw\""
++		OBJECT_DEPENDS "${_mihawkgen}/model/network.fgw")
++
 +	# shaderc is the fork with the debug-information option of PCSX2's own patch.
 +	target_compile_definitions(PCSX2_FLAGS INTERFACE SHADERC_PCSX2_CUSTOM)
 +
@@ -2373,7 +2386,7 @@ index 4c8ce815d..fa2b94249 100644
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index 21adcf1f1..9c830e466 100644
+index 21adcf1f1..b07161e27 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -9,9 +9,12 @@
@@ -2455,7 +2468,7 @@ index 21adcf1f1..9c830e466 100644
  		GSHardwareDownloadMode HWDownloadMode = GSHardwareDownloadMode::Enabled;
  		GSCASMode CASMode = DEFAULT_CAS_MODE;
 +		GSFrameGenMode FrameGen = GSFrameGenMode::Disabled; // PS5
-+		u8 FrameGenMethod = 0; // PS5: 0 the title's own motion search, 1 AMD FSR 3's optical flow
++		u8 FrameGenMethod = 0; // PS5: 0 the title's own motion search, 1 AMD FSR 3's optical flow, 2 MihawkGen
 +		u8 FrameGenQuality = 1; // PS5: optical flow: 0 performance, 1 balanced, 2 quality
 +		bool BlackFrameInsertion = false; // PS5: at twice the game's rate, every second refresh black
 +		bool FrameGenSkipVideos = true; // PS5: no made pictures while a game plays a video
@@ -3935,7 +3948,7 @@ index 70f171df7..85b0312f0 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65b3..eb4be0679 100644
+index b3c8d65b3..f7188a86d 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
@@ -3966,7 +3979,7 @@ index b3c8d65b3..eb4be0679 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1445,403 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1445,421 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4243,6 +4256,24 @@ index b3c8d65b3..eb4be0679 100644
 +	return FrameGenMake(time);
 +}
 +
++// PS5: MihawkGen's picture between the last two (the third method); the title's own when it cannot.
++GSTexture* GSDevice::FrameGenMakeMihawkGen(float time)
++{
++	if (m_fg_count < 2)
++		return FrameGenNewest();
++	GSTexture* const older = m_fg_frames[m_fg_newest ^ 1];
++	GSTexture* const newer = m_fg_frames[m_fg_newest];
++	if (!m_ofg_made || m_ofg_made->GetWidth() != newer->GetWidth() || m_ofg_made->GetHeight() != newer->GetHeight())
++	{
++		delete m_ofg_made;
++		m_ofg_made = CreateSurface(GSTexture::Usage::RenderTarget | GSTexture::Usage::ShaderWrite, newer->GetWidth(), newer->GetHeight(), 1,
++			GSTexture::Format::Color);
++	}
++	if (m_ofg_made && DoMihawkGenMake(older, newer, m_ofg_made, time))
++		return m_ofg_made;
++	return FrameGenMake(time);
++}
++
 +// PS5: NVIDIA Image Scaling, where FSR 1 would be: the picture enlarged to its place on the
 +// screen and sharpened, from 1x to 2x of its size. Further than 2x it is left to the bilinear
 +// filter of the screen's pass (and said once).
@@ -4371,7 +4402,7 @@ index b3c8d65b3..eb4be0679 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8eac3..a248d2d5b 100644
+index 421f8eac3..b0a9f113e 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -4417,7 +4448,7 @@ index 421f8eac3..a248d2d5b 100644
  	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
  	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
  	GSTexture* m_ds_as_rt_orig = nullptr; ///< Where the depth as color came from
-@@ -1529,6 +1558,28 @@ protected:
+@@ -1529,6 +1558,30 @@ protected:
  	/// Applies Gaussian blur and writes to the destination texture.
  	void DoGaussianBlur(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, GSTexture* tempTex);
  
@@ -4435,6 +4466,8 @@ index 421f8eac3..a248d2d5b 100644
 +	/// PS5: AMD FSR 3's optical flow: `out` (a picture compute shaders may write, of the size of
 +	/// both) made at `time` between `older` and `newer`. quality 0..2. False where it cannot be.
 +	virtual bool DoOpticalFlowMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time, u32 quality) { return false; }
++	/// PS5: MihawkGen (Mihawk's trained network) writes the picture at `time` between `older` and `newer` into `out`.
++	virtual bool DoMihawkGenMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time) { return false; }
 +	/// PS5: NVIDIA Image Scaling from the whole of sTex into the whole of dTex (1x to 2x).
 +	virtual bool DoNIS(GSTexture* sTex, GSTexture* dTex, float sharpness) { return false; }
 +	/// PS5: the look (a libretro preset, ps5_slang.h) loaded from `path` ("" drops it); false when
@@ -4446,7 +4479,7 @@ index 421f8eac3..a248d2d5b 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1738,6 +1789,78 @@ public:
+@@ -1738,6 +1791,79 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -4512,6 +4545,7 @@ index 421f8eac3..a248d2d5b 100644
 +	/// PS5: the same, made by AMD FSR 3's optical flow (FrameGenMethod 1); the title's own passes
 +	/// where that cannot be done.
 +	GSTexture* FrameGenMakeOpticalFlow(float time);
++	GSTexture* FrameGenMakeMihawkGen(float time);
 +	/// PS5: forgets the pictures kept and gives their memory back.
 +	void FrameGenReset();
 +	/// PS5: forgets the pictures kept, and keeps the memory for the next ones (a black frame
@@ -4526,7 +4560,7 @@ index 421f8eac3..a248d2d5b 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc49..9611aed66 100644
+index 35ab6fc49..db02fb25b 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -4804,7 +4838,7 @@ index 35ab6fc49..9611aed66 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -691,6 +891,102 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -691,6 +891,104 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			}
  		}
  
@@ -4843,7 +4877,9 @@ index 35ab6fc49..9611aed66 100644
 +			{
 +				const float time = m_fg_pacer.Time(shown, fg_presents);
 +				made = (time < 1.0f);
-+				fg_picture = made ? (GSConfig.FrameGenMethod == 1 ? g_gs_device->FrameGenMakeOpticalFlow(time) : g_gs_device->FrameGenMake(time)) :
++				fg_picture = made ? (GSConfig.FrameGenMethod == 1 ? g_gs_device->FrameGenMakeOpticalFlow(time) :
++										   GSConfig.FrameGenMethod == 2 ? g_gs_device->FrameGenMakeMihawkGen(time) :
++																		  g_gs_device->FrameGenMake(time)) :
 +									g_gs_device->FrameGenNewest();
 +				m_fg_made += made ? 1 : 0;
 +			}
@@ -4907,7 +4943,7 @@ index 35ab6fc49..9611aed66 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -709,8 +1005,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +1007,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -4921,7 +4957,7 @@ index 35ab6fc49..9611aed66 100644
  	}
  
  	// snapshot
-@@ -774,6 +1075,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -774,6 +1077,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  					(m_dump_frames == 1) ? TRANSLATE_SV("GS", "single frame") : TRANSLATE_SV("GS", "multi-frame"), compression_str,
  					Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -4937,7 +4973,7 @@ index 35ab6fc49..9611aed66 100644
  		}
  
  		const bool internal_resolution = (GSConfig.ScreenshotSize >= GSScreenshotSize::InternalResolution);
-@@ -804,7 +1114,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -804,7 +1116,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			Host::AddKeyedOSDMessage("GSDump",
  				fmt::format(TRANSLATE_FS("GS", "Saved GS dump to '{}'."), Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -4956,7 +4992,7 @@ index 35ab6fc49..9611aed66 100644
  		}
  		else if (!last)
  		{
-@@ -960,6 +1281,15 @@ std::string GSGetBaseVideoFilename()
+@@ -960,6 +1283,15 @@ std::string GSGetBaseVideoFilename()
  
  void GSRenderer::StopGSDump()
  {
@@ -4972,7 +5008,7 @@ index 35ab6fc49..9611aed66 100644
  	m_snapshot = {};
  	m_dump_frames = 0;
  }
-@@ -1000,7 +1330,11 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1332,11 @@ void GSRenderer::PresentCurrentFrame()
  			GetVideoMode() == GSVideoMode::SDTV_480P);
  		s_last_draw_rect = draw_rect;
  		const bool refresh_blur = !m_background_blurred;
@@ -4984,7 +5020,7 @@ index 35ab6fc49..9611aed66 100644
  		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
  	}
  
-@@ -1011,9 +1345,20 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1011,9 +1347,20 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
@@ -5618,7 +5654,7 @@ index 77a28dfb6..0b3229c61 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 567d2ca54..bd50777a8 100644
+index 567d2ca54..eb9bfb313 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -6576,7 +6612,7 @@ index 567d2ca54..bd50777a8 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-@@ -6752,9 +7303,207 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6752,9 +7303,208 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -6627,6 +6663,7 @@ index 567d2ca54..bd50777a8 100644
 +	m_ps5_skip_barriers = skip;
 +	m_ps5_rt_no_compression = no_compression;
 +	m_ps5_rov_keep_pass = rov_keep;
++	m_ps5_fg_debug = Host::GetBoolSettingValue("EmuCore/GS", "PS5FrameGenDebug", false);
 +
 +	const char* when = at_create ? "" : " (this game)";
 +	ps5px_log("graphics%s: render targets a draw has read %s", when, m_ps5_hold_feedback ?
@@ -6784,7 +6821,7 @@ index 567d2ca54..bd50777a8 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6765,7 +7514,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6765,7 +7515,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -6793,7 +6830,7 @@ index 567d2ca54..bd50777a8 100644
  
  	if (full_barrier)
  	{
-@@ -6775,11 +7524,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6775,11 +7525,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -6814,7 +6851,7 @@ index 567d2ca54..bd50777a8 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6791,8 +7549,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6791,8 +7550,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -6828,7 +6865,7 @@ index 567d2ca54..bd50777a8 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 423023821..1a357f4d8 100644
+index 423023821..3fc3c6734 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,8 @@ public:
@@ -6895,7 +6932,7 @@ index 423023821..1a357f4d8 100644
  	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
  
  	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
-@@ -492,6 +532,16 @@ private:
+@@ -492,6 +532,17 @@ private:
  
  	bool DoCAS(
  		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
@@ -6903,6 +6940,7 @@ index 423023821..1a357f4d8 100644
 +	bool DoFrameGenPass(u32 pass, GSTexture* dTex, GSTexture* const* sTex, u32 count, const GSVector4& params) final;
 +#ifdef __PROSPERO__
 +	bool DoOpticalFlowMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time, u32 quality) final;
++	bool DoMihawkGenMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time) final;
 +	bool DoNIS(GSTexture* sTex, GSTexture* dTex, float sharpness) final;
 +	bool LoadLook(const std::string& path, std::string* error) final;
 +	bool DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame) final;
@@ -6912,7 +6950,7 @@ index 423023821..1a357f4d8 100644
  
  	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
  	void ClearSamplerCache() final;
-@@ -499,6 +549,9 @@ private:
+@@ -499,6 +550,9 @@ private:
  	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
  	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
  	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
@@ -6922,7 +6960,7 @@ index 423023821..1a357f4d8 100644
  	VkPipeline GetTFXPipeline(const PipelineSelector& p);
  
  	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
-@@ -517,6 +570,8 @@ private:
+@@ -517,6 +571,8 @@ private:
  	bool CompileMergePipelines();
  	bool CompilePostProcessingPipelines();
  	bool CompileCASPipelines();
@@ -6931,7 +6969,7 @@ index 423023821..1a357f4d8 100644
  
  	bool CompileImGuiPipeline();
  	void RenderImGui();
-@@ -531,6 +586,9 @@ protected:
+@@ -531,6 +587,9 @@ protected:
  	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
  		PresentShader shader, Filter filter) override;
  public:
@@ -6941,7 +6979,7 @@ index 423023821..1a357f4d8 100644
  	GSDeviceVK();
  	~GSDeviceVK() override;
  
-@@ -572,6 +630,28 @@ public:
+@@ -572,6 +631,28 @@ public:
  	bool IsPresenting() const;
  
  	bool SetGPUTimingEnabled(bool enabled) override;
@@ -6970,7 +7008,7 @@ index 423023821..1a357f4d8 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -648,6 +728,51 @@ public:
+@@ -648,6 +729,53 @@ public:
  	void FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_region);
  	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  		bool one_barrier, bool full_barrier);
@@ -7016,13 +7054,15 @@ index 423023821..1a357f4d8 100644
 +	/// [EmuCore/GS] PS5ROVKeepPass (on by default): an ordered view draw drops the feedback loop flags of the
 +	/// attachment it does not bind, so a run of them stays in one render pass (RenderHW; counted in ROVPassesKept).
 +	bool m_ps5_rov_keep_pass = true;
++	bool m_ps5_fg_debug = false; // [EmuCore/GS] PS5FrameGenDebug: AMD FSR 3's optical flow shows what it found
++
 +	/// Reads the rows above (and logs them): when the device is made (at_create) and at each game start.
 +	void PS5ReadSettings(bool at_create);
 +#endif
  
  	//////////////////////////////////////////////////////////////////////////
  	// Vulkan State
-@@ -774,6 +899,9 @@ private:
+@@ -774,6 +902,9 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -7034,10 +7074,10 @@ index 423023821..1a357f4d8 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 000000000..1bc29cfef
+index 000000000..6680d2676
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1068 @@
+@@ -0,0 +1,1161 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -7060,6 +7100,13 @@ index 000000000..1bc29cfef
 +#include "BuildVersion.h"
 +
 +#include "ps5_compute_fx.h"
++#include "framegen.h" // MihawkGen (ps5/frontend/third_party/mihawkgen, GPL-3.0-or-later)
++
++namespace PS5MihawkGen
++{
++const void* Model(); // ps5/frontend/ps5_mihawkgen_model.cpp
++size_t ModelSize();
++} // namespace PS5MihawkGen
 +#include "ps5_slang.h"
 +#include "ps5_slang_runner.h"
 +
@@ -7086,6 +7133,11 @@ index 000000000..1bc29cfef
 +	u32 flow_quality = 0xffffffffu;
 +	PS5ComputeFX::NIS nis;
 +	bool nis_failed = false;
++
++	// MihawkGen (third_party/mihawkgen): its context, for one picture size.
++	fg_context* mihawk = nullptr;
++	bool mihawk_failed = false;
++	u32 mihawk_w = 0, mihawk_h = 0;
 +
 +	PS5SlangRunner::Device chain_device;
 +	PS5Slang::Preset preset;
@@ -7128,6 +7180,8 @@ index 000000000..1bc29cfef
 +	m_ps5_tools->chain.reset();
 +	m_ps5_tools->flow.Destroy();
 +	m_ps5_tools->nis.Destroy();
++	if (m_ps5_tools->mihawk)
++		fg_context_destroy(m_ps5_tools->mihawk);
 +	delete m_ps5_tools;
 +	m_ps5_tools = nullptr;
 +}
@@ -7332,6 +7386,17 @@ index 000000000..1bc29cfef
 +	o->TransitionToLayout(GSTextureVK::Layout::ComputeReadWriteImage);
 +	o->SetUseFenceCounter(GetCurrentFenceCounter());
 +
++	// "Show the movement" (Settings > Graphics): the made pictures show what was decided for each
++	// pixel instead of the picture (fg_warp.comp: red both pictures moved, green the newer alone,
++	// blue the older alone, grey the two mixed in place). For checking frame generation, not playing.
++	if (t.flow.GetTuning().debugView != m_ps5_fg_debug)
++	{
++		PS5ComputeFX::OpticalFlowFG::Tuning tuning = t.flow.GetTuning();
++		tuning.debugView = m_ps5_fg_debug;
++		t.flow.SetTuning(tuning);
++		ps5px_log("picture: AMD FSR 3's optical flow %s", m_ps5_fg_debug ? "shows the movement it found (debug view)" : "makes pictures");
++	}
++
 +	PS5ComputeFX::FrameGenInput in;
 +	in.previous = a->GetView();
 +	in.current = b->GetView();
@@ -7345,6 +7410,74 @@ index 000000000..1bc29cfef
 +		return false;
 +	}
 +	// (The module records its own barriers; the pipeline state PCSX2 had bound is gone.)
++	InvalidateCachedState();
++	return true;
++}
++
++// MihawkGen: Mihawk's small trained network (432,308 parameters). It reads the two pictures and
++// nothing else, estimates the movement and a mask at four scales, warps both pictures and mixes
++// them, and keeps what did not move exactly as it was. Its descriptor sets are kept one for each
++// command buffer (the slot), as its interface asks.
++bool GSDeviceVK::DoMihawkGenMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time)
++{
++	PS5Tools& t = Tools();
++	if (t.mihawk_failed || !older || !newer || !out)
++		return false;
++	const u32 w = static_cast<u32>(out->GetWidth()), h = static_cast<u32>(out->GetHeight());
++	if (!t.mihawk || t.mihawk_w != w || t.mihawk_h != h)
++	{
++		if (t.mihawk)
++		{
++			ExecuteCommandBuffer(true, "MihawkGen resized");
++			fg_context_destroy(t.mihawk);
++			t.mihawk = nullptr;
++		}
++		fg_create_info info = {};
++		info.device = m_device;
++		info.physical_device = m_physical_device;
++		info.width = w;
++		info.height = h;
++		info.slots = NUM_COMMAND_BUFFERS;
++		info.output_format = VK_FORMAT_R8G8B8A8_UNORM;
++		char error[256] = {};
++		VkResult result = fg_context_create(&info, &t.mihawk, error, sizeof(error));
++		if (result == VK_SUCCESS)
++			result = fg_context_load_network(t.mihawk, PS5MihawkGen::Model(), PS5MihawkGen::ModelSize(), error, sizeof(error));
++		if (result != VK_SUCCESS || !fg_method_available(t.mihawk, FG_METHOD_NEURAL))
++		{
++			ps5px_log("picture: MihawkGen could not be made (%s, %d): the title's own frame generation makes the pictures", error,
++				static_cast<int>(result));
++			if (t.mihawk)
++				fg_context_destroy(t.mihawk);
++			t.mihawk = nullptr;
++			t.mihawk_failed = true;
++			return false;
++		}
++		t.mihawk_w = w;
++		t.mihawk_h = h;
++		ps5px_log("picture: MihawkGen works on %ux%u (its network: %zu bytes)", w, h, PS5MihawkGen::ModelSize());
++	}
++
++	EndRenderPass();
++	GSTextureVK* const a = static_cast<GSTextureVK*>(older);
++	GSTextureVK* const b = static_cast<GSTextureVK*>(newer);
++	GSTextureVK* const o = static_cast<GSTextureVK*>(out);
++	for (GSTextureVK* tex : {a, b})
++	{
++		tex->CommitClear();
++		tex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
++		tex->SetUseFenceCounter(GetCurrentFenceCounter());
++	}
++	o->TransitionToLayout(GSTextureVK::Layout::ComputeReadWriteImage);
++	o->SetUseFenceCounter(GetCurrentFenceCounter());
++
++	fg_frame_pair pair = {};
++	pair.prev_color = a->GetView();
++	pair.next_color = b->GetView();
++	pair.t = std::clamp(time, 0.01f, 0.99f);
++	fg_record_generate(t.mihawk, GetCurrentCommandBuffer(), m_current_frame, FG_METHOD_NEURAL, &pair, o->GetView());
++	// (It records barriers between its own passes; the pipeline state PCSX2 had bound is gone. The
++	// output's next layout change makes its writes visible to the pass that shows it.)
 +	InvalidateCachedState();
 +	return true;
 +}
@@ -11020,7 +11153,7 @@ index 255b6ea38..be7ca63ad 100644
 +#endif
  } // namespace Patch
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 51c34b978..307d6bd77 100644
+index 51c34b978..0fc7f9cf6 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
 @@ -537,6 +537,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
@@ -11102,7 +11235,7 @@ index 51c34b978..307d6bd77 100644
 +	SettingsWrapEntryEx(FrameGenSkipVideos, "FrameGenerationSkipVideos");
 +	if (wrap.IsLoading())
 +	{
-+		FrameGenMethod = std::min<u8>(FrameGenMethod, 1);
++		FrameGenMethod = std::min<u8>(FrameGenMethod, 2);
 +		FrameGenQuality = std::min<u8>(FrameGenQuality, 2);
 +	}
  	SettingsWrapBitfieldEx(CAS_Sharpness, "CASSharpness");

@@ -487,12 +487,27 @@ Added:
   not round like a PC's or the PS5's, and a few games' AI or physics depend on the PS2's exact
   results. These switches do the PS2's arithmetic exactly, inside the recompilers (from PCSX2
   Reliquary). FPU and VU0 cost some speed; VU1 costs a lot and is only for games that need it.
+- **MihawkGen, a third frame generation method** (Settings > Graphics > *Frame generation method*),
+  as PSSwanStation and PSFlyCast have it: Mihawk's small trained network (432,308 parameters,
+  GPL-3.0-or-later), which looks at the game's two pictures only, estimates the movement and a mask
+  at four scales, warps both pictures and mixes them, and leaves what did not move exactly as it
+  was. If it cannot start, Crux2's own method makes the frames and the boot log says why.
+- **Show the movement** (Settings > Graphics, advanced): with AMD FSR 3 optical flow, the made
+  frames show what was decided for each pixel instead of the picture (red both frames, green the
+  newer alone, blue the older alone, grey the two mixed). For checking frame generation, not for
+  playing.
 
 Changed:
+- **Frame generation is lighter without an upscaler**: when the game's picture reaches the screen by
+  a plain stretch (Upscaling off, or a picture already near the screen's size), the pictures are
+  kept, searched and made at the game picture's own size instead of the screen's. With FSR or NIS
+  (the default is FSR) the upscaled picture is interpolated as before: making the pictures before
+  the upscaler would mean upscaling every made picture as well, which costs more than it saves.
 - **Accurate floating point is switched on for the FPU and VU0** in the two games known to need
   it, unless a game's own settings name the switch. The boot log's `game fixes:` line says when it
   is on.
 - **Save states keep their format**: states from v1.0.17 load in v1.0.18 and the other way round.
+- **The content version is 01.018.000.**
 
 Fixed:
 - **Frame generation sped up and slowed down every few seconds** in games at 30 frames a second.
@@ -501,16 +516,10 @@ Fixed:
   none, then thirds, several times a second. It now settles on the game's rate from the last eight
   frames and changes it only when the game really does (the same rate twice in a row, or most of
   the eight).
-- **Frame generation is lighter without an upscaler**: when the game's picture reaches the screen by
-  a plain stretch (Upscaling off, or a picture already near the screen's size), the pictures are
-  kept, searched and made at the game picture's own size instead of the screen's. With FSR or NIS
-  (the default is FSR) the upscaled picture is interpolated as before: making the pictures before
-  the upscaler would mean upscaling every made picture as well, which costs more than it saves.
 - **What's new** (Settings > System) only said whether a newer Crux2 was out. It now shows what was
   added, changed and fixed in each version, newest first, from the `CHANGELOG.md` the title folder
   now holds. After an update it opens by itself once, with the changes since the version that ran
   before.
-- **The content version is 01.018.000.**
 
 ## What v1.0.17 changed
 

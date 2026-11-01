@@ -1063,6 +1063,23 @@
 			}
 		},
 		{
+			"id": "mihawkgen",
+			"name": "MihawkGen: frame generation by a small trained network (its neural method's Vulkan passes and its trained network, network.fgw), the third frame generation method",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Mihawk",
+			"modifications": "none: used as it is (ps5/frontend/third_party/mihawkgen); Crux2 calls it from GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp and assembles the network into the title (ps5/frontend/ps5_mihawkgen_model.cpp)",
+			"texts": {
+				"MihawkGen-LICENSE.md": "ps5/frontend/third_party/mihawkgen/LICENSE.md"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/mihawk-99/PS5_MihawkGen",
+				"revision": "c57232a9f16bcb6df5fe07c9bb631518f2b1cc0e"
+			}
+		},
+		{
 			"id": "nis",
 			"name": "NVIDIA Image Scaling (NIS) v1.0.3, compiled into the title",
 			"licence": "MIT",

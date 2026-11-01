@@ -983,8 +983,11 @@ Page graphicsPage(int layer, bool forGame)
 			"and can cause smearing on fast movement.",
 		GS, "FrameGeneration", 0, {"Off", "30 to 60", "30 to 60, and 60 to 120 at 120 Hz"}));
 	const auto fg = [](Option o) { return whenNot(std::move(o), GS, "FrameGeneration", 0, 0); };
-	rows.push_back(fg(list("Frame generation method", "How the extra frames are generated. AMD FSR 3 optical flow handles small, fast movement better.", GS,
-		"FrameGenerationMethod", 0, {"Crux2's own", "AMD FSR 3 optical flow"})));
+	rows.push_back(fg(list("Frame generation method",
+		"How the extra frames are made. Crux2's own: its motion search. AMD FSR 3 optical flow: handles small, fast movement "
+		"better, and keeps a score or a map still. MihawkGen: Mihawk's small trained network, which looks at the two "
+		"pictures only and leaves what did not move exactly as it was.",
+		GS, "FrameGenerationMethod", 0, {"Crux2's own", "AMD FSR 3 optical flow", "MihawkGen"})));
 	{
 		Option o = list("Optical flow quality", "Higher quality needs more GPU power.", GS, "FrameGenerationQuality", 1,
 			{"Performance", "Balanced", "Quality"});
@@ -992,6 +995,15 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(fg(toggle("No frame generation during videos", "Turns frame generation off while the game plays a video.", GS, "FrameGenerationSkipVideos", true)));
+	{
+		Option o = toggle("Show the movement",
+			"For checking frame generation, not for playing: the made frames show what AMD FSR 3 optical flow decided for "
+			"each pixel instead of the picture (red both frames, green the newer alone, blue the older alone, grey the two "
+			"mixed). Takes effect the next time a game starts.",
+			GS, "PS5FrameGenDebug", false, Option::NextStart);
+		o.enabled = [](int l) { return effectiveInt(l, GS, "FrameGeneration", 0) != 0 && effectiveInt(l, GS, "FrameGenerationMethod", 0) == 1; };
+		rows.push_back(adv(std::move(o)));
+	}
 
 	// ---- Advanced
 	rows.push_back(heading("ADVANCED", ADV));

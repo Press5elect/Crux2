@@ -16,6 +16,10 @@
 - Fixed: frame generation sped up and slowed down every few seconds in games at 30 frames a
   second: one late or early frame changed how every following frame was made. It now keeps the
   game's rate until the game really changes it.
+- Added: MihawkGen as a third frame generation method (Settings > Graphics, Frame generation
+  method): Mihawk's small trained network, from PSSwanStation and PSFlyCast.
+- Added: Show the movement (Settings > Graphics, advanced): AMD FSR 3 optical flow's made frames
+  show what it decided for each pixel, for checking frame generation.
 - Changed: frame generation works at the game picture's own size when the screen only stretches
   it (no FSR or NIS): less work for each picture it makes.
 - Fixed: What's new (Settings > System) only said whether a newer version was out. It now shows
