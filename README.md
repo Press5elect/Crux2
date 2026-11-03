@@ -470,6 +470,20 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.19 changed
+
+Changed:
+- **Built on PCSX2 v2.9.152** (was v2.9.150): out-of-bounds reads fixed when replacement textures
+  load, and LZMA (7-Zip's) 26.05.
+- **The content version is 01.019.000.**
+
+Fixed:
+- **SingStar's microphones heard nothing.** Crux2 looked for the console's microphone library
+  while it ran, and a title can neither load a system library of its own choice nor look a
+  function up at run time, so the library was never found. The title now imports it, and the
+  console binds it when it starts the title. The boot log's `mic:` lines say whether it was bound
+  (`libSceAudioIn imported by the title: open bound, ...`) and how each microphone opened.
+
 ## What v1.0.18 changed
 
 Added:

@@ -32,6 +32,17 @@ extern "C" {
 int sceUserServiceGetInitialUser(int32_t* user_id);
 int sceUserServiceGetLoginUserIdList(int32_t* user_ids);
 void ps5px_log(const char* format, ...);
+
+// libSceAudioIn, imported by the title (linked against the SDK's stub of it): the loader binds a
+// title's own imports when it starts it, and that is the only way a title reaches a system module.
+// Up to v1.0.18 the module was looked for while the title ran instead, and a title can neither
+// load a system module of its own choice (0x80020063) nor look a function up at run time
+// (sceKernelDlsym answers ESRCH for every name: PS5_Vulkan's docs/HARDWARE_FINDINGS.md,
+// 2026-09-18 and 2026-09-27): SingStar's microphones heard nothing. An import the loader does not
+// bind is left at 0 rather than stopping the title, so each is read from its slot before use.
+int32_t sceAudioInOpen(int32_t user, uint32_t type, uint32_t index, uint32_t length, uint32_t frequency, uint32_t param);
+int32_t sceAudioInInput(int32_t handle, void* dest);
+int32_t sceAudioInClose(int32_t handle);
 }
 
 namespace PS5Mic
@@ -70,7 +81,26 @@ const Api& Functions()
 		s_api.input = reinterpret_cast<InputFn>(PS5SystemModules::FindInHandle(handle, "sceAudioInInput", "LozEOU8+anM"));
 		s_api.close = reinterpret_cast<CloseFn>(PS5SystemModules::FindInHandle(handle, "sceAudioInClose", "Jh6WbHhnI68"));
 	};
-	find();
+	// The title's own imports first (above). Each address is read through a volatile slot: the
+	// compiler may take an imported function's address for not null, and here it can be.
+	{
+		OpenFn volatile open_slot = &sceAudioInOpen;
+		InputFn volatile input_slot = &sceAudioInInput;
+		CloseFn volatile close_slot = &sceAudioInClose;
+		const OpenFn o = open_slot;
+		const InputFn i = input_slot;
+		const CloseFn c = close_slot;
+		ps5px_log("mic: libSceAudioIn imported by the title: open %s, input %s, close %s", o ? "bound" : "NOT bound",
+			i ? "bound" : "NOT bound", c ? "bound" : "NOT bound");
+		if (o && i && c)
+		{
+			s_api.open = o;
+			s_api.input = i;
+			s_api.close = c;
+		}
+	}
+	if (!s_api.open)
+		find();
 	if (!s_api.open)
 	{
 		// Not in the process yet. First as the console's own loaders bring it in: by its internal ID

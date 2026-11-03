@@ -1,5 +1,13 @@
 # Crux2 - what changed
 
+## v1.0.19 (2026-11-03)
+
+- Changed: built on PCSX2 v2.9.152 (was v2.9.150): out-of-bounds reads fixed when replacement
+  textures load, and LZMA 26.05.
+- Changed: the content version in param.json is 01.019.000.
+- Fixed: SingStar's microphones heard nothing: the console's microphone library is now imported
+  by the title instead of looked for while it runs, which a title cannot do.
+
 ## v1.0.18 (2026-10-31)
 
 - Added: Settings > Folders: game folders anywhere (USB drives, network shares, the console's

@@ -81,6 +81,11 @@ stub() {
 }
 stub libSceAgc vendor/ps5/sdk/stubs/agc_canary_link_stub.c
 stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_canary_link_stub.c
+# The microphones' libSceAudioIn, which the SDK has no stub for either: Crux2's own
+# (ps5/stubs/libSceAudioIn.c), under the system module's name.
+cc -std=c11 -O2 -fPIC -c "$ps5/stubs/libSceAudioIn.c" -o "$work/link/obj/libSceAudioIn_stub.o"
+"$sdk/bin/prospero-lld" --shared -soname libSceAudioIn.sprx \
+    -o "$work/link/stubs/libSceAudioIn.so" "$work/link/obj/libSceAudioIn_stub.o"
 
 # ---- what is linked ------------------------------------------------------------------------
 # The emulator and the port layer; then what they are built on. All in one group: the libraries
@@ -272,7 +277,7 @@ fi
     -e _start -o "$work/link/llvm-pie.elf" \
     "$work/link/obj/app_crt.o" \
     --start-group "${title_archives[@]}" "${port_archives[@]}" --end-group \
-    "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" \
+    "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" "$work/link/stubs/libSceAudioIn.so" \
     "${radv_link_inputs[@]}" \
     --as-needed "$sdk"/target/lib/*.so
 # LINK_ONLY=1 stops here: the ELF and its map, to look at, with the title folder left as it is.
@@ -283,7 +288,8 @@ fi
 null_imports=$(comm -23 \
     <("$sdk/bin/llvm-nm" -D --undefined-only "$work/link/llvm-pie.elf" |
         awk '$1 == "U" { sub(/@.*/, "", $2); print $2 }' | sort -u) \
-    <(for library in "$sdk"/target/lib/*.so "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so"; do
+    <(for library in "$sdk"/target/lib/*.so "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" \
+        "$work/link/stubs/libSceAudioIn.so"; do
         case ${library##*/} in libkernel_sys.so | libScePosixForWebKit.so) continue ;; esac
         "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'
     done | sort -u))
