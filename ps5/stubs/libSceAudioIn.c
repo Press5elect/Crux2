@@ -12,14 +12,14 @@
  * bind is null at run time, and ps5_mic.cpp checks each before it calls one.
  */
 
-asm(".global sceAudioInOpen\n"
+__asm__(".global sceAudioInOpen\n"
     ".type sceAudioInOpen @function\n"
     "sceAudioInOpen:\n");
 
-asm(".global sceAudioInInput\n"
+__asm__(".global sceAudioInInput\n"
     ".type sceAudioInInput @function\n"
     "sceAudioInInput:\n");
 
-asm(".global sceAudioInClose\n"
+__asm__(".global sceAudioInClose\n"
     ".type sceAudioInClose @function\n"
     "sceAudioInClose:\n");
