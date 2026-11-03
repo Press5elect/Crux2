@@ -302,7 +302,7 @@ fi
 [[ ${LINK_ONLY:-0} == 1 ]] && { echo "linked: $work/link/llvm-pie.elf"; exit 0; }
 "$tool" link --in "$work/link/llvm-pie.elf" --out "$work/eboot.elf.new" \
     --stub-dir "$sdk/target/lib" --stub "$work/link/stubs/libSceAgc.so" \
-    --stub "$work/link/stubs/libSceAgcDriver.so" --module-sdk 0x02000009 \
+    --stub "$work/link/stubs/libSceAgcDriver.so" --stub "$work/link/stubs/libSceAudioIn.so" --module-sdk 0x02000009 \
     --companion-sdk 0x08050001 --file-name eboot.elf
 
 # ---- the title folder --------------------------------------------------------------------------
