@@ -106,7 +106,11 @@ def pins() -> dict:
         "@mesa": mesa + " + " + mesa_patches + "/ (" + ", ".join(sorted(p.stem for p in (ROOT / mesa_patches).glob("*.patch"))) +
                  "; 0007 and 0009 from PS5CEMU-HAR, GPL-3.0)",
         "@template": git_revision(ROOT.parent / "PS5_VulkanTemplate"),
-        "@boilerplate": git_revision(ROOT.parent / "ps5-native-app-boilerplate"),
+        # (ps5/elevation/ was taken from ps5-native-app-boilerplate at dd44bbdc, with its LICENSE and
+        # THIRD_PARTY_NOTICES.md: a checkout beside this one names its own revision instead.)
+        "@boilerplate": (git_revision(ROOT.parent / "ps5-native-app-boilerplate")
+                         if (ROOT.parent / "ps5-native-app-boilerplate/.git").exists()
+                         else "dd44bbdc75437332ed22e3ba95126733419ef25a"),
         # The build that made the title folder: PS5PX_BUILD_DIR from tools/link-title.sh (build/ps5,
         # build/ps5-pgo-use, ...), build/ps5 when it is not set.
         "@identity": read(Path(os.environ.get("PS5PX_BUILD_DIR", str(ROOT / "build/ps5"))) / "build-identity.txt"),
@@ -116,10 +120,26 @@ def pins() -> dict:
     }
 
 
+def recomp_dir() -> Path:
+    """Where paraLLEl-GS's sources came from, as build-parallel-gs.sh chooses: PS5_CRUX2RECOMP_DIR,
+    a PS5_Crux2Recomp checkout beside this one, or this repository's own crux2recomp/."""
+    named = os.environ.get("PS5_CRUX2RECOMP_DIR")
+    if named:
+        return Path(named).resolve()
+    beside = ROOT.parent / "PS5_Crux2Recomp"
+    return beside if (beside / "ps5/tools").is_dir() else ROOT / "crux2recomp"
+
+
+def recomp_source(source: str) -> str:
+    """A licence text named under ../PS5_Crux2Recomp/, found where the sources came from."""
+    prefix = "../PS5_Crux2Recomp/"
+    return str(recomp_dir() / source[len(prefix):]) if source.startswith(prefix) else source
+
+
 def recomp_pins() -> dict:
     """paraLLEl-GS's parts, as PS5_Crux2Recomp's tools/fetch-parallel-gs.sh and fetch-ps2recomp.sh pin them."""
     import re
-    recomp = ROOT.parent / "PS5_Crux2Recomp"
+    recomp = recomp_dir()
     def pin(script: str, name: str) -> str:
         path = recomp / "ps5/tools" / script
         text = path.read_text() if path.is_file() else ""
@@ -129,11 +149,13 @@ def recomp_pins() -> dict:
     head = vendetta.read_text().split("\n", 2)[:2] if vendetta.is_file() else []
     defjam = next((m.group(0) for line in head for m in [re.search(r"[0-9a-f]{40}", line)] if m), "unknown")
     recomp_revision = git_revision(recomp)
+    origin = ("this repository's crux2recomp/" if recomp == ROOT / "crux2recomp"
+              else "from PS5_Crux2Recomp " + recomp_revision)
     return {
-        "@pgs": pin("fetch-parallel-gs.sh", "pgs_revision") + " + crux2recomp/ps5/patches/parallel-gs/ of Crux2's source (from PS5_Crux2Recomp " + recomp_revision + ")",
+        "@pgs": pin("fetch-parallel-gs.sh", "pgs_revision") + " + crux2recomp/ps5/patches/parallel-gs/ of Crux2's source (" + origin + ")",
         "@granite": pin("fetch-parallel-gs.sh", "granite_revision"),
         "@volk": pin("fetch-parallel-gs.sh", "volk_revision"),
-        "@defjam": defjam + " + crux2recomp/ps5/patches/ps2recomp/runner.patch of Crux2's source (from PS5_Crux2Recomp " + recomp_revision + ")",
+        "@defjam": defjam + " + crux2recomp/ps5/patches/ps2recomp/runner.patch of Crux2's source (" + origin + ")",
     }
 
 
@@ -164,6 +186,7 @@ def stage(app: Path) -> int:
     for component in components:
         texts = []
         for name, source in component["texts"].items():
+            source = recomp_source(source)
             source_path = Path(source) if source.startswith("/") else (ROOT / source)
             if not source_path.is_file():
                 print(f"{component['id']}: licence text missing: {source}", file=sys.stderr)
