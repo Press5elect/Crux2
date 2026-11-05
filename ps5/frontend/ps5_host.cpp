@@ -1000,6 +1000,7 @@ void PS5Host::CPUThreadEntryPoint()
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - exit_started).count(), sound_and_disc, machine, graphics,
 		settings, files, emulator);
 	ps5px_log("shut down");
+	ps5px_log_flush();
 }
 
 //////////////////////////////////////////////////////////////////////////

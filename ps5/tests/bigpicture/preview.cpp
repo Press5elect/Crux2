@@ -1365,6 +1365,20 @@ public:
 		found.label = "Found by Crux2";
 		found.info = [] { return std::string("/mnt/usb0/PS2/"); };
 		page.rows.push_back(found);
+		// v1.0.19: the network shares, as the console's Backend lists them.
+		page.rows.push_back(heading("NETWORK SHARES"));
+		page.rows.push_back(act("Add a network share",
+			"A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS).",
+			[] { bp::pick("Kind of share", {"SMB (a Windows PC, most NAS)", "NFS (a NAS or a Linux PC)"}, 0, [](int) {}); }));
+		bp::Option share = act("PS2", "A network share. Press to change it or take it away.",
+			[] { bp::pick("PS2", {"Change it", "Take it away"}, -1, [](int) {}); });
+		share.info = [] { return std::string("smb://192.168.1.10/Games/PS2"); };
+		page.rows.push_back(std::move(share));
+		bp::Option account = act("The shares' account",
+			"The user and password for the SMB shares without an account of their own: guest and no password for an open share.",
+			[] { bp::editText("User for the shares (guest: an open share)", "guest", false, [](const std::string&) {}); });
+		account.info = [] { return std::string("guest"); };
+		page.rows.push_back(std::move(account));
 		page.rows.push_back(heading("WHERE CRUX2 KEEPS ITS FILES"));
 		for (const char* label : {"BIOS", "Memory cards", "Save states", "Screenshots and GS dumps", "Cheats", "Covers", "Texture replacements"})
 		{

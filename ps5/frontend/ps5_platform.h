@@ -60,6 +60,8 @@ void ps5px_profile_thread_named(const char* name);
 
 /// The boot log's descriptor (-1: none), for the crash report.
 int ps5px_log_fd(void);
+// Everything logged so far into the file and onto the disk (waits up to 5 s for the log's writer).
+void ps5px_log_flush(void);
 
 /// Gives the calling thread a stack of its own for the crash report, so that a stack overflow can
 /// be reported too (ps5_crash.cpp). The emulator's threads do this as they start.

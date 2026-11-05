@@ -10,6 +10,7 @@
 
 #include "platform.h"
 #include "ps5_vfs.h"
+#include "ps5_shares.h"
 
 #include "../elevation/elevation.hpp"
 
@@ -28,6 +29,7 @@
 #include <ctime>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
@@ -207,7 +209,162 @@ constexpr char NETWORK_CFG_TEMPLATE[] =
   "# uid = 1000\n"
   "# gid = 1000\n";
 
+// v1.0.19 (from OGBox 0.0.3): the boot log's lines go through memory to a writer thread of their own.
+// A line written straight to the file (ps5px_log's write, standard error's) waited for the file
+// system on the thread that logged it: OGBox measured 600 to 900 ms a line on the console while a
+// game's own writes and an fsync were in flight, and Crux2 logs from the EE and GS threads (a
+// render target made, a frame queue changed, the pacing) while save states and memory cards are
+// written. The writer writes what is there every 100 ms at most, and syncs the file every 2 s (a
+// console that goes down whole loses what the cache held). Fixed storage: the crash report drains
+// it, in a signal handler (ps5px_log_fd).
+constexpr size_t LOG_RING = size_t(2) << 20;
+char s_ring[LOG_RING];
+size_t s_ring_head = 0, s_ring_length = 0; // the oldest byte, and how many
+unsigned long long s_ring_dropped = 0;
+pthread_mutex_t s_ring_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t s_ring_ready = PTHREAD_COND_INITIALIZER;
+pthread_cond_t s_ring_empty = PTHREAD_COND_INITIALIZER;
+std::atomic<bool> s_writer_up{false};
+bool s_writer_busy = false; // a chunk taken out, being written
+int s_pipe_read = -1;       // standard error's pipe, read by a thread of its own
+
+void RingPut(const char* data, size_t length)
+{
+  pthread_mutex_lock(&s_ring_lock);
+  if (s_ring_length + length > LOG_RING)
+  {
+    s_ring_dropped += length;
+  }
+  else
+  {
+    size_t at = (s_ring_head + s_ring_length) % LOG_RING;
+    for (size_t done = 0; done < length;)
+    {
+      const size_t part = std::min(length - done, LOG_RING - at);
+      std::memcpy(s_ring + at, data + done, part);
+      done += part;
+      at = (at + part) % LOG_RING;
+    }
+    s_ring_length += length;
+  }
+  pthread_cond_signal(&s_ring_ready);
+  pthread_mutex_unlock(&s_ring_lock);
+}
+
+// A line of the log: through the writer when it runs, else straight into the file.
+void LogWrite(const char* data, size_t length)
+{
+  if (s_log_fd < 0)
+    return;
+  if (s_writer_up.load(std::memory_order_acquire))
+    RingPut(data, length);
+  else
+    (void)!write(s_log_fd, data, length);
+}
+
+// What the ring holds into the file. The caller holds the lock, which is let go while it writes.
+void RingWriteOut()
+{
+  static char chunk[256 * 1024];
+  while (s_ring_length)
+  {
+    const size_t length = std::min({s_ring_length, sizeof(chunk), LOG_RING - s_ring_head});
+    std::memcpy(chunk, s_ring + s_ring_head, length);
+    s_ring_head = (s_ring_head + length) % LOG_RING;
+    s_ring_length -= length;
+    s_writer_busy = true;
+    pthread_mutex_unlock(&s_ring_lock);
+    if (s_log_fd >= 0)
+      (void)!write(s_log_fd, chunk, length);
+    pthread_mutex_lock(&s_ring_lock);
+    s_writer_busy = false;
+  }
+  if (s_ring_dropped)
+  {
+    char note[96];
+    const int length =
+      std::snprintf(note, sizeof(note), "[log: %llu bytes of lines dropped: the file system was slow]\n", s_ring_dropped);
+    s_ring_dropped = 0;
+    pthread_mutex_unlock(&s_ring_lock);
+    if (s_log_fd >= 0 && length > 0)
+      (void)!write(s_log_fd, note, static_cast<size_t>(length));
+    pthread_mutex_lock(&s_ring_lock);
+  }
+  pthread_cond_broadcast(&s_ring_empty);
+}
+
+timespec Deadline(long milliseconds)
+{
+  timespec until;
+  clock_gettime(CLOCK_REALTIME, &until);
+  until.tv_nsec += milliseconds * 1000000L;
+  until.tv_sec += until.tv_nsec / 1000000000L;
+  until.tv_nsec %= 1000000000L;
+  return until;
+}
+
+void* LogWriterMain(void*)
+{
+  auto last_sync = std::chrono::steady_clock::now();
+  pthread_mutex_lock(&s_ring_lock);
+  for (;;)
+  {
+    if (!s_ring_length)
+    {
+      const timespec until = Deadline(100);
+      pthread_cond_timedwait(&s_ring_ready, &s_ring_lock, &until);
+    }
+    RingWriteOut();
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_sync >= std::chrono::seconds(2) && s_log_fd >= 0)
+    {
+      last_sync = now;
+      pthread_mutex_unlock(&s_ring_lock);
+      fsync(s_log_fd);
+      pthread_mutex_lock(&s_ring_lock);
+    }
+  }
+  return nullptr;
+}
+
+// Standard error's pipe into the ring: a line printed there never waits for the file either.
+void* LogPipeMain(void*)
+{
+  char buffer[16384];
+  for (;;)
+  {
+    const ssize_t got = read(s_pipe_read, buffer, sizeof(buffer));
+    if (got > 0)
+      RingPut(buffer, static_cast<size_t>(got));
+    else if (got == 0 || (errno != EINTR && errno != EAGAIN))
+      break;
+  }
+  return nullptr;
+}
+
 } // namespace
+
+// Everything logged so far into the file and onto the disk (the shutdown's last line, a fatal
+// error): waits up to 5 s for the writer.
+extern "C" void ps5px_log_flush(void)
+{
+  if (s_writer_up.load(std::memory_order_acquire))
+  {
+    std::fflush(stderr);
+    if (s_pipe_read >= 0)
+      sceKernelUsleep(20000); // (the pipe's last lines into the ring)
+    pthread_mutex_lock(&s_ring_lock);
+    for (int i = 0; i < 100 && (s_ring_length || s_writer_busy); i++)
+    {
+      pthread_cond_signal(&s_ring_ready);
+      const timespec until = Deadline(50);
+      pthread_cond_timedwait(&s_ring_empty, &s_ring_lock, &until);
+    }
+    pthread_mutex_unlock(&s_ring_lock);
+  }
+  if (s_log_fd >= 0)
+    fsync(s_log_fd);
+}
 
 extern "C" const char* ps5px_title_dir(void)
 {
@@ -219,8 +376,22 @@ extern "C" const char* ps5px_ca_bundle(void)
   return s_ca_bundle;
 }
 
+// The crash report's descriptor of the log, which it writes its lines to itself (in a signal
+// handler): what the ring still holds goes in first, unless another thread holds the ring (a
+// signal handler can't wait for it).
 extern "C" int ps5px_log_fd(void)
 {
+  if (s_log_fd >= 0 && s_writer_up.load(std::memory_order_acquire) && pthread_mutex_trylock(&s_ring_lock) == 0)
+  {
+    while (s_ring_length)
+    {
+      const size_t length = std::min(s_ring_length, LOG_RING - s_ring_head);
+      (void)!write(s_log_fd, s_ring + s_ring_head, length);
+      s_ring_head = (s_ring_head + length) % LOG_RING;
+      s_ring_length -= length;
+    }
+    pthread_mutex_unlock(&s_ring_lock);
+  }
   return s_log_fd;
 }
 
@@ -241,7 +412,7 @@ extern "C" void ps5px_log(const char* format, ...)
   {
     length = std::snprintf(line, sizeof(line), "[%8.3f] %s\n", now_seconds() - s_start_time, text);
     if (length > 0)
-      (void)!write(s_log_fd, line, std::min<size_t>(static_cast<size_t>(length), sizeof(line) - 1));
+      LogWrite(line, std::min<size_t>(static_cast<size_t>(length), sizeof(line) - 1));
   }
 }
 
@@ -274,8 +445,7 @@ extern "C" void ps5_title_fatal(const char* message)
     s_in_fatal = true;
     ps5px_log("FATAL: %s", message ? message : "(no message)");
     ps5px_notify(message ? message : "A fatal error stopped the emulator.");
-    if (s_log_fd >= 0)
-      fsync(s_log_fd);
+    ps5px_log_flush();
   }
 
   // The shell closes the title asynchronously: wait for it, and never return.
@@ -327,12 +497,41 @@ void PS5Platform::EarlyInit()
   MakePublic(log_path, false);
   MakePublic(previous_path, false);
 
-  // Standard error goes into the boot log, each line written as it is printed: what the graphics
-  // driver says before a stop is then in the file. (The console refuses dup2 onto descriptor 2 to a
-  // title, so the stream is moved to a second descriptor of the file; both append.)
+  // Standard error goes into the boot log, each line as it is printed: what the graphics driver says
+  // before a stop is then in the file. (The console refuses dup2 onto descriptor 2 to a title, so the
+  // stream is moved to another descriptor.) v1.0.19: the log's writer thread, and standard error
+  // into it through a pipe read by a thread of its own, so that no line waits for the file system;
+  // without them, as before, a second descriptor of the file.
   if (s_log_fd >= 0)
   {
-    const int second = open(log_path, O_WRONLY | O_APPEND);
+    {
+      pthread_t writer;
+      if (pthread_create(&writer, nullptr, &LogWriterMain, nullptr) == 0)
+      {
+        pthread_detach(writer);
+        s_writer_up.store(true, std::memory_order_release);
+      }
+    }
+    int second = -1;
+    int pipe_fds[2] = {-1, -1};
+    if (s_writer_up.load(std::memory_order_acquire) && pipe(pipe_fds) == 0)
+    {
+      s_pipe_read = pipe_fds[0];
+      pthread_t reader;
+      if (pthread_create(&reader, nullptr, &LogPipeMain, nullptr) == 0)
+      {
+        pthread_detach(reader);
+        second = pipe_fds[1];
+      }
+      else
+      {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        s_pipe_read = -1;
+      }
+    }
+    if (second < 0)
+      second = open(log_path, O_WRONLY | O_APPEND);
     FILE* const stream = (second >= 0) ? fdopen(second, "a") : nullptr;
     if (stream)
     {
@@ -557,9 +756,12 @@ void PS5Platform::MountShares()
   }
   MakePublic(config.c_str(), false);
 
-  const int mounted = ps5vfs_load_network_config(config.c_str());
+  // v1.0.19: read and mounted by PS5Shares, which Settings > Folders changes them through (a
+  // share's own name and account; the mounts of a file written by hand are named as before).
+  std::string why;
+  const int mounted = PS5Shares::LoadAndMount(config, &why);
   if (mounted < 0)
-    ps5px_log("network shares: %s cannot be read", config.c_str());
+    ps5px_log("network shares: %s cannot be read: %s", config.c_str(), why.c_str());
   else
     ps5px_log("network shares: %d in network.cfg", mounted);
 }

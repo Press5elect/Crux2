@@ -374,7 +374,8 @@ password =
   the NAS or PC. One account serves all paths.
 - Each folder is shown as `/smb/<the folder's name>` and is added to the game list by itself.
 - SMB 2 and 3 are spoken (not the old SMB 1). The share is only ever read.
-- Restart Crux2 after changing the file.
+- Restart Crux2 after changing the file. Or add, change and take away shares in Settings >
+  Folders, typed with the on-screen keyboard: they are connected at once, and Crux2 writes the file.
 
 A game on a share is read from it as it plays, so the link to the NAS matters while playing:
 a wired connection is the safe choice. Settings > Speed > **Load the whole disc into memory** loads
@@ -472,12 +473,33 @@ TCP or UDP.
 
 ## What v1.0.19 changed
 
+Added:
+- **Network shares in Settings > Folders**: *Add a network share* asks for the kind (SMB or NFS),
+  the server (found on the network, or typed), the share and folder, a name, and an account of its
+  own if it has one, all typed with the on-screen keyboard. The share is connected at once and its
+  games join the library; a share can be changed or taken away the same way, and *The shares'
+  account* sets the user and password for those without one. network.cfg is written for you (a
+  file written by hand is read as before, and its shares keep their names).
+
 Changed:
 - **Built on PCSX2 v2.9.152** (was v2.9.150): out-of-bounds reads fixed when replacement textures
   load, and LZMA (7-Zip's) 26.05.
+- **Games on a network share are read faster**: a share's connection asks for large buffers
+  (up to 4 MiB) before it connects. The console's small default window held a share to about
+  18 MB/s whatever the link.
+- **The boot log is written by a thread of its own**: a line no longer waits for the file system
+  on the thread that logged it (OGBox measured 600 to 900 ms a line while a game's own writes were
+  in flight), and the file is synced every 2 seconds.
+- **The graphics driver carries two newer fixes of PS5_Mesa's**: a large GPU buffer is backed by
+  several pieces of the console's memory when no single free piece is big enough, instead of
+  failing, and each piece is placed only where nothing else is.
 - **The content version is 01.019.000.**
 
 Fixed:
+- **The console could go down after Crux2 was closed many times with USB drives on.** Leaving the
+  sandbox (for USB drives) wrote the console's root folder into Crux2's own without counting it,
+  so each exit released two references to the root it never took. The helper now trades its own
+  counted references with Crux2's.
 - **SingStar's microphones heard nothing.** Crux2 looked for the console's microphone library
   while it ran, and a title can neither load a system library of its own choice nor look a
   function up at run time, so the library was never found. The title now imports it, and the

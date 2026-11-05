@@ -1,10 +1,17 @@
 # Crux2 - what changed
 
-## v1.0.19 (2026-11-03)
+## v1.0.19 (2026-11-05)
 
+- Added: network shares in Settings > Folders: added, changed and taken away with the on-screen
+  keyboard, servers found on the network, connected at once; network.cfg is written for you.
+- Changed: games on a network share are read faster (large buffers on the share's connection).
+- Changed: the boot log is written by a thread of its own, so no line waits for the file system.
+- Changed: the graphics driver backs a large buffer with several pieces of memory when no single
+  free piece is big enough.
 - Changed: built on PCSX2 v2.9.152 (was v2.9.150): out-of-bounds reads fixed when replacement
   textures load, and LZMA 26.05.
 - Changed: the content version in param.json is 01.019.000.
+- Fixed: the console could go down after Crux2 was closed many times with USB drives on.
 - Fixed: SingStar's microphones heard nothing: the console's microphone library is now imported
   by the title instead of looked for while it runs, which a title cannot do.
 
