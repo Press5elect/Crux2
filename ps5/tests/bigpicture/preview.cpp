@@ -2516,6 +2516,9 @@ void shots(Harness& h)
 	h.shot("13a3-settings-restored");
 	h.press(P::Cross, 20);
 	h.press(P::Circle);
+	// v1.0.19: the Folders page, its network shares under the game folders.
+	go("Folders", "Add a network share");
+	h.shot("13a4-settings-folders-shares");
 	// The network adapter and the hard drive; an address is changed number by number.
 	go("Network & HDD", "Network adapter");
 	h.shot("13b-settings-network");
