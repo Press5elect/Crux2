@@ -118,6 +118,8 @@ const char* ElevationStatusText(elevation::Status status)
   {
     case elevation::Status::ok:
       return "granted";
+    case elevation::Status::ok_unbalanced:
+      return "granted the old way (the helper's root was not the console's: Crux2's exit releases two references to the console's root it never took)";
     case elevation::Status::invalid_request:
       return "the helper refused the request";
     case elevation::Status::unsupported_version:
@@ -295,7 +297,7 @@ void PS5Platform::EarlyInit()
   {
     s_elevation_tried = true;
     s_elevation_status = elevation::request(elevation::Capability::filesystem, "/app0/sandbox-elevator.elf");
-    s_elevated = (s_elevation_status == elevation::Status::ok);
+    s_elevated = (s_elevation_status == elevation::Status::ok || s_elevation_status == elevation::Status::ok_unbalanced);
   }
 
   // The title's folder, under whichever name reaches it now.
