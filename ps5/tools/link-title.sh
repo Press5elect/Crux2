@@ -187,6 +187,10 @@ extra_flags+=("--wrap=lstat")
 # restarted: frontend/ps5_libc.c waits again for what is left, so a network share's wait never fails
 # for it.
 extra_flags+=("--wrap=poll")
+# A network share's TCP connection gets large buffers where libsmb2 and libnfs set TCP_NODELAY,
+# before connecting (frontend/ps5_libc.c): the console's default window held a share to one small
+# window per round trip.
+extra_flags+=("--wrap=setsockopt")
 # std::filesystem (libc++) names these; the platform layer's refuse as a file system without links,
 # and give the title's folder as the working directory.
 for name in symlink link getcwd; do
