@@ -492,7 +492,8 @@ Added:
 Changed:
 - **Built on PCSX2 v2.9.158** (was v2.9.150): out-of-bounds reads fixed when replacement textures
   load, a Vulkan fix for the feedback-loop layout (a texture is marked changed when it switches),
-  a guard against out-of-bounds 4-bit texture reads from bad GS register settings, more Japanese game serials and corrected titles, a newer controller database, and LZMA
+  a guard against out-of-bounds 4-bit texture reads from bad GS register
+  settings, more Japanese game serials and corrected titles, a newer controller database, and LZMA
   (7-Zip's) 26.05.
 - **Games on a network share are read faster**: a share's connection asks for large buffers
   (up to 4 MiB) before it connects. The console's small default window held a share to about

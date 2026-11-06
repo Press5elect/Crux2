@@ -1,6 +1,6 @@
 # Crux2 - what changed
 
-## v1.0.19 (2026-11-05)
+## v1.0.19 (2026-11-06)
 
 - Added: SMAA anti-aliasing as a Look (Settings > Picture), beside FXAA; the FXAA row now points to
   the internal resolution and paraLLEl-GS's samples for supersampling.
