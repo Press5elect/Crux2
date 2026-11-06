@@ -1,5 +1,29 @@
 # Crux2 - what changed
 
+## Unreleased
+
+- Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
+  add, instead of the PS2's; in games with a VU rounding fix, later results came out slightly
+  wrong.
+- Fixed: accurate floating point on VU0 ran in the EE's rounding mode for the VU0 instructions
+  the EE runs itself (COP2); in games with an EE rounding fix their results were wrong.
+- Fixed: the EE interpreter compared floats differently from the recompiler when accurate
+  floating point was off (infinities and NaNs).
+- Fixed: accurate floating point's SQRT.S cleared the FPU's overflow and underflow flags; the
+  PS2's only touches invalid and divide.
+- Fixed: under a menu or paused, a picture FSR enlarged long ago could be shown instead of the
+  game's own after FSR had stopped enlarging it.
+- Changed: less work in the EE's recompiled ADDA, MADDA, MSUBA and MULA (a flag nothing read).
+- Changed: accurate floating point keeps more of the EE's registers around its calls, compares
+  without branches, and VU adds take their fast path.
+- Changed: the pipelines a game needed last time are made on the optimiser's thread, not the
+  GS thread: no stalls in a game's first frames.
+- Changed: a picture shown twice (frame generation not making one) gets its look and side
+  picture once. The side picture builds only its own pass, not frame generation's.
+- Changed: smaller fixes: the game's pipeline list is merged without a quadratic search, the
+  pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
+  invalidate its copies.
+
 ## v1.0.19 (2026-11-06)
 
 - Added: SMAA anti-aliasing as a Look (Settings > Picture), beside FXAA; the FXAA row now points to
