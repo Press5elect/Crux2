@@ -947,6 +947,23 @@
 			}
 		},
 		{
+			"id": "smaa",
+			"name": "SMAA, Enhanced Subpixel Morphological Anti-Aliasing (resources/shaders/slang/anti-aliasing/shaders/smaa/)",
+			"licence": "MIT (SMAA.hlsl and the lookup pictures); Unlicense (the three pass files)",
+			"copyright": "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez",
+			"modifications": "none: copied unchanged from libretro's slang-shaders; the preset that runs them (crux2/smaa.slangp) is Crux2's own",
+			"texts": {
+				"SMAA-LICENSE.txt": "ps5/licenses/SMAA-LICENSE.txt"
+			},
+			"artifacts": [
+				"resources/shaders/slang/anti-aliasing/"
+			],
+			"source": {
+				"url": "https://github.com/libretro/slang-shaders (anti-aliasing/shaders/smaa); original: https://github.com/iryoku/smaa",
+				"revision": "3685eda59ffd2ebe1b12cc4640581dc23552ce88"
+			}
+		},
+		{
 			"id": "noto-sans-cjk-subset",
 			"name": "Noto Sans CJK JP Regular, a subset (the letters of Japanese, Chinese and Korean game names)",
 			"licence": "SIL OFL 1.1",

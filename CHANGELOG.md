@@ -2,6 +2,8 @@
 
 ## v1.0.19 (2026-11-05)
 
+- Added: SMAA anti-aliasing as a Look (Settings > Picture), beside FXAA; the FXAA row now points to
+  the internal resolution and paraLLEl-GS's samples for supersampling.
 - Added: Settings > Debug > Logs: logs on or off, where they go (the console or a USB drive), and a
   switch for each (Crux2's boot log, the graphics driver's messages, the emulator's log, the klog copy).
 - Added: network shares in Settings > Folders: added, changed and taken away with the on-screen

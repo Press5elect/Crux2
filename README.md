@@ -474,6 +474,9 @@ TCP or UDP.
 ## What v1.0.19 changed
 
 Added:
+- **SMAA anti-aliasing**, under Settings > Picture > Look beside the CRT and signal looks: sharper edges
+  than FXAA for a little more GPU time (a look is one preset, so it replaces a CRT look). FXAA stays
+  where it was; supersampling (SSAA) is the internal resolution, or paraLLEl-GS's samples.
 - **Settings > Debug > Logs: what is logged, and where.** *Logs* off turns every log off (no
   crux2-boot.log, no emulog.txt, no copy in the console's kernel log). *Logs go to* chooses the
   console or a USB drive's Crux2-logs folder (a drive that is out at the start keeps the boot log in
