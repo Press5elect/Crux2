@@ -1245,8 +1245,9 @@ Page advancedPage(int layer)
 		"Creates a backup copy of a save state if it already exists when the save is created. The backup copy has a "
 			".backup suffix", CORE, "BackupSavestate", true, A));
 	rows.push_back(listOf("Save a state by itself",
-		"Automatically saves the game's state at this interval. Load it from the quick menu with \"Load the "
-			"auto-save\". The game may pause briefly while saving.",
+		"Automatically saves the game's state to the console's drive at this interval. Load it from the quick menu with "
+			"\"Load the auto-save\". The game may pause briefly while saving. (Sleep-safe saving keeps its own five-minute "
+			"state in memory.)",
 		"PS5", "AutoSaveMinutes", 0, {"Off", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes"}, {0, 2, 5, 10, 15}, A));
 	rows.push_back(toggle("Undo for a loaded state",
 		"Keeps the game's current state before you load a save state, so you can undo the load from the quick menu.", "PS5",

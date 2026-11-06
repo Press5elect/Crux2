@@ -67,22 +67,29 @@ bool Exists(const char* path)
   return (stat(path, &st) == 0);
 }
 
-// [PS5] USBDrives in inis/PCSX2.ini, read by hand: the settings are loaded long after the one moment
-// the sandbox can be left (before the process has a second thread). A file named usb-off.txt in
-// the title folder says no as well, for when the interface cannot be reached to change the setting.
-bool ReadWantsUSB(const char* title_dir)
+// [PS5] USBDrives in inis/PCSX2.ini, read by hand (ReadEarlySettings, below): the settings are
+// loaded long after the one moment the sandbox can be left (before the process has a second
+// thread). A file named usb-off.txt in the title folder says no as well, for when the interface
+// cannot be reached to change the setting.
+struct LogChoice
+{
+  bool on = true, boot = true, driver = true, klog = true;
+  std::string place;
+};
+
+bool IniFalse(std::string_view value)
+{
+  return value == "false" || value == "False" || value == "0";
+}
+
+// The [PS5] keys of inis/PCSX2.ini the start needs before the settings are loaded.
+void ReadEarlySettings(const char* title_dir, bool* wants_usb, LogChoice* logs)
 {
   char path[256];
-  std::snprintf(path, sizeof(path), "%s/usb-off.txt", title_dir);
-  if (Exists(path))
-    return false;
-
   std::snprintf(path, sizeof(path), "%s/inis/PCSX2.ini", title_dir);
   FILE* const fp = std::fopen(path, "r");
   if (!fp)
-    return true;
-
-  bool wanted = true;
+    return;
   bool in_section = false;
   char line[512];
   while (std::fgets(line, sizeof(line), fp))
@@ -97,17 +104,35 @@ bool ReadWantsUSB(const char* title_dir)
     }
     if (!in_section)
       continue;
-
     const size_t equals = text.find('=');
     if (equals == std::string_view::npos)
       continue;
-    if (StringUtil::StripWhitespace(text.substr(0, equals)) == "USBDrives")
-    {
-      const std::string_view value = StringUtil::StripWhitespace(text.substr(equals + 1));
-      wanted = !(value == "false" || value == "False" || value == "0");
-    }
+    const std::string_view key = StringUtil::StripWhitespace(text.substr(0, equals));
+    const std::string_view value = StringUtil::StripWhitespace(text.substr(equals + 1));
+    if (key == "USBDrives" && wants_usb)
+      *wants_usb = !IniFalse(value);
+    else if (logs && key == "Logs")
+      logs->on = !IniFalse(value);
+    else if (logs && key == "LogBoot")
+      logs->boot = !IniFalse(value);
+    else if (logs && key == "LogDriver")
+      logs->driver = !IniFalse(value);
+    else if (logs && key == "LogKlog")
+      logs->klog = !IniFalse(value);
+    else if (logs && key == "LogPlace")
+      logs->place = std::string(value);
   }
   std::fclose(fp);
+}
+
+bool ReadWantsUSB(const char* title_dir)
+{
+  char path[256];
+  std::snprintf(path, sizeof(path), "%s/usb-off.txt", title_dir);
+  if (Exists(path))
+    return false;
+  bool wanted = true;
+  ReadEarlySettings(title_dir, &wanted, nullptr);
   return wanted;
 }
 
@@ -209,14 +234,41 @@ constexpr char NETWORK_CFG_TEMPLATE[] =
   "# uid = 1000\n"
   "# gid = 1000\n";
 
-// v1.0.19 (from OGBox 0.0.3): the boot log's lines go through memory to a writer thread of their own.
-// A line written straight to the file (ps5px_log's write, standard error's) waited for the file
-// system on the thread that logged it: OGBox measured 600 to 900 ms a line on the console while a
-// game's own writes and an fsync were in flight, and Crux2 logs from the EE and GS threads (a
-// render target made, a frame queue changed, the pacing) while save states and memory cards are
-// written. The writer writes what is there every 100 ms at most, and syncs the file every 2 s (a
-// console that goes down whole loses what the cache held). Fixed storage: the crash report drains
-// it, in a signal handler (ps5px_log_fd).
+// ---- the logs (v1.0.19) ------------------------------------------------------------------------
+//
+// What is logged and where is the player's choice (Settings > Debug > Logs, read here by hand from
+// inis/PCSX2.ini: the boot log starts long before the settings are loaded):
+//   [PS5] Logs      false: no logs at all (no file, no copy in klog, the driver's messages dropped)
+//   [PS5] LogBoot   false: no crux2-boot.log
+//   [PS5] LogDriver false: the graphics driver's messages (standard error) dropped
+//   [PS5] LogKlog   false: no copy of the lines in the console's kernel log
+//   [PS5] LogPlace  the folder the logs go to ("": the title folder; a USB drive's Crux2-logs). A
+//                   folder that is not there at the start (the drive is out) keeps the boot log in
+//                   memory for the session, where Settings > Debug shows it.
+//
+// The lines go through memory to a writer thread of their own (from OGBox 0.0.3): a line written
+// straight to the file waited for the file system on the thread that logged it (OGBox measured 600
+// to 900 ms a line while a game's own writes were in flight, and Crux2 logs from the EE and GS
+// threads while states and memory cards are written). The writer writes what is there every 100 ms
+// at most, and the file is synced only at the moments that matter (a game starts or closes, a fatal
+// error, the shutdown: ps5px_log_checkpoint): up to the first v1.0.19 builds it was synced every
+// two seconds, which wrote the same last block of the console's drive again and again for a few
+// hundred KB of text; the console writes the rest out by itself within about 30 s. Fixed storage:
+// the crash report drains it, in a signal handler (ps5px_log_fd).
+enum class LogMode
+{
+  Direct, // before the writer runs: straight into the file
+  File,   // through the writer into the file
+  Memory, // kept in memory only (the chosen folder was not there)
+  Off,    // no boot log
+};
+LogChoice s_log_choice;
+std::atomic<LogMode> s_log_mode{LogMode::Direct};
+char s_log_path[256] = "";
+char s_log_previous[256] = "";
+char s_crash_path[256] = "";
+int s_crash_fd = -1;
+
 constexpr size_t LOG_RING = size_t(2) << 20;
 char s_ring[LOG_RING];
 size_t s_ring_head = 0, s_ring_length = 0; // the oldest byte, and how many
@@ -225,41 +277,65 @@ pthread_mutex_t s_ring_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t s_ring_ready = PTHREAD_COND_INITIALIZER;
 pthread_cond_t s_ring_empty = PTHREAD_COND_INITIALIZER;
 std::atomic<bool> s_writer_up{false};
+std::atomic<bool> s_sync_wanted{false}; // a checkpoint: the writer syncs the file after what it writes
 bool s_writer_busy = false; // a chunk taken out, being written
 int s_pipe_read = -1;       // standard error's pipe, read by a thread of its own
 
+// Into the ring. Kept in memory only, the oldest lines make room for new ones; otherwise a full
+// ring drops the new ones (and the file says how many) rather than wait for the file system.
 void RingPut(const char* data, size_t length)
 {
+  if (length > LOG_RING)
+  {
+    data += length - LOG_RING;
+    length = LOG_RING;
+  }
   pthread_mutex_lock(&s_ring_lock);
   if (s_ring_length + length > LOG_RING)
   {
-    s_ring_dropped += length;
-  }
-  else
-  {
-    size_t at = (s_ring_head + s_ring_length) % LOG_RING;
-    for (size_t done = 0; done < length;)
+    if (s_log_mode.load(std::memory_order_relaxed) == LogMode::Memory)
     {
-      const size_t part = std::min(length - done, LOG_RING - at);
-      std::memcpy(s_ring + at, data + done, part);
-      done += part;
-      at = (at + part) % LOG_RING;
+      const size_t room = s_ring_length + length - LOG_RING;
+      s_ring_head = (s_ring_head + room) % LOG_RING;
+      s_ring_length -= room;
     }
-    s_ring_length += length;
+    else
+    {
+      s_ring_dropped += length;
+      pthread_cond_signal(&s_ring_ready);
+      pthread_mutex_unlock(&s_ring_lock);
+      return;
+    }
   }
+  size_t at = (s_ring_head + s_ring_length) % LOG_RING;
+  for (size_t done = 0; done < length;)
+  {
+    const size_t part = std::min(length - done, LOG_RING - at);
+    std::memcpy(s_ring + at, data + done, part);
+    done += part;
+    at = (at + part) % LOG_RING;
+  }
+  s_ring_length += length;
   pthread_cond_signal(&s_ring_ready);
   pthread_mutex_unlock(&s_ring_lock);
 }
 
-// A line of the log: through the writer when it runs, else straight into the file.
+// A line of the boot log, by the way the log goes now.
 void LogWrite(const char* data, size_t length)
 {
-  if (s_log_fd < 0)
-    return;
-  if (s_writer_up.load(std::memory_order_acquire))
-    RingPut(data, length);
-  else
-    (void)!write(s_log_fd, data, length);
+  switch (s_log_mode.load(std::memory_order_acquire))
+  {
+    case LogMode::Direct:
+      if (s_log_fd >= 0)
+        (void)!write(s_log_fd, data, length);
+      break;
+    case LogMode::File:
+    case LogMode::Memory:
+      RingPut(data, length);
+      break;
+    case LogMode::Off:
+      break;
+  }
 }
 
 // What the ring holds into the file. The caller holds the lock, which is let go while it writes.
@@ -305,23 +381,23 @@ timespec Deadline(long milliseconds)
 
 void* LogWriterMain(void*)
 {
-  auto last_sync = std::chrono::steady_clock::now();
   pthread_mutex_lock(&s_ring_lock);
   for (;;)
   {
-    if (!s_ring_length)
+    if (!s_ring_length || s_log_mode.load(std::memory_order_relaxed) != LogMode::File)
     {
       const timespec until = Deadline(100);
       pthread_cond_timedwait(&s_ring_ready, &s_ring_lock, &until);
     }
-    RingWriteOut();
-    const auto now = std::chrono::steady_clock::now();
-    if (now - last_sync >= std::chrono::seconds(2) && s_log_fd >= 0)
+    if (s_log_mode.load(std::memory_order_relaxed) == LogMode::File)
     {
-      last_sync = now;
-      pthread_mutex_unlock(&s_ring_lock);
-      fsync(s_log_fd);
-      pthread_mutex_lock(&s_ring_lock);
+      RingWriteOut();
+      if (s_sync_wanted.exchange(false, std::memory_order_acq_rel) && s_log_fd >= 0)
+      {
+        pthread_mutex_unlock(&s_ring_lock);
+        fsync(s_log_fd);
+        pthread_mutex_lock(&s_ring_lock);
+      }
     }
   }
   return nullptr;
@@ -342,13 +418,15 @@ void* LogPipeMain(void*)
   return nullptr;
 }
 
+
 } // namespace
 
-// Everything logged so far into the file and onto the disk (the shutdown's last line, a fatal
-// error): waits up to 5 s for the writer.
+// Everything logged so far into the file and onto the disk, now: a fatal error, the shutdown.
+// Waits up to 5 s for the log's writer.
 extern "C" void ps5px_log_flush(void)
 {
-  if (s_writer_up.load(std::memory_order_acquire))
+  const LogMode mode = s_log_mode.load(std::memory_order_acquire);
+  if (mode == LogMode::File && s_writer_up.load(std::memory_order_acquire))
   {
     std::fflush(stderr);
     if (s_pipe_read >= 0)
@@ -362,25 +440,83 @@ extern "C" void ps5px_log_flush(void)
     }
     pthread_mutex_unlock(&s_ring_lock);
   }
-  if (s_log_fd >= 0)
+  if ((mode == LogMode::File || mode == LogMode::Direct) && s_log_fd >= 0)
     fsync(s_log_fd);
 }
 
-extern "C" const char* ps5px_title_dir(void)
+// A moment that matters (a game starts or closes): the writer syncs the file after the lines it has,
+// on its own thread; the caller does not wait.
+extern "C" void ps5px_log_checkpoint(void)
 {
-  return s_title_dir;
+  const LogMode mode = s_log_mode.load(std::memory_order_acquire);
+  if (mode == LogMode::File && s_writer_up.load(std::memory_order_acquire))
+  {
+    s_sync_wanted.store(true, std::memory_order_release);
+    pthread_mutex_lock(&s_ring_lock);
+    pthread_cond_signal(&s_ring_ready);
+    pthread_mutex_unlock(&s_ring_lock);
+  }
+  else if (mode == LogMode::Direct && s_log_fd >= 0)
+  {
+    fsync(s_log_fd);
+  }
 }
 
-extern "C" const char* ps5px_ca_bundle(void)
+// The boot log as it is now, for Settings > Debug when it is kept in memory only: true and the
+// text, or false when it has a file (or there is none).
+bool PS5Platform::LogInMemory(std::string* text)
 {
-  return s_ca_bundle;
+  if (s_log_mode.load(std::memory_order_acquire) != LogMode::Memory)
+    return false;
+  pthread_mutex_lock(&s_ring_lock);
+  text->clear();
+  text->reserve(s_ring_length);
+  const size_t first = std::min(s_ring_length, LOG_RING - s_ring_head);
+  text->append(s_ring + s_ring_head, first);
+  text->append(s_ring, s_ring_length - first);
+  pthread_mutex_unlock(&s_ring_lock);
+  return true;
+}
+
+std::string PS5Platform::LogPath()
+{
+  return s_log_path;
+}
+
+std::string PS5Platform::LogPreviousPath()
+{
+  if (s_log_previous[0] != '\0')
+    return s_log_previous;
+  // No file of its own this run: a crash of the run before that kept its log in memory.
+  char kept[256];
+  std::snprintf(kept, sizeof(kept), "%s/crux2-crash.previous.log", s_title_dir);
+  return Exists(kept) ? std::string(kept) : std::string();
 }
 
 // The crash report's descriptor of the log, which it writes its lines to itself (in a signal
 // handler): what the ring still holds goes in first, unless another thread holds the ring (a
-// signal handler can't wait for it).
+// signal handler can't wait for it). A boot log kept in memory goes into crux2-crash.log in the
+// title folder with the report: a crash is the one time it is written to the console's drive.
 extern "C" int ps5px_log_fd(void)
 {
+  const LogMode mode = s_log_mode.load(std::memory_order_acquire);
+  if (mode == LogMode::Off)
+    return -1;
+  if (mode == LogMode::Memory)
+  {
+    if (s_crash_fd < 0 && s_crash_path[0] != '\0')
+    {
+      s_crash_fd = open(s_crash_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0666);
+      if (s_crash_fd >= 0 && pthread_mutex_trylock(&s_ring_lock) == 0)
+      {
+        const size_t first = std::min(s_ring_length, LOG_RING - s_ring_head);
+        (void)!write(s_crash_fd, s_ring + s_ring_head, first);
+        (void)!write(s_crash_fd, s_ring, s_ring_length - first);
+        pthread_mutex_unlock(&s_ring_lock);
+      }
+    }
+    return s_crash_fd;
+  }
   if (s_log_fd >= 0 && s_writer_up.load(std::memory_order_acquire) && pthread_mutex_trylock(&s_ring_lock) == 0)
   {
     while (s_ring_length)
@@ -397,6 +533,8 @@ extern "C" int ps5px_log_fd(void)
 
 extern "C" void ps5px_log(const char* format, ...)
 {
+  if (!s_log_choice.on)
+    return;
   char text[1024];
   va_list args;
   va_start(args, format);
@@ -404,11 +542,15 @@ extern "C" void ps5px_log(const char* format, ...)
   va_end(args);
 
   char line[1100];
-  int length = std::snprintf(line, sizeof(line), "[Crux2] %s\n", text);
-  if (length > 0)
-    (void)sceKernelDebugOutText(0, line);
+  int length;
+  if (s_log_choice.klog)
+  {
+    length = std::snprintf(line, sizeof(line), "[Crux2] %s\n", text);
+    if (length > 0)
+      (void)sceKernelDebugOutText(0, line);
+  }
 
-  if (s_log_fd >= 0)
+  if (s_log_choice.boot)
   {
     length = std::snprintf(line, sizeof(line), "[%8.3f] %s\n", now_seconds() - s_start_time, text);
     if (length > 0)
@@ -437,6 +579,8 @@ extern "C" void ps5px_notify(const char* message)
   (void)sceKernelSendNotificationRequest(0, &request, sizeof(request), 0);
 }
 
+extern "C" int ps5px_safety_state_write(void);
+
 extern "C" void ps5_title_fatal(const char* message)
 {
   static bool s_in_fatal = false;
@@ -445,6 +589,9 @@ extern "C" void ps5_title_fatal(const char* message)
     s_in_fatal = true;
     ps5px_log("FATAL: %s", message ? message : "(no message)");
     ps5px_notify(message ? message : "A fatal error stopped the emulator.");
+    // v1.0.19: the game's safety state, kept in memory, onto the drive (ps5_extras.cpp).
+    if (ps5px_safety_state_write())
+      ps5px_log("(the game's safety state was written: the library offers to go on from it)");
     ps5px_log_flush();
   }
 
@@ -474,64 +621,131 @@ void PS5Platform::EarlyInit()
   const bool found = FindTitleFolder(s_title_dir, sizeof(s_title_dir));
   std::snprintf(s_ca_bundle, sizeof(s_ca_bundle), "%s/resources/cacert.pem", s_title_dir);
 
-  // The boot log; the previous run's is kept, since a crash report is the last thing in it.
-  char log_path[192], previous_path[192];
-  std::snprintf(log_path, sizeof(log_path), "%s/crux2-boot.log", s_title_dir);
-  std::snprintf(previous_path, sizeof(previous_path), "%s/crux2-boot.previous.log", s_title_dir);
+  // The logs: what is logged and where (Settings > Debug > Logs; read by hand, as the settings are
+  // loaded long after the boot log starts). Off: no file, no copy in klog, the driver's messages
+  // dropped. The driver's messages go into the boot log, so without it they are dropped too.
+  ReadEarlySettings(s_title_dir, nullptr, &s_log_choice);
+  if (!s_log_choice.on)
+    s_log_choice.boot = s_log_choice.driver = s_log_choice.klog = false;
+  if (!s_log_choice.boot)
+    s_log_choice.driver = false;
+  std::snprintf(s_crash_path, sizeof(s_crash_path), "%s/crux2-crash.log", s_title_dir);
   {
-    // The builds before v0.6.0 named them pspcsx2-boot.log: the last of those becomes this run's
-    // "run before" (a crash it ended in is still told), the older one goes.
-    char before[192];
-    std::snprintf(before, sizeof(before), "%s/pspcsx2-boot.previous.log", s_title_dir);
-    (void)unlink(before);
-    std::snprintf(before, sizeof(before), "%s/pspcsx2-boot.log", s_title_dir);
-    if (access(log_path, F_OK) != 0)
-      (void)rename(before, log_path);
-    else
-      (void)unlink(before);
+    // A crash of a run whose boot log was kept in memory left crux2-crash.log: it becomes the run
+    // before's (once), so that the library still tells of it.
+    char kept[256];
+    std::snprintf(kept, sizeof(kept), "%s/crux2-crash.previous.log", s_title_dir);
+    if (access(s_crash_path, F_OK) == 0)
+    {
+      (void)unlink(kept);
+      (void)rename(s_crash_path, kept);
+    }
+    else if (access(kept, F_OK) == 0)
+    {
+      (void)unlink(kept);
+    }
   }
-  // (The previous log goes first: a rename onto a file is not trusted on an exFAT drive.)
-  (void)unlink(previous_path);
-  (void)rename(log_path, previous_path);
-  s_log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0666);
-  MakePublic(log_path, false);
-  MakePublic(previous_path, false);
-
-  // Standard error goes into the boot log, each line as it is printed: what the graphics driver says
-  // before a stop is then in the file. (The console refuses dup2 onto descriptor 2 to a title, so the
-  // stream is moved to another descriptor.) v1.0.19: the log's writer thread, and standard error
-  // into it through a pipe read by a thread of its own, so that no line waits for the file system;
-  // without them, as before, a second descriptor of the file.
-  if (s_log_fd >= 0)
+  bool place_missing = false;
+  std::string folder = s_title_dir;
+  if (!s_log_choice.place.empty())
   {
+    // A folder of the player's choice (a USB drive's Crux2-logs): made when its drive is there.
+    folder = s_log_choice.place;
+    if (mkdir(folder.c_str(), 0777) != 0 && errno != EEXIST)
+      place_missing = true;
+    struct stat st;
+    if (stat(folder.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+      place_missing = true;
+  }
+  char log_path[256], previous_path[256];
+  std::snprintf(log_path, sizeof(log_path), "%s/crux2-boot.log", folder.c_str());
+  std::snprintf(previous_path, sizeof(previous_path), "%s/crux2-boot.previous.log", folder.c_str());
+  if (s_log_choice.boot && !place_missing)
+  {
+    if (s_log_choice.place.empty())
     {
-      pthread_t writer;
-      if (pthread_create(&writer, nullptr, &LogWriterMain, nullptr) == 0)
-      {
-        pthread_detach(writer);
-        s_writer_up.store(true, std::memory_order_release);
-      }
-    }
-    int second = -1;
-    int pipe_fds[2] = {-1, -1};
-    if (s_writer_up.load(std::memory_order_acquire) && pipe(pipe_fds) == 0)
-    {
-      s_pipe_read = pipe_fds[0];
-      pthread_t reader;
-      if (pthread_create(&reader, nullptr, &LogPipeMain, nullptr) == 0)
-      {
-        pthread_detach(reader);
-        second = pipe_fds[1];
-      }
+      // The builds before v0.6.0 named them pspcsx2-boot.log: the last of those becomes this run's
+      // "run before" (a crash it ended in is still told), the older one goes.
+      char before[192];
+      std::snprintf(before, sizeof(before), "%s/pspcsx2-boot.previous.log", s_title_dir);
+      (void)unlink(before);
+      std::snprintf(before, sizeof(before), "%s/pspcsx2-boot.log", s_title_dir);
+      if (access(log_path, F_OK) != 0)
+        (void)rename(before, log_path);
       else
-      {
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
-        s_pipe_read = -1;
-      }
+        (void)unlink(before);
     }
-    if (second < 0)
-      second = open(log_path, O_WRONLY | O_APPEND);
+    // The previous run's log is kept, since a crash report is the last thing in it. (It goes first:
+    // a rename onto a file is not trusted on an exFAT drive.)
+    (void)unlink(previous_path);
+    (void)rename(log_path, previous_path);
+    s_log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0666);
+    MakePublic(log_path, false);
+    MakePublic(previous_path, false);
+  }
+  if (!s_log_choice.boot)
+  {
+    s_log_mode.store(LogMode::Off, std::memory_order_release);
+  }
+  else if (s_log_fd >= 0)
+  {
+    std::snprintf(s_log_path, sizeof(s_log_path), "%s", log_path);
+    std::snprintf(s_log_previous, sizeof(s_log_previous), "%s", previous_path);
+    s_log_mode.store(LogMode::Direct, std::memory_order_release);
+  }
+  else
+  {
+    // The chosen folder is not there (its drive is out) or the file can't be made: the boot log is
+    // kept in memory for this session, where Settings > Debug shows it.
+    s_log_mode.store(LogMode::Memory, std::memory_order_release);
+  }
+
+  // The writer thread, when there is a file to write to.
+  if (s_log_mode.load(std::memory_order_acquire) == LogMode::Direct)
+  {
+    pthread_t writer;
+    if (pthread_create(&writer, nullptr, &LogWriterMain, nullptr) == 0)
+    {
+      pthread_detach(writer);
+      s_writer_up.store(true, std::memory_order_release);
+      s_log_mode.store(LogMode::File, std::memory_order_release);
+    }
+  }
+
+  // Standard error (the graphics driver's messages) into the boot log, each line as it is printed:
+  // what the driver says before a stop is then there. Through a pipe read by a thread of its own,
+  // so that no line waits for the file system; without that thread, a second descriptor of the
+  // file, as before v1.0.19. (The console refuses dup2 onto descriptor 2 to a title, so the stream
+  // is moved to another descriptor.) The driver's messages not wanted: into /dev/null.
+  {
+    int second = -1;
+    if (s_log_choice.driver)
+    {
+      const LogMode mode = s_log_mode.load(std::memory_order_acquire);
+      int pipe_fds[2] = {-1, -1};
+      if ((mode == LogMode::File || mode == LogMode::Memory) && pipe(pipe_fds) == 0)
+      {
+        s_pipe_read = pipe_fds[0];
+        pthread_t reader;
+        if (pthread_create(&reader, nullptr, &LogPipeMain, nullptr) == 0)
+        {
+          pthread_detach(reader);
+          second = pipe_fds[1];
+        }
+        else
+        {
+          close(pipe_fds[0]);
+          close(pipe_fds[1]);
+          s_pipe_read = -1;
+        }
+      }
+      if (second < 0 && mode == LogMode::Direct && s_log_fd >= 0)
+        second = open(log_path, O_WRONLY | O_APPEND);
+    }
+    else
+    {
+      second = open("/dev/null", O_WRONLY);
+    }
     FILE* const stream = (second >= 0) ? fdopen(second, "a") : nullptr;
     if (stream)
     {
@@ -553,6 +767,14 @@ void PS5Platform::EarlyInit()
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S UTC", tm);
   ps5px_log("Crux2 (%s) starts, %s", TITLE_ID, when);
   ps5px_log("title folder: %s", s_title_dir);
+  {
+    const LogMode mode = s_log_mode.load(std::memory_order_acquire);
+    ps5px_log("logs: this log %s; the graphics driver's messages %s; a copy in klog %s; synced to the drive when a game starts "
+              "or closes and at the end",
+              mode == LogMode::Memory ? (place_missing ? "kept in memory (its folder is not there: is the drive in?)" : "kept in memory (its file could not be made)")
+                                      : s_log_path,
+              s_log_choice.driver ? "in it" : "dropped", s_log_choice.klog ? "on" : "off");
+  }
   if (!s_wants_usb)
     ps5px_log("USB drives: off ([PS5] USBDrives in inis/PCSX2.ini, or usb-off.txt)");
   else

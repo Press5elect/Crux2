@@ -3,7 +3,7 @@ Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of N
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index b0c394591..220d85992 100644
+index b0c3945..220d859 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -36,7 +36,15 @@ detect_compiler()
@@ -44,7 +44,7 @@ index b0c394591..220d85992 100644
  endif()
  
 diff --git a/bin/resources/GameIndex.yaml b/bin/resources/GameIndex.yaml
-index 96998116b..5a1b3450d 100644
+index 9699811..5a1b345 100644
 --- a/bin/resources/GameIndex.yaml
 +++ b/bin/resources/GameIndex.yaml
 @@ -2044,6 +2044,7 @@ SCAJ-20125:
@@ -104,7 +104,7 @@ index 96998116b..5a1b3450d 100644
  SLUS-21161:
    name: "Fight Night Round 2"
 diff --git a/cmake/BuildParameters.cmake b/cmake/BuildParameters.cmake
-index b8ead9be6..1a7939cf4 100644
+index b8ead9b..1a7939c 100644
 --- a/cmake/BuildParameters.cmake
 +++ b/cmake/BuildParameters.cmake
 @@ -107,7 +107,10 @@ if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64" OR "${CMAKE_SYSTEM_PROCESSOR}"
@@ -120,7 +120,7 @@ index b8ead9be6..1a7939cf4 100644
  			endif()
  		endif()
 diff --git a/common/BitUtils.h b/common/BitUtils.h
-index 125570901..e08286142 100644
+index 1255709..e082861 100644
 --- a/common/BitUtils.h
 +++ b/common/BitUtils.h
 @@ -28,6 +28,9 @@ static inline int _BitScanReverse(unsigned long* const Index, const unsigned lon
@@ -151,7 +151,7 @@ index 125570901..e08286142 100644
  	{
  		// If the sign bit is 1, we invert the bits to 0 for count-leading-zero.
 diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
-index 7d3dd44cf..ccd8c3598 100644
+index 7d3dd44..ccd8c35 100644
 --- a/common/CMakeLists.txt
 +++ b/common/CMakeLists.txt
 @@ -169,6 +169,15 @@ elseif(APPLE)
@@ -171,7 +171,7 @@ index 7d3dd44cf..ccd8c3598 100644
  	target_sources(common PRIVATE
  		Linux/LnxHostSys.cpp
 diff --git a/common/CrashHandler.cpp b/common/CrashHandler.cpp
-index a44f07af3..240d51086 100644
+index a44f07a..240d510 100644
 --- a/common/CrashHandler.cpp
 +++ b/common/CrashHandler.cpp
 @@ -354,6 +354,11 @@ void CrashHandler::WriteDumpForCaller()
@@ -187,7 +187,7 @@ index a44f07af3..240d51086 100644
  
  bool CrashHandler::Install()
 diff --git a/common/FileSystem.cpp b/common/FileSystem.cpp
-index 24eddeb3b..76f891605 100644
+index 24eddeb..76f8916 100644
 --- a/common/FileSystem.cpp
 +++ b/common/FileSystem.cpp
 @@ -23,7 +23,16 @@
@@ -707,7 +707,7 @@ index 24eddeb3b..76f891605 100644
  
  	return S_ISLNK(sysStatData.st_mode);
 diff --git a/common/HTTPDownloaderCurl.cpp b/common/HTTPDownloaderCurl.cpp
-index 078d5d304..fa7f999c9 100644
+index 078d5d3..fa7f999 100644
 --- a/common/HTTPDownloaderCurl.cpp
 +++ b/common/HTTPDownloaderCurl.cpp
 @@ -14,6 +14,10 @@
@@ -734,7 +734,7 @@ index 078d5d304..fa7f999c9 100644
  	if (request->type == Request::Type::Post)
  	{
 diff --git a/common/HostSys.cpp b/common/HostSys.cpp
-index d1ce25ba9..7ebe768ac 100644
+index d1ce25b..7ebe768 100644
 --- a/common/HostSys.cpp
 +++ b/common/HostSys.cpp
 @@ -130,8 +130,17 @@ struct crash_info_t
@@ -756,7 +756,7 @@ index d1ce25ba9..7ebe768ac 100644
  	gCRAnnotations.message = reinterpret_cast<size_t>(msg);
  	// Some macOS's seem to have issues displaying non-static `message`s, so throw it in here too
 diff --git a/common/Semaphore.cpp b/common/Semaphore.cpp
-index 8dc2f7913..2214e977a 100644
+index 8dc2f79..2214e97 100644
 --- a/common/Semaphore.cpp
 +++ b/common/Semaphore.cpp
 @@ -137,7 +137,7 @@ void Threading::WorkSema::Reset()
@@ -769,7 +769,7 @@ index 8dc2f7913..2214e977a 100644
  Threading::KernelSemaphore::KernelSemaphore()
  {
 diff --git a/common/SettingsWrapper.cpp b/common/SettingsWrapper.cpp
-index 335f70003..c4b0c900a 100644
+index 335f700..c4b0c90 100644
 --- a/common/SettingsWrapper.cpp
 +++ b/common/SettingsWrapper.cpp
 @@ -23,6 +23,26 @@ SettingsWrapper::SettingsWrapper(SettingsInterface& si)
@@ -800,7 +800,7 @@ index 335f70003..c4b0c900a 100644
  	: SettingsWrapper(si)
  {
 diff --git a/common/SettingsWrapper.h b/common/SettingsWrapper.h
-index 9f621f493..fb7886593 100644
+index 9f621f4..fb78865 100644
 --- a/common/SettingsWrapper.h
 +++ b/common/SettingsWrapper.h
 @@ -9,6 +9,7 @@
@@ -820,7 +820,7 @@ index 9f621f493..fb7886593 100644
  	template <typename T>
  	void EnumEntry(const char* section, const char* var, T& value, const char* const* enumArray = nullptr, const T defvalue = (T)0)
 diff --git a/common/Threading.h b/common/Threading.h
-index 70b6ed0fb..c59516b1f 100644
+index 70b6ed0..c59516b 100644
 --- a/common/Threading.h
 +++ b/common/Threading.h
 @@ -7,6 +7,8 @@
@@ -847,7 +847,7 @@ index 70b6ed0fb..c59516b1f 100644
  		sem_t m_sema;
  #endif
 diff --git a/common/WindowInfo.cpp b/common/WindowInfo.cpp
-index d26d5fc07..b66f9ffce 100644
+index d26d5fc..b66f9ff 100644
 --- a/common/WindowInfo.cpp
 +++ b/common/WindowInfo.cpp
 @@ -246,6 +246,10 @@ static std::optional<float> GetRefreshRateFromXRandR(const WindowInfo& wi)
@@ -862,7 +862,7 @@ index d26d5fc07..b66f9ffce 100644
  	if (wi.type == WindowInfo::Type::X11)
  		return GetRefreshRateFromXRandR(wi);
 diff --git a/common/WindowInfo.h b/common/WindowInfo.h
-index 4ccad5a4d..af12d0c00 100644
+index 4ccad5a..af12d0c 100644
 --- a/common/WindowInfo.h
 +++ b/common/WindowInfo.h
 @@ -15,7 +15,8 @@ struct WindowInfo
@@ -876,7 +876,7 @@ index 4ccad5a4d..af12d0c00 100644
  
  	/// The type of the surface. Surfaceless indicates it will not be displayed on screen at all.
 diff --git a/common/emitter/bmi.cpp b/common/emitter/bmi.cpp
-index 0733b6958..4f2827fd9 100644
+index 0733b69..4f2827f 100644
 --- a/common/emitter/bmi.cpp
 +++ b/common/emitter/bmi.cpp
 @@ -5,18 +5,17 @@
@@ -905,7 +905,7 @@ index 0733b6958..4f2827fd9 100644
  	}
  } // namespace x86Emitter
 diff --git a/common/emitter/groups.cpp b/common/emitter/groups.cpp
-index 97883646b..04e1299ba 100644
+index 9788364..04e1299 100644
 --- a/common/emitter/groups.cpp
 +++ b/common/emitter/groups.cpp
 @@ -189,7 +189,7 @@ namespace x86Emitter
@@ -927,7 +927,7 @@ index 97883646b..04e1299ba 100644
  	void xImpl_Group8::operator()(const xIndirect64& bitbase, u8 bitoffset) const { xOpWrite0F(0xba, InstType, bitbase, bitoffset); }
  	void xImpl_Group8::operator()(const xIndirect32& bitbase, u8 bitoffset) const { xOpWrite0F(0xba, InstType, bitbase, bitoffset); }
 diff --git a/common/emitter/implement/bmi.h b/common/emitter/implement/bmi.h
-index 6f77fe9e6..c0353bc99 100644
+index 6f77fe9..c0353bc 100644
 --- a/common/emitter/implement/bmi.h
 +++ b/common/emitter/implement/bmi.h
 @@ -10,9 +10,7 @@ namespace x86Emitter
@@ -972,7 +972,7 @@ index 6f77fe9e6..c0353bc99 100644
  	};
  } // namespace x86Emitter
 diff --git a/common/emitter/instructions.h b/common/emitter/instructions.h
-index 256169c2a..1221678db 100644
+index 256169c..1221678 100644
 --- a/common/emitter/instructions.h
 +++ b/common/emitter/instructions.h
 @@ -601,6 +601,8 @@ namespace x86Emitter
@@ -985,7 +985,7 @@ index 256169c2a..1221678db 100644
  	extern const xImplSimd_AddSub xPADD;
  	extern const xImplSimd_AddSub xPSUB;
 diff --git a/common/emitter/internal.h b/common/emitter/internal.h
-index 961212d25..4ae9773a1 100644
+index 961212d..4ae9773 100644
 --- a/common/emitter/internal.h
 +++ b/common/emitter/internal.h
 @@ -107,73 +107,6 @@ namespace x86Emitter
@@ -1063,7 +1063,7 @@ index 961212d25..4ae9773a1 100644
  	void EmitVEX(SIMDInstructionInfo info, const xRegisterBase& dst, u8 src1, const xIndirectVoid& src2, int extraRipOffset = 0);
  	void EmitVEX(SIMDInstructionInfo info, u32 ext, u8 dst, const xRegisterBase& src2, int extraRipOffset = 0);
 diff --git a/common/emitter/simd.cpp b/common/emitter/simd.cpp
-index fe0ef2898..efe6b37f2 100644
+index fe0ef28..efe6b37 100644
 --- a/common/emitter/simd.cpp
 +++ b/common/emitter/simd.cpp
 @@ -143,7 +143,7 @@ namespace x86Emitter
@@ -1102,7 +1102,7 @@ index fe0ef2898..efe6b37f2 100644
  	{
  		{SIMDInstructionInfo(0xfc).p66().i().commutative()}, // B
 diff --git a/common/emitter/x86emitter.cpp b/common/emitter/x86emitter.cpp
-index 0c70b8aaf..55abeab0f 100644
+index 0c70b8a..55abeab 100644
 --- a/common/emitter/x86emitter.cpp
 +++ b/common/emitter/x86emitter.cpp
 @@ -1196,14 +1196,14 @@ const xRegister32
@@ -1123,7 +1123,7 @@ index 0c70b8aaf..55abeab0f 100644
  
  	void xImpl_DwordShift::operator()(const xIndirectVoid& dest, const xRegister16or32or64& from, const xRegisterCL& /* clreg */) const
 diff --git a/pcsx2/CDVD/CDVD.cpp b/pcsx2/CDVD/CDVD.cpp
-index 3b6ab2e11..31de0a9e0 100644
+index 3b6ab2e..31de0a9 100644
 --- a/pcsx2/CDVD/CDVD.cpp
 +++ b/pcsx2/CDVD/CDVD.cpp
 @@ -355,6 +355,13 @@ s32 cdvdReadConfig(u8* config)
@@ -1141,7 +1141,7 @@ index 3b6ab2e11..31de0a9e0 100644
  			cdvd.CBlockIndex++;
  		}
 diff --git a/pcsx2/CDVD/CDVDdiscReader.h b/pcsx2/CDVD/CDVDdiscReader.h
-index c9f00a640..617cd5ea2 100644
+index c9f00a6..617cd5e 100644
 --- a/pcsx2/CDVD/CDVDdiscReader.h
 +++ b/pcsx2/CDVD/CDVDdiscReader.h
 @@ -11,6 +11,10 @@
@@ -1188,7 +1188,7 @@ index c9f00a640..617cd5ea2 100644
  	u32 m_sectors = 0;
  	u32 m_layer_break = 0;
 diff --git a/pcsx2/CDVD/CDVDdiscThread.cpp b/pcsx2/CDVD/CDVDdiscThread.cpp
-index 466c83292..0635290b4 100644
+index 466c832..0635290 100644
 --- a/pcsx2/CDVD/CDVDdiscThread.cpp
 +++ b/pcsx2/CDVD/CDVDdiscThread.cpp
 @@ -2,6 +2,22 @@
@@ -1549,7 +1549,7 @@ index 466c83292..0635290b4 100644
  	if (src->GetMediaType() >= 0)
  	{
 diff --git a/pcsx2/CDVD/Darwin/DriveUtility.cpp b/pcsx2/CDVD/Darwin/DriveUtility.cpp
-index e01e59e3b..5c23da78d 100644
+index e01e59e..5c23da7 100644
 --- a/pcsx2/CDVD/Darwin/DriveUtility.cpp
 +++ b/pcsx2/CDVD/Darwin/DriveUtility.cpp
 @@ -18,6 +18,10 @@
@@ -1593,7 +1593,7 @@ index e01e59e3b..5c23da78d 100644
  		drive.clear();
  #endif
 diff --git a/pcsx2/CDVD/Darwin/IOCtlSrc.cpp b/pcsx2/CDVD/Darwin/IOCtlSrc.cpp
-index 695f4c344..fe72c1585 100644
+index 695f4c3..fe72c15 100644
 --- a/pcsx2/CDVD/Darwin/IOCtlSrc.cpp
 +++ b/pcsx2/CDVD/Darwin/IOCtlSrc.cpp
 @@ -19,6 +19,220 @@
@@ -2246,7 +2246,7 @@ index 695f4c344..fe72c1585 100644
  	if (m_device == -1)
  		return false;
 diff --git a/pcsx2/CMakeLists.txt b/pcsx2/CMakeLists.txt
-index 4c8ce815d..8233eb4b1 100644
+index 4c8ce81..8233eb4 100644
 --- a/pcsx2/CMakeLists.txt
 +++ b/pcsx2/CMakeLists.txt
 @@ -103,6 +103,7 @@ set(pcsx2Sources
@@ -2386,7 +2386,7 @@ index 4c8ce815d..8233eb4b1 100644
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index 21adcf1f1..b07161e27 100644
+index 21adcf1..b07161e 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -9,9 +9,12 @@
@@ -2501,7 +2501,7 @@ index 21adcf1f1..b07161e27 100644
  
  #define SHIFT_RECOMPILE // Speed majorly reduced if disabled
 diff --git a/pcsx2/DEV9/AdapterUtils.cpp b/pcsx2/DEV9/AdapterUtils.cpp
-index 9478c33c0..7c354fb44 100644
+index 9478c33..7c354fb 100644
 --- a/pcsx2/DEV9/AdapterUtils.cpp
 +++ b/pcsx2/DEV9/AdapterUtils.cpp
 @@ -561,6 +561,12 @@ std::vector<IP_Address> AdapterUtils::GetDNS(const Adapter* adapter)
@@ -2518,7 +2518,7 @@ index 9478c33c0..7c354fb44 100644
  
  	std::fstream servers("/etc/resolv.conf", std::ios::in);
 diff --git a/pcsx2/DEV9/InternalServers/DHCP_Server.cpp b/pcsx2/DEV9/InternalServers/DHCP_Server.cpp
-index 31448c3da..db9292e3e 100644
+index 31448c3..db9292e 100644
 --- a/pcsx2/DEV9/InternalServers/DHCP_Server.cpp
 +++ b/pcsx2/DEV9/InternalServers/DHCP_Server.cpp
 @@ -25,6 +25,10 @@
@@ -2581,7 +2581,7 @@ index 31448c3da..db9292e3e 100644
  		callback();
  		return true;
 diff --git a/pcsx2/DEV9/InternalServers/DNS_Server.cpp b/pcsx2/DEV9/InternalServers/DNS_Server.cpp
-index 3beb36dd1..1d8cc3533 100644
+index 3beb36d..1d8cc35 100644
 --- a/pcsx2/DEV9/InternalServers/DNS_Server.cpp
 +++ b/pcsx2/DEV9/InternalServers/DNS_Server.cpp
 @@ -27,6 +27,10 @@
@@ -2631,7 +2631,7 @@ index 3beb36dd1..1d8cc3533 100644
  		hints.ai_family = AF_INET;
  		addrinfo* result = nullptr;
 diff --git a/pcsx2/DEV9/net.cpp b/pcsx2/DEV9/net.cpp
-index ba1b41856..23c96f6b5 100644
+index ba1b418..23c96f6 100644
 --- a/pcsx2/DEV9/net.cpp
 +++ b/pcsx2/DEV9/net.cpp
 @@ -64,6 +64,13 @@ NetAdapter* GetNetAdapter()
@@ -2667,7 +2667,7 @@ index ba1b41856..23c96f6b5 100644
  	sched_param param;
  
 diff --git a/pcsx2/DEV9/sockets.cpp b/pcsx2/DEV9/sockets.cpp
-index a962a7412..01780703a 100644
+index a962a74..0178070 100644
 --- a/pcsx2/DEV9/sockets.cpp
 +++ b/pcsx2/DEV9/sockets.cpp
 @@ -34,6 +34,10 @@
@@ -2843,7 +2843,7 @@ index a962a7412..01780703a 100644
  
  SocketAdapter::~SocketAdapter()
 diff --git a/pcsx2/FPU.cpp b/pcsx2/FPU.cpp
-index 89d050453..77d5c7ca9 100644
+index 89d0504..77d5c7c 100644
 --- a/pcsx2/FPU.cpp
 +++ b/pcsx2/FPU.cpp
 @@ -2,6 +2,7 @@
@@ -3308,7 +3308,7 @@ index 89d050453..77d5c7ca9 100644
  
  }	// End Namespace COP1
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
-index a0b988f22..714ef824a 100644
+index a0b988f..714ef82 100644
 --- a/pcsx2/GS/GS.cpp
 +++ b/pcsx2/GS/GS.cpp
 @@ -53,6 +53,11 @@
@@ -3605,7 +3605,7 @@ index a0b988f22..714ef824a 100644
  
  #include <sys/mman.h>
 diff --git a/pcsx2/GS/GSDump.cpp b/pcsx2/GS/GSDump.cpp
-index 2fdb1ac85..4a208ffcf 100644
+index 2fdb1ac..4a208ff 100644
 --- a/pcsx2/GS/GSDump.cpp
 +++ b/pcsx2/GS/GSDump.cpp
 @@ -339,6 +339,16 @@ namespace
@@ -3626,7 +3626,7 @@ index 2fdb1ac85..4a208ffcf 100644
  		m_in_buff.reserve(_1mb);
  		m_out_buff.resize(_1mb);
 diff --git a/pcsx2/GS/GSJobQueue.h b/pcsx2/GS/GSJobQueue.h
-index d944b77e7..9b8303b36 100644
+index d944b77..9b8303b 100644
 --- a/pcsx2/GS/GSJobQueue.h
 +++ b/pcsx2/GS/GSJobQueue.h
 @@ -12,6 +12,12 @@
@@ -3659,7 +3659,7 @@ index d944b77e7..9b8303b36 100644
  		if (m_shutdown)
  			m_shutdown();
 diff --git a/pcsx2/GS/GSPerfMon.h b/pcsx2/GS/GSPerfMon.h
-index d4defa812..d74eb9288 100644
+index d4defa8..d74eb92 100644
 --- a/pcsx2/GS/GSPerfMon.h
 +++ b/pcsx2/GS/GSPerfMon.h
 @@ -26,6 +26,13 @@ public:
@@ -3677,7 +3677,7 @@ index d4defa812..d74eb9288 100644
  
  		// Reused counters for HW.
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 88fdbb3fb..6b19de0e8 100644
+index 88fdbb3..6b19de0 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
 @@ -1494,6 +1494,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
@@ -3877,7 +3877,7 @@ index 88fdbb3fb..6b19de0e8 100644
  		int  n = 1;
  		u32 buff[3];
 diff --git a/pcsx2/GS/GSState.h b/pcsx2/GS/GSState.h
-index 3e0b3548d..242543005 100644
+index 3e0b354..2425430 100644
 --- a/pcsx2/GS/GSState.h
 +++ b/pcsx2/GS/GSState.h
 @@ -299,6 +299,18 @@ public:
@@ -3900,7 +3900,7 @@ index 3e0b3548d..242543005 100644
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
 diff --git a/pcsx2/GS/GSUtil.cpp b/pcsx2/GS/GSUtil.cpp
-index c2178466f..544f2f834 100644
+index c217846..544f2f8 100644
 --- a/pcsx2/GS/GSUtil.cpp
 +++ b/pcsx2/GS/GSUtil.cpp
 @@ -194,6 +194,13 @@ const char* GSUtil::GetPerfMonCounterName(GSPerfMon::counter_t counter, bool hw)
@@ -3918,7 +3918,7 @@ index c2178466f..544f2f834 100644
  		static_assert(std::size(names_hw) == static_cast<std::size_t>(GSPerfMon::CounterLastHW));
  		return counter < std::size(names_hw) ? names_hw[counter] : "";
 diff --git a/pcsx2/GS/MultiISA.cpp b/pcsx2/GS/MultiISA.cpp
-index 247e9b3b1..c74cbc480 100644
+index 247e9b3..c74cbc4 100644
 --- a/pcsx2/GS/MultiISA.cpp
 +++ b/pcsx2/GS/MultiISA.cpp
 @@ -60,6 +60,13 @@ static ProcessorFeatures getProcessorFeatures()
@@ -3936,7 +3936,7 @@ index 247e9b3b1..c74cbc480 100644
  	{
  		features.hasFMA = over[0] == 'Y' || over[0] == 'y' || over[0] == '1';
 diff --git a/pcsx2/GS/MultiISA.h b/pcsx2/GS/MultiISA.h
-index 70f171df7..85b0312f0 100644
+index 70f171d..85b0312 100644
 --- a/pcsx2/GS/MultiISA.h
 +++ b/pcsx2/GS/MultiISA.h
 @@ -48,6 +48,7 @@ struct ProcessorFeatures
@@ -3948,7 +3948,7 @@ index 70f171df7..85b0312f0 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65b3..f7188a86d 100644
+index b3c8d65..f7188a8 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
@@ -4402,7 +4402,7 @@ index b3c8d65b3..f7188a86d 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8eac3..b0a9f113e 100644
+index 421f8ea..b0a9f11 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -4560,7 +4560,7 @@ index 421f8eac3..b0a9f113e 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc49..db02fb25b 100644
+index 35ab6fc..db02fb2 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -5045,7 +5045,7 @@ index 35ab6fc49..db02fb25b 100644
  
  		EndPresentFrame();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.h b/pcsx2/GS/Renderers/Common/GSRenderer.h
-index b9a2cc796..747d0ace6 100644
+index b9a2cc7..747d0ac 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.h
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.h
 @@ -7,6 +7,10 @@
@@ -5089,7 +5089,7 @@ index b9a2cc796..747d0ace6 100644
  	GSVector2i m_real_size{0, 0};
  
 diff --git a/pcsx2/GS/Renderers/Common/GSTexture.h b/pcsx2/GS/Renderers/Common/GSTexture.h
-index 14c6efabd..8b173c64f 100644
+index 14c6efa..8b173c6 100644
 --- a/pcsx2/GS/Renderers/Common/GSTexture.h
 +++ b/pcsx2/GS/Renderers/Common/GSTexture.h
 @@ -8,6 +8,9 @@
@@ -5153,7 +5153,7 @@ index 14c6efabd..8b173c64f 100644
  
  	void GenerateMipmapsIfNeeded();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 8b058e166..f963797ee 100644
+index 8b058e1..f963797 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -11,6 +11,9 @@
@@ -5368,7 +5368,7 @@ index 8b058e166..f963797ee 100644
  	}
  
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.h b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-index 6adcc67e0..5ac11a5f4 100644
+index 6adcc67..5ac11a5 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.h
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.h
 @@ -255,6 +255,14 @@ private:
@@ -5436,7 +5436,7 @@ index 6adcc67e0..5ac11a5f4 100644
  	std::vector<GSVertexSW> m_sw_vertex_buffer;
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index 6da649813..6459ccd82 100644
+index 6da6498..6459ccd 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 @@ -17,6 +17,7 @@
@@ -5572,7 +5572,7 @@ index 6da649813..6459ccd82 100644
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.h b/pcsx2/GS/Renderers/HW/GSTextureCache.h
-index a4d9256cb..f67dcf848 100644
+index a4d9256..f67dcf8 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.h
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.h
 @@ -7,6 +7,7 @@
@@ -5620,7 +5620,7 @@ index a4d9256cb..f67dcf848 100644
  	struct TargetHeightElem
  	{
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
-index 77a28dfb6..0b3229c61 100644
+index 77a28df..0b3229c 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 @@ -1,6 +1,9 @@
@@ -5654,7 +5654,7 @@ index 77a28dfb6..0b3229c61 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 567d2ca54..eb9bfb313 100644
+index 567d2ca..eb9bfb3 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -6865,7 +6865,7 @@ index 567d2ca54..eb9bfb313 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 423023821..3fc3c6734 100644
+index 4230238..3fc3c67 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,8 @@ public:
@@ -7074,7 +7074,7 @@ index 423023821..3fc3c6734 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 000000000..6680d2676
+index 0000000..6680d26
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 @@ -0,0 +1,1161 @@
@@ -8240,7 +8240,7 @@ index 000000000..6680d2676
 +		compressed ? (depth ? "compressed (HTILE)" : "compressed (DCC)") : "not compressed");
 +}
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
-index c4abff222..f1222e6a2 100644
+index c4abff2..f1222e6 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
 @@ -223,6 +223,19 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Create(Usage usage, Format format, int
@@ -8370,7 +8370,7 @@ index c4abff222..f1222e6a2 100644
  	// Count as a UAV barrier if we transition to/from UAV.
  	if (IsRenderTargetOrDepthStencil() &&
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
-index 55ddbb6fa..f66910c55 100644
+index 55ddbb6..f66910c 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.h
 @@ -87,6 +87,27 @@ public:
@@ -8412,7 +8412,7 @@ index 55ddbb6fa..f66910c55 100644
  	// Contains the fence counter when the texture was last used.
  	// When this matches the current fence counter, the texture was used this command buffer.
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp b/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
-index e094dd9f7..523d6f8bb 100644
+index e094dd9..523d6f8 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
 @@ -38,6 +38,66 @@ void Vulkan::ResetVulkanLibraryFunctionPointers()
@@ -8492,7 +8492,7 @@ index e094dd9f7..523d6f8bb 100644
  {
  	bool required_functions_missing = false;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
-index 5f8b2ba4e..f4dabdde0 100644
+index 5f8b2ba..229ea39 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
 @@ -134,6 +134,25 @@ namespace dyn_shaderc
@@ -8529,8 +8529,40 @@ index 5f8b2ba4e..f4dabdde0 100644
  }
  
  void dyn_shaderc::Close()
+@@ -315,7 +335,22 @@ void VKShaderCache::Open()
+ {
+ 	if (!GSConfig.DisableShaderCache)
+ 	{
++#ifdef __PROSPERO__
++		// Crux2 v1.0.19: no pipeline cache file of PCSX2's own on the PS5. RADV keeps every pipeline
++		// it compiles in its own disk cache (radv-shader-cache), and a pipeline cache made empty
++		// looks there for what it doesn't hold (Mesa's vk_pipeline_cache: the disk cache behind an
++		// application's cache), so vulkan_pipelines.bin held the same compiled code a second time and
++		// was written out whole (1 to 2 MB) at every close it had grown: writes to the console's own
++		// drive for nothing. The cache is kept in memory for the session, and the old file taken
++		// away once.
++		{
++			const std::string old_file = GetPipelineCacheBaseFileName(GSConfig.UseDebugDevice);
++			if (FileSystem::FileExists(old_file.c_str()) && FileSystem::DeleteFilePath(old_file.c_str()))
++				Console.WriteLn("Removed '%s': the graphics driver's own disk cache keeps the pipelines", old_file.c_str());
++		}
++#else
+ 		m_pipeline_cache_filename = GetPipelineCacheBaseFileName(GSConfig.UseDebugDevice);
++#endif
+ 
+ 		const std::string base_filename = GetShaderCacheBaseFileName(GSConfig.UseDebugDevice);
+ 		const std::string index_filename = base_filename + ".idx";
+@@ -324,7 +359,7 @@ void VKShaderCache::Open()
+ 		if (!ReadExistingShaderCache(index_filename, blob_filename))
+ 			CreateNewShaderCache(index_filename, blob_filename);
+ 
+-		if (!ReadExistingPipelineCache())
++		if (m_pipeline_cache_filename.empty() || !ReadExistingPipelineCache())
+ 			CreateNewPipelineCache();
+ 	}
+ 	else
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
-index c0a6a4ccc..4ef24b68b 100644
+index c0a6a4c..4ef24b6 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
 @@ -1,6 +1,7 @@
@@ -8596,7 +8628,7 @@ index c0a6a4ccc..4ef24b68b 100644
  
  void VKStreamBuffer::UpdateCurrentFencePosition()
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
-index 1e8c6eb17..970cefe94 100644
+index 1e8c6eb..970cefe 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
 +++ b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
 @@ -52,6 +52,11 @@ private:
@@ -8612,7 +8644,7 @@ index 1e8c6eb17..970cefe94 100644
  	// List of fences and the corresponding positions in the buffer
  	std::deque<std::pair<u64, u32>> m_tracked_fences;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
-index 4de995d72..e710f4cb9 100644
+index 4de995d..e710f4c 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp
 @@ -5,6 +5,11 @@
@@ -8825,7 +8857,7 @@ index 4de995d72..e710f4cb9 100644
  
  	// Determine the dimensions of the swap chain. Values of -1 indicate the size we specify here
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.h b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.h
-index ce43ea689..aa8eddffb 100644
+index ce43ea6..aa8eddf 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKSwapChain.h
 +++ b/pcsx2/GS/Renderers/Vulkan/VKSwapChain.h
 @@ -26,6 +26,9 @@ public:
@@ -8839,7 +8871,7 @@ index ce43ea689..aa8eddffb 100644
  	static void DestroyVulkanSurface(VkInstance instance, WindowInfo* wi, VkSurfaceKHR surface);
  
 diff --git a/pcsx2/GameDatabase.cpp b/pcsx2/GameDatabase.cpp
-index c49e2989b..9659a329c 100644
+index c49e298..9659a32 100644
 --- a/pcsx2/GameDatabase.cpp
 +++ b/pcsx2/GameDatabase.cpp
 @@ -12,6 +12,7 @@
@@ -9055,7 +9087,7 @@ index c49e2989b..9659a329c 100644
  {
  	GameDatabase::ensureLoaded();
 diff --git a/pcsx2/GameDatabase.h b/pcsx2/GameDatabase.h
-index baaff0a36..d203b4b53 100644
+index baaff0a..d203b4b 100644
 --- a/pcsx2/GameDatabase.h
 +++ b/pcsx2/GameDatabase.h
 @@ -8,6 +8,7 @@
@@ -9083,7 +9115,7 @@ index baaff0a36..d203b4b53 100644
  	struct TrackHash
  	{
 diff --git a/pcsx2/Host/AudioStream.cpp b/pcsx2/Host/AudioStream.cpp
-index de96b9277..56bd1d995 100644
+index de96b92..56bd1d9 100644
 --- a/pcsx2/Host/AudioStream.cpp
 +++ b/pcsx2/Host/AudioStream.cpp
 @@ -16,8 +16,10 @@
@@ -9219,7 +9251,7 @@ index de96b9277..56bd1d995 100644
  		m_stretch_ok_count = 0;
  	}
 diff --git a/pcsx2/Host/AudioStream.h b/pcsx2/Host/AudioStream.h
-index 266b654d4..37e33f1ad 100644
+index 266b654..37e33f1 100644
 --- a/pcsx2/Host/AudioStream.h
 +++ b/pcsx2/Host/AudioStream.h
 @@ -3,6 +3,8 @@
@@ -9264,7 +9296,7 @@ index 266b654d4..37e33f1ad 100644
  	bool m_paused = false;
  
 diff --git a/pcsx2/IPU/IPU.cpp b/pcsx2/IPU/IPU.cpp
-index 91abe00fe..c65971fca 100644
+index 91abe00..c65971f 100644
 --- a/pcsx2/IPU/IPU.cpp
 +++ b/pcsx2/IPU/IPU.cpp
 @@ -8,6 +8,7 @@
@@ -9305,7 +9337,7 @@ index 91abe00fe..c65971fca 100644
  	decoder.coding_type			= I_TYPE;
  	decoder.mpeg1				= ipuRegs.ctrl.MP1;
 diff --git a/pcsx2/ImGui/ImGuiManager.cpp b/pcsx2/ImGui/ImGuiManager.cpp
-index 53abe0f3f..21a7919a7 100644
+index 53abe0f..21a7919 100644
 --- a/pcsx2/ImGui/ImGuiManager.cpp
 +++ b/pcsx2/ImGui/ImGuiManager.cpp
 @@ -113,6 +113,12 @@ struct ControllerNavState
@@ -9489,7 +9521,7 @@ index 53abe0f3f..21a7919a7 100644
  	if (negative_key != GenericInputBinding::Unknown)
  	{
 diff --git a/pcsx2/ImGui/ImGuiOverlays.cpp b/pcsx2/ImGui/ImGuiOverlays.cpp
-index a9846132b..7938416f1 100644
+index a984613..7938416 100644
 --- a/pcsx2/ImGui/ImGuiOverlays.cpp
 +++ b/pcsx2/ImGui/ImGuiOverlays.cpp
 @@ -1,6 +1,10 @@
@@ -9561,7 +9593,7 @@ index a9846132b..7938416f1 100644
  			if (!s_speed_line.empty())
  			{
 diff --git a/pcsx2/Input/InputManager.cpp b/pcsx2/Input/InputManager.cpp
-index 14bef9944..a4112ec32 100644
+index 14bef99..a4112ec 100644
 --- a/pcsx2/Input/InputManager.cpp
 +++ b/pcsx2/Input/InputManager.cpp
 @@ -255,7 +255,7 @@ std::optional<InputBindingKey> InputManager::ParseInputBindingKey(const std::str
@@ -9657,7 +9689,7 @@ index 14bef9944..a4112ec32 100644
  #ifdef _WIN32
  #include "Input/DInputSource.h"
 diff --git a/pcsx2/Interpreter.cpp b/pcsx2/Interpreter.cpp
-index 4faad6c99..d1cb2916a 100644
+index 4faad6c..d1cb291 100644
 --- a/pcsx2/Interpreter.cpp
 +++ b/pcsx2/Interpreter.cpp
 @@ -19,6 +19,12 @@ extern int vu0branch, vu1branch;
@@ -9730,7 +9762,7 @@ index 4faad6c99..d1cb2916a 100644
 +}
 +#endif
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa029..1daf23583 100644
+index 59f5aa0..1daf235 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
 @@ -1,6 +1,9 @@
@@ -9997,7 +10029,7 @@ index 59f5aa029..1daf23583 100644
  		}
  
 diff --git a/pcsx2/MTGS.h b/pcsx2/MTGS.h
-index ccd9f27c7..e6429e27b 100644
+index ccd9f27..e6429e2 100644
 --- a/pcsx2/MTGS.h
 +++ b/pcsx2/MTGS.h
 @@ -64,6 +64,12 @@ namespace MTGS
@@ -10014,7 +10046,7 @@ index ccd9f27c7..e6429e27b 100644
  
  	void RunOnGSThread(AsyncCallType func);
 diff --git a/pcsx2/MTVU.cpp b/pcsx2/MTVU.cpp
-index 3f261dcea..c4c82b486 100644
+index 3f261dc..c4c82b4 100644
 --- a/pcsx2/MTVU.cpp
 +++ b/pcsx2/MTVU.cpp
 @@ -1,6 +1,10 @@
@@ -10066,7 +10098,7 @@ index 3f261dcea..c4c82b486 100644
  void VU_Thread::ExecuteVU(u32 vu_addr, u32 vif_top, u32 vif_itop, u32 fbrst)
 diff --git a/pcsx2/PS2Float.cpp b/pcsx2/PS2Float.cpp
 new file mode 100644
-index 000000000..c7c034680
+index 0000000..c7c0346
 --- /dev/null
 +++ b/pcsx2/PS2Float.cpp
 @@ -0,0 +1,590 @@
@@ -10662,7 +10694,7 @@ index 000000000..c7c034680
 +}
 diff --git a/pcsx2/PS2Float.h b/pcsx2/PS2Float.h
 new file mode 100644
-index 000000000..b73ae60a2
+index 0000000..b73ae60
 --- /dev/null
 +++ b/pcsx2/PS2Float.h
 @@ -0,0 +1,151 @@
@@ -10819,7 +10851,7 @@ index 000000000..b73ae60a2
 +#include "PS2Float.inl"
 diff --git a/pcsx2/PS2Float.inl b/pcsx2/PS2Float.inl
 new file mode 100644
-index 000000000..cf69c67cf
+index 0000000..cf69c67
 --- /dev/null
 +++ b/pcsx2/PS2Float.inl
 @@ -0,0 +1,276 @@
@@ -11100,7 +11132,7 @@ index 000000000..cf69c67cf
 +	return PS2Float(sign | (u32)(resExponent << MANTISSA_BITS) | (resMantissa & 0x7FFFFF));
 +}
 diff --git a/pcsx2/Patch.cpp b/pcsx2/Patch.cpp
-index 0156bc852..1b9be6d10 100644
+index 0156bc8..1b9be6d 100644
 --- a/pcsx2/Patch.cpp
 +++ b/pcsx2/Patch.cpp
 @@ -313,10 +313,33 @@ bool Patch::OpenPatchesZip()
@@ -11138,7 +11170,7 @@ index 0156bc852..1b9be6d10 100644
  {
  	pxAssert(!all_crcs || (include_serial && add_wildcard));
 diff --git a/pcsx2/Patch.h b/pcsx2/Patch.h
-index 255b6ea38..be7ca63ad 100644
+index 255b6ea..be7ca63 100644
 --- a/pcsx2/Patch.h
 +++ b/pcsx2/Patch.h
 @@ -175,4 +175,10 @@ namespace Patch
@@ -11153,7 +11185,7 @@ index 255b6ea38..be7ca63ad 100644
 +#endif
  } // namespace Patch
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 51c34b978..0fc7f9cf6 100644
+index 51c34b9..0fc7f9c 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
 @@ -537,6 +537,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
@@ -11275,7 +11307,7 @@ index 51c34b978..0fc7f9cf6 100644
  
  		SettingsWrapEntry(AutoMask);
 diff --git a/pcsx2/SIO/Memcard/MemoryCardFile.cpp b/pcsx2/SIO/Memcard/MemoryCardFile.cpp
-index 5cae5578a..9be7acdbc 100644
+index 5cae557..9be7acd 100644
 --- a/pcsx2/SIO/Memcard/MemoryCardFile.cpp
 +++ b/pcsx2/SIO/Memcard/MemoryCardFile.cpp
 @@ -1,6 +1,10 @@
@@ -11594,7 +11626,7 @@ index 5cae5578a..9be7acdbc 100644
  {
  	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
 diff --git a/pcsx2/SIO/Memcard/MemoryCardFile.h b/pcsx2/SIO/Memcard/MemoryCardFile.h
-index 2148c0b60..6ed746e5f 100644
+index 2148c0b..6ed746e 100644
 --- a/pcsx2/SIO/Memcard/MemoryCardFile.h
 +++ b/pcsx2/SIO/Memcard/MemoryCardFile.h
 @@ -51,6 +51,13 @@ s32 FileMcd_Save(uint port, uint slot, const u8* src, u32 adr, int size);
@@ -11612,7 +11644,7 @@ index 2148c0b60..6ed746e5f 100644
  
  std::vector<AvailableMcdInfo> FileMcd_GetAvailableCards(bool include_in_use_cards);
 diff --git a/pcsx2/SIO/Pad/Pad.cpp b/pcsx2/SIO/Pad/Pad.cpp
-index a618605cf..79e4e9a8b 100644
+index a618605..79e4e9a 100644
 --- a/pcsx2/SIO/Pad/Pad.cpp
 +++ b/pcsx2/SIO/Pad/Pad.cpp
 @@ -13,6 +13,9 @@
@@ -11672,8 +11704,123 @@ index a618605cf..79e4e9a8b 100644
  	// PCSX2 Controller Settings - Hotkeys
  
  	// PCSX2 Controller Settings - Hotkeys - General
+diff --git a/pcsx2/SaveState.cpp b/pcsx2/SaveState.cpp
+index 239737c..f4eeaa3 100644
+--- a/pcsx2/SaveState.cpp
++++ b/pcsx2/SaveState.cpp
+@@ -924,11 +924,24 @@ static bool SaveState_ReadScreenshot(zip_t* zf, u32* out_width, u32* out_height,
+ // --------------------------------------------------------------------------------------
+ //  CompressThread_VmState
+ // --------------------------------------------------------------------------------------
++#ifdef __PROSPERO__
++// Crux2 v1.0.19: an automatic state's zstd level, on the thread that zips it (-1: the settings').
++static thread_local int s_ps5_zstd_level = -1;
++#endif
++
+ static bool SaveState_AddToZip(zip_t* zf, ArchiveEntryList* srclist, SaveStateScreenshotData* screenshot)
+ {
+ 	u32 compression = ZIP_CM_DEFAULT;
+ 	u32 compression_level = 0;
+ 
++#ifdef __PROSPERO__
++	if (s_ps5_zstd_level >= 0)
++	{
++		compression = ZIP_CM_ZSTD;
++		compression_level = static_cast<u32>(s_ps5_zstd_level);
++	}
++	else
++#endif
+ 	if (EmuConfig.Savestate.CompressionType == SavestateCompressionMethod::Zstandard)
+ 	{
+ 		compression = ZIP_CM_ZSTD;
+@@ -1068,6 +1081,70 @@ bool SaveState_ZipToDisk(
+ 	return true;
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2 v1.0.19: a state zipped into memory at zstd level `zstd_level`: the safety save is held
++// there and written to the drive only when it is needed (ps5_extras.cpp). The bytes are the file a
++// state on disk would be.
++bool SaveState_ZipToMemory(std::unique_ptr<ArchiveEntryList> srclist, std::unique_ptr<SaveStateScreenshotData> screenshot,
++	int zstd_level, std::vector<u8>* out, Error* error)
++{
++	zip_error_t ze = {};
++	zip_source_t* const zs = zip_source_buffer_create(nullptr, 0, 0, &ze);
++	if (!zs)
++	{
++		Error::SetStringFmt(error, "Failed to make a buffer for the save state: {}.", zip_error_strerror(&ze));
++		return false;
++	}
++	zip_source_keep(zs); // (it outlives the archive: the bytes are read from it after the close)
++	zip_t* const zf = zip_open_from_source(zs, ZIP_CREATE | ZIP_TRUNCATE, &ze);
++	if (!zf)
++	{
++		Error::SetStringFmt(error, "Failed to open a zip in memory for the save state: {}.", zip_error_strerror(&ze));
++		zip_source_free(zs); // (kept: two references)
++		zip_source_free(zs);
++		return false;
++	}
++	s_ps5_zstd_level = zstd_level;
++	const bool added = SaveState_AddToZip(zf, srclist.get(), screenshot.get());
++	s_ps5_zstd_level = -1;
++	if (!added)
++	{
++		Error::SetString(error, "Failed to save the state into memory.");
++		zip_discard(zf);
++		zip_source_free(zs);
++		return false;
++	}
++	if (zip_close(zf) != 0)
++	{
++		Error::SetStringFmt(error, "Failed to save the state into memory: {}.", zip_strerror(zf));
++		zip_discard(zf);
++		zip_source_free(zs);
++		return false;
++	}
++	bool ok = false;
++	if (zip_source_open(zs) == 0)
++	{
++		if (zip_source_seek(zs, 0, SEEK_END) == 0)
++		{
++			const zip_int64_t size = zip_source_tell(zs);
++			if (size > 0 && zip_source_seek(zs, 0, SEEK_SET) == 0)
++			{
++				out->resize(static_cast<size_t>(size));
++				ok = zip_source_read(zs, out->data(), static_cast<zip_uint64_t>(size)) == size;
++			}
++		}
++		zip_source_close(zs);
++	}
++	zip_source_free(zs);
++	if (!ok)
++	{
++		out->clear();
++		Error::SetString(error, "Failed to read the state back out of memory.");
++	}
++	return ok;
++}
++#endif
++
+ bool SaveState_ReadScreenshot(const std::string& filename, u32* out_width, u32* out_height, std::vector<u32>* out_pixels)
+ {
+ 	zip_error_t ze = {};
+diff --git a/pcsx2/SaveState.h b/pcsx2/SaveState.h
+index b24870c..e6f69e9 100644
+--- a/pcsx2/SaveState.h
++++ b/pcsx2/SaveState.h
+@@ -57,6 +57,10 @@ extern std::unique_ptr<SaveStateScreenshotData> SaveState_SaveScreenshot();
+ extern bool SaveState_ZipToDisk(
+ 	std::unique_ptr<ArchiveEntryList> srclist, std::unique_ptr<SaveStateScreenshotData> screenshot,
+ 	const char* filename, Error* error);
++#ifdef __PROSPERO__
++extern bool SaveState_ZipToMemory(std::unique_ptr<ArchiveEntryList> srclist, std::unique_ptr<SaveStateScreenshotData> screenshot,
++	int zstd_level, std::vector<u8>* out, Error* error);
++#endif
+ extern bool SaveState_ReadScreenshot(const std::string& filename, u32* out_width, u32* out_height, std::vector<u32>* out_pixels);
+ extern bool SaveState_UnzipFromDisk(const std::string& filename, Error* error);
+ 
 diff --git a/pcsx2/USB/usb-mic/usb-mic.cpp b/pcsx2/USB/usb-mic/usb-mic.cpp
-index 337046a35..aa0b04b1e 100644
+index 337046a..aa0b04b 100644
 --- a/pcsx2/USB/usb-mic/usb-mic.cpp
 +++ b/pcsx2/USB/usb-mic/usb-mic.cpp
 @@ -1292,6 +1292,31 @@ std::unique_ptr<AudioDevice> AudioDevice::CreateNoopDevice(AudioDir dir, u32 cha
@@ -11715,7 +11862,7 @@ index 337046a35..aa0b04b1e 100644
 +
 +#endif // __PROSPERO__
 diff --git a/pcsx2/USB/usb-pad/usb-pad.cpp b/pcsx2/USB/usb-pad/usb-pad.cpp
-index 335613422..132401249 100644
+index 3356134..1324012 100644
 --- a/pcsx2/USB/usb-pad/usb-pad.cpp
 +++ b/pcsx2/USB/usb-pad/usb-pad.cpp
 @@ -606,7 +606,10 @@ namespace usb_pad
@@ -11730,7 +11877,7 @@ index 335613422..132401249 100644
  
  	static void pad_handle_data(USBDevice* dev, USBPacket* p)
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index f6fda22a1..ccdca9421 100644
+index f6fda22..163f1b6 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
 @@ -40,8 +40,17 @@
@@ -11751,7 +11898,18 @@ index f6fda22a1..ccdca9421 100644
  #include "ps2/BiosTools.h"
  
  #include "common/Console.h"
-@@ -194,6 +203,9 @@ static float s_target_speed = 0.0f;
+@@ -124,6 +133,10 @@ namespace VMManager
+ 	static void ZipSaveStateOnThread(std::unique_ptr<ArchiveEntryList> elist,
+ 		std::unique_ptr<SaveStateScreenshotData> screenshot, std::string filename,
+ 		s32 slot_for_message, std::function<void(const std::string&)> error_callback);
++#ifdef __PROSPERO__
++	static void ZipAutomaticOnThread(std::unique_ptr<ArchiveEntryList> elist, std::unique_ptr<SaveStateScreenshotData> screenshot,
++		std::string filename, int zstd_level, std::function<void(std::vector<u8> data, std::string error)> done);
++#endif
+ 
+ 	static void LoadSettings();
+ 	static void LoadCoreSettings(SettingsInterface& si);
+@@ -194,6 +207,9 @@ static float s_target_speed = 0.0f;
  static bool s_target_speed_can_sync_to_host = false;
  static bool s_target_speed_synced_to_host = false;
  static bool s_use_vsync_for_timing = false;
@@ -11761,7 +11919,37 @@ index f6fda22a1..ccdca9421 100644
  
  // Used to track play time. We use a monotonic timer here, in case of clock changes.
  static u64 s_session_resume_timestamp = 0;
-@@ -732,6 +744,11 @@ void VMManager::WarnAboutUnconfiguredController()
+@@ -490,7 +506,17 @@ void VMManager::UpdateLoggingSettings(SettingsInterface& si)
+ 
+ 	const bool system_console_enabled = !s_log_block_system_console && si.GetBoolValue("Logging", "EnableSystemConsole", false);
+ 	const bool log_window_enabled = !s_log_block_system_console && si.GetBoolValue("Logging", "EnableLogWindow", false);
++#ifdef __PROSPERO__
++	// Crux2 v1.0.19: Settings > Debug > Logs. All logs off ([PS5] Logs) takes this one too, and
++	// [PS5] LogPlace (a USB drive's Crux2-logs) is where it goes; a place that is not there (the
++	// drive is out) means no file rather than one on the console's own drive.
++	const std::string ps5_log_place = si.GetStringValue("PS5", "LogPlace", "");
++	const bool ps5_log_place_there = ps5_log_place.empty() || FileSystem::DirectoryExists(ps5_log_place.c_str());
++	const bool file_logging_enabled = s_log_force_file_log ||
++		(si.GetBoolValue("PS5", "Logs", true) && ps5_log_place_there && si.GetBoolValue("Logging", "EnableFileLogging", true));
++#else
+ 	const bool file_logging_enabled = s_log_force_file_log || si.GetBoolValue("Logging", "EnableFileLogging", true);
++#endif
+ 
+ 	if (system_console_enabled != Log::IsConsoleOutputEnabled())
+ 		Log::SetConsoleOutputLevel(system_console_enabled ? level : LOGLEVEL_NONE);
+@@ -526,7 +552,11 @@ void VMManager::UpdateLoggingSettings(SettingsInterface& si)
+ 	// Set the output level if file logging or trace logs have changed.
+ 	if (file_logging_enabled != Log::IsFileOutputEnabled() || (EmuConfig.Trace.Enabled && Log::GetMaxLevel() < LOGLEVEL_TRACE))
+ 	{
++#ifdef __PROSPERO__
++		std::string path = Path::Combine(ps5_log_place.empty() ? EmuFolders::Logs : ps5_log_place, "emulog.txt");
++#else
+ 		std::string path = Path::Combine(EmuFolders::Logs, "emulog.txt");
++#endif
+ 		Log::SetFileOutputLevel(file_logging_enabled ? EmuConfig.Trace.Enabled ? LOGLEVEL_TRACE : level : LOGLEVEL_NONE, std::move(path));
+ 	}
+ }
+@@ -732,6 +762,11 @@ void VMManager::WarnAboutUnconfiguredController()
  
  void VMManager::ApplyGameFixes()
  {
@@ -11773,7 +11961,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!HasBootedELF() && !GSDumpReplayer::IsReplayingDump())
  	{
  		// Instant DMA needs to be on for this BIOS (font rendering is broken without it, possible cache issues).
-@@ -739,6 +756,10 @@ void VMManager::ApplyGameFixes()
+@@ -739,6 +774,10 @@ void VMManager::ApplyGameFixes()
  
  		// Disable user's manual hardware fixes, it might be problematic.
  		EmuConfig.GS.ManualUserHacks = false;
@@ -11784,7 +11972,7 @@ index f6fda22a1..ccdca9421 100644
  		return;
  	}
  
-@@ -747,11 +768,27 @@ void VMManager::ApplyGameFixes()
+@@ -747,11 +786,27 @@ void VMManager::ApplyGameFixes()
  		return;
  
  	game->applyGameFixes(EmuConfig, EmuConfig.EnableGameFixes);
@@ -11812,7 +12000,7 @@ index f6fda22a1..ccdca9421 100644
  }
  
  void VMManager::ApplySettings()
-@@ -1014,6 +1051,13 @@ bool VMManager::UpdateGameSettingsLayer()
+@@ -1014,6 +1069,13 @@ bool VMManager::UpdateGameSettingsLayer()
  		}
  	}
  
@@ -11826,7 +12014,7 @@ index f6fda22a1..ccdca9421 100644
  	std::string input_profile_name;
  	if (new_interface)
  		new_interface->GetStringValue("EmuCore", "InputProfileName", &input_profile_name);
-@@ -1202,12 +1246,21 @@ void VMManager::HandleELFChange(bool verbose_patches_if_changed)
+@@ -1202,12 +1264,21 @@ void VMManager::HandleELFChange(bool verbose_patches_if_changed)
  	// point is in the patch (e.g. WRC 4). So. Gross, but the only way to handle it really.
  	const u32 crc_to_report = HasBootedELF() ? s_current_crc : 0;
  
@@ -11848,7 +12036,7 @@ index f6fda22a1..ccdca9421 100644
  }
  
  void VMManager::UpdateELFInfo(std::string elf_path)
-@@ -1373,6 +1426,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1373,6 +1444,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	// cancel any game list scanning, we need to use CDVD!
  	// TODO: we can get rid of this once, we make CDVD not use globals...
  	// (or make it thread-local, but that seems silly.)
@@ -11858,7 +12046,7 @@ index f6fda22a1..ccdca9421 100644
  	Host::CancelGameListRefresh();
  
  	s_state.store(VMState::Initializing, std::memory_order_release);
-@@ -1457,6 +1513,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1457,6 +1531,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	// Playing GS dumps don't need a BIOS.
  	if (!GSDumpReplayer::IsReplayingDump())
  	{
@@ -11868,7 +12056,7 @@ index f6fda22a1..ccdca9421 100644
  		Console.WriteLn("Loading BIOS...");
  		if (!LoadBIOS())
  		{
-@@ -1476,6 +1535,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1476,6 +1553,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	}
  
  	Error cdvd_error;
@@ -11878,7 +12066,7 @@ index f6fda22a1..ccdca9421 100644
  	Console.WriteLn("Opening CDVD...");
  	if (!DoCDVDopen(&cdvd_error))
  	{
-@@ -1569,6 +1631,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1569,6 +1649,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  
  	Console.WriteLn("Opening GS...");
  	s_gs_open_on_initialize = MTGS::IsOpen();
@@ -11888,7 +12076,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!s_gs_open_on_initialize && !MTGS::WaitForOpen())
  	{
  		// we assume GS is going to report its own error
-@@ -1582,6 +1647,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1582,6 +1665,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening SPU2...");
@@ -11898,7 +12086,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!SPU2::Open())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize SPU2."));
-@@ -1591,6 +1659,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1591,6 +1677,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  
  
  	Console.WriteLn("Initializing Pad...");
@@ -11908,7 +12096,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!Pad::Initialize())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize PAD."));
-@@ -1600,6 +1671,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1600,6 +1689,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	ScopedGuard close_pad = &Pad::Shutdown;
  
  	Console.WriteLn("Initializing SIO2...");
@@ -11918,7 +12106,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!g_Sio2.Initialize())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize SIO2."));
-@@ -1620,6 +1694,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1620,6 +1712,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening DEV9...");
@@ -11928,7 +12116,7 @@ index f6fda22a1..ccdca9421 100644
  	if (DEV9init() != 0 || DEV9open() != 0)
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize DEV9."));
-@@ -1631,6 +1708,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
+@@ -1631,6 +1726,9 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
  	};
  
  	Console.WriteLn("Opening USB...");
@@ -11938,7 +12126,7 @@ index f6fda22a1..ccdca9421 100644
  	if (!USBopen())
  	{
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Failed to initialize USB."));
-@@ -1777,6 +1857,10 @@ void VMManager::Shutdown(bool save_resume_state)
+@@ -1777,6 +1875,10 @@ void VMManager::Shutdown(bool save_resume_state)
  	cdvdUnlock();
  
  	s_state.store(VMState::Shutdown, std::memory_order_release);
@@ -11949,7 +12137,7 @@ index f6fda22a1..ccdca9421 100644
  	FullscreenUI::OnVMDestroyed();
  	SaveStateSelectorUI::Clear();
  	UpdateInhibitScreensaver(false);
-@@ -1935,6 +2019,21 @@ std::string VMManager::GetCurrentSaveStateFileName(s32 slot, bool backup)
+@@ -1935,6 +2037,21 @@ std::string VMManager::GetCurrentSaveStateFileName(s32 slot, bool backup)
  	return GetSaveStateFileName(s_disc_serial.c_str(), s_disc_crc, slot, backup);
  }
  
@@ -11971,7 +12159,7 @@ index f6fda22a1..ccdca9421 100644
  bool VMManager::DoLoadState(const char* filename, Error* error)
  {
  	if (GSDumpReplayer::IsReplayingDump())
-@@ -1942,6 +2041,25 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
+@@ -1942,6 +2059,25 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
  		Error::SetString(error, TRANSLATE_STR("VMManager", "Cannot load state while replaying a GS dump."));
  		return false;
  	}
@@ -11997,7 +12185,81 @@ index f6fda22a1..ccdca9421 100644
  	GSCapture::FlushAudioOnly();
  	Host::OnSaveStateLoading(filename);
  
-@@ -2251,6 +2369,9 @@ void VMManager::UpdateTargetSpeed()
+@@ -2052,6 +2188,73 @@ void VMManager::ZipSaveStateOnThread(std::unique_ptr<ArchiveEntryList> elist,
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2 v1.0.19: an automatic state (the safety save), zipped on a thread of its own at zstd level
++// `zstd_level`: into `filename` (written beside it, then put in its place), or with no filename
++// into memory only. `done` gets the zipped bytes (or none and the reason), on that thread.
++void VMManager::SaveStateAutomatic(std::string filename, int zstd_level, std::function<void(std::vector<u8> data, std::string error)> done)
++{
++	if (GSDumpReplayer::IsReplayingDump())
++	{
++		done({}, "a GS dump is being replayed");
++		return;
++	}
++	Error error;
++	std::unique_ptr<ArchiveEntryList> elist = SaveState_DownloadState(&error);
++	if (!elist)
++	{
++		done({}, error.GetDescription());
++		return;
++	}
++	std::unique_ptr<SaveStateScreenshotData> screenshot = SaveState_SaveScreenshot();
++	{
++		std::unique_lock lock(s_save_state_threads_mutex);
++		s_save_state_threads.emplace_back(&VMManager::ZipAutomaticOnThread, std::move(elist), std::move(screenshot),
++			std::move(filename), zstd_level, std::move(done));
++	}
++	MemcardBusy::CheckSaveStateDependency();
++}
++
++void VMManager::ZipAutomaticOnThread(std::unique_ptr<ArchiveEntryList> elist, std::unique_ptr<SaveStateScreenshotData> screenshot,
++	std::string filename, int zstd_level, std::function<void(std::vector<u8> data, std::string error)> done)
++{
++	Error error;
++	std::vector<u8> data;
++	std::string failure;
++	if (!SaveState_ZipToMemory(std::move(elist), std::move(screenshot), zstd_level, &data, &error))
++	{
++		failure = error.GetDescription();
++	}
++	else if (!filename.empty())
++	{
++		const std::string beside = filename + ".tmp";
++		if (!FileSystem::WriteBinaryFile(beside.c_str(), data.data(), data.size()) || !FileSystem::RenamePath(beside.c_str(), filename.c_str()))
++		{
++			FileSystem::DeleteFilePath(beside.c_str());
++			failure = "the state could not be written to " + filename;
++		}
++		else
++		{
++			Host::OnSaveStateSaved(filename);
++		}
++	}
++	done(std::move(data), std::move(failure));
++
++	// remove ourselves from the thread list. if we're joining, we might not be in there.
++	const auto this_id = std::this_thread::get_id();
++	std::unique_lock lock(s_save_state_threads_mutex);
++	for (auto it = s_save_state_threads.begin(); it != s_save_state_threads.end(); ++it)
++	{
++		if (it->get_id() == this_id)
++		{
++			it->detach();
++			s_save_state_threads.erase(it);
++			break;
++		}
++	}
++}
++#endif
++
+ void VMManager::WaitForSaveStateFlush()
+ {
+ 	std::unique_lock lock(s_save_state_threads_mutex);
+@@ -2251,6 +2454,9 @@ void VMManager::UpdateTargetSpeed()
  	s_target_speed_can_sync_to_host = false;
  	s_target_speed_synced_to_host = false;
  	s_use_vsync_for_timing = false;
@@ -12007,7 +12269,7 @@ index f6fda22a1..ccdca9421 100644
  
  	if (EmuConfig.EmulationSpeed.SyncToHostRefreshRate)
  	{
-@@ -2258,13 +2379,55 @@ void VMManager::UpdateTargetSpeed()
+@@ -2258,13 +2464,55 @@ void VMManager::UpdateTargetSpeed()
  		// We can at least avoid the query in the first place if we're not using sync to host.
  		if (const std::optional<float> host_refresh_rate = GSGetHostRefreshRate(); host_refresh_rate.has_value())
  		{
@@ -12064,7 +12326,7 @@ index f6fda22a1..ccdca9421 100644
  
  			Console.WriteLn("Refresh rate: Host=%fhz Guest=%fhz Ratio=%f - %s %s",
  				host_refresh_rate.value(), frame_rate, host_to_guest_ratio,
-@@ -2308,10 +2471,64 @@ float VMManager::GetFrameRate()
+@@ -2308,10 +2556,64 @@ float VMManager::GetFrameRate()
  void VMManager::ResetFrameLimiter()
  {
  	s_limiter_frame_start = GetCPUTicks();
@@ -12129,7 +12391,7 @@ index f6fda22a1..ccdca9421 100644
  	if (s_target_speed == 0.0f || s_use_vsync_for_timing)
  		return;
  
-@@ -2329,6 +2546,13 @@ void VMManager::Internal::Throttle(bool vsync_start)
+@@ -2329,6 +2631,13 @@ void VMManager::Internal::Throttle(bool vsync_start)
  		return;
  	}
  
@@ -12143,7 +12405,7 @@ index f6fda22a1..ccdca9421 100644
  	// Conversion of delta from CPU ticks (microseconds) to milliseconds
  	const s32 msec = static_cast<s32>((sDeltaTime * -1000) / static_cast<s64>(GetTickFrequency()));
  
-@@ -2345,6 +2569,7 @@ void VMManager::Internal::Throttle(bool vsync_start)
+@@ -2345,6 +2654,7 @@ void VMManager::Internal::Throttle(bool vsync_start)
  	while (GetCPUTicks() < uExpectedEnd)
  	{
  	}
@@ -12151,7 +12413,7 @@ index f6fda22a1..ccdca9421 100644
  
  	if (!vsync_start)
  	{
-@@ -2760,7 +2985,7 @@ void VMManager::UpdateCPUImplementations()
+@@ -2760,7 +3070,7 @@ void VMManager::UpdateCPUImplementations()
  	psxCpu = CHECK_IOPREC ? &psxRec : &psxInt;
  
  	CpuVU0 = EmuConfig.Cpu.Recompiler.EnableVU0 ? static_cast<BaseVUmicroCPU*>(&CpuMicroVU0) : static_cast<BaseVUmicroCPU*>(&CpuIntVU0);
@@ -12160,7 +12422,7 @@ index f6fda22a1..ccdca9421 100644
  #else
  	Cpu = &intCpu;
  	psxCpu = &psxInt;
-@@ -3005,6 +3230,10 @@ void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)
+@@ -3005,6 +3315,10 @@ void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)
  
  	Console.WriteLn("Updating CPU configuration...");
  	FPControlRegister::SetCurrent(EmuConfig.Cpu.FPUFPCR);
@@ -12171,7 +12433,7 @@ index f6fda22a1..ccdca9421 100644
  	Internal::ClearCPUExecutionCaches();
  	memBindConditionalHandlers();
  
-@@ -3043,6 +3272,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
+@@ -3043,6 +3357,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
  		UpdateTargetSpeed();
  		MTGS::UpdateVSyncMode();
  	}
@@ -12185,7 +12447,7 @@ index f6fda22a1..ccdca9421 100644
  
  	MTGS::ApplySettings();
  }
-@@ -3707,7 +3943,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
+@@ -3707,7 +4028,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
  
  static void InitializeProcessorList()
  {
@@ -12207,7 +12469,7 @@ index f6fda22a1..ccdca9421 100644
  }
  
  void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
-@@ -3722,8 +3972,57 @@ void VMManager::EnsureCPUInfoInitialized()
+@@ -3722,8 +4057,57 @@ void VMManager::EnsureCPUInfoInitialized()
  	std::call_once(s_processor_list_initialized, InitializeProcessorList);
  }
  
@@ -12266,7 +12528,7 @@ index f6fda22a1..ccdca9421 100644
  	if (s_thread_affinities_set == new_pin_enable)
  		return;
 diff --git a/pcsx2/VMManager.h b/pcsx2/VMManager.h
-index 682f613d9..5cb004d84 100644
+index 682f613..be9deef 100644
 --- a/pcsx2/VMManager.h
 +++ b/pcsx2/VMManager.h
 @@ -168,6 +168,14 @@ namespace VMManager
@@ -12284,8 +12546,22 @@ index 682f613d9..5cb004d84 100644
  	/// Loads state from the specified slot.
  	bool LoadStateFromSlot(s32 slot, bool backup = false, Error* error = nullptr);
  
+@@ -175,6 +183,13 @@ namespace VMManager
+ 	void SaveState(const char* filename, bool zip_on_thread, bool backup_old_state,
+ 		std::function<void(const std::string&)> error_callback);
+ 
++#ifdef __PROSPERO__
++	/// Crux2 v1.0.19: an automatic state (the safety save), zipped on a thread of its own at zstd
++	/// level `zstd_level`: into `filename`, or with no filename into memory only. `done` gets the
++	/// zipped bytes (none, and the reason, on a failure), on that thread. Call on the CPU thread.
++	void SaveStateAutomatic(std::string filename, int zstd_level, std::function<void(std::vector<u8> data, std::string error)> done);
++#endif
++
+ 	/// Saves state to the specified slot.
+ 	void SaveStateToSlot(s32 slot, bool zip_on_thread, std::function<void(const std::string&)> error_callback);
+ 
 diff --git a/pcsx2/VU.h b/pcsx2/VU.h
-index dc39935cd..a4bfa0029 100644
+index dc39935..a4bfa00 100644
 --- a/pcsx2/VU.h
 +++ b/pcsx2/VU.h
 @@ -121,6 +121,7 @@ struct alignas(16) VURegs
@@ -12308,7 +12584,7 @@ index dc39935cd..a4bfa0029 100644
  	u32 macflag;
  	u32 statusflag;
 diff --git a/pcsx2/VU0.cpp b/pcsx2/VU0.cpp
-index fb54b4688..c8bca75eb 100644
+index fb54b46..c8bca75 100644
 --- a/pcsx2/VU0.cpp
 +++ b/pcsx2/VU0.cpp
 @@ -177,6 +177,11 @@ void CTC2() {
@@ -12324,7 +12600,7 @@ index fb54b4688..c8bca75eb 100644
  			VU0.VI[REG_FBRST].UL = cpuRegs.GPR.r[_Rt_].UL[0] & 0x0C0C;
  			if (cpuRegs.GPR.r[_Rt_].UL[0] & 0x1) { // VU0 Force Break
 diff --git a/pcsx2/VU0micro.cpp b/pcsx2/VU0micro.cpp
-index 1e2081d4c..42f749ef6 100644
+index 1e2081d..42f749e 100644
 --- a/pcsx2/VU0micro.cpp
 +++ b/pcsx2/VU0micro.cpp
 @@ -22,7 +22,7 @@ void vu0ResetRegs()
@@ -12337,7 +12613,7 @@ index 1e2081d4c..42f749ef6 100644
  
  static __fi void vu0SetMicroFlags(u32* flags, u32 value)
 diff --git a/pcsx2/VU0microInterp.cpp b/pcsx2/VU0microInterp.cpp
-index 9b7502802..c34884f73 100644
+index 9b75028..c34884f 100644
 --- a/pcsx2/VU0microInterp.cpp
 +++ b/pcsx2/VU0microInterp.cpp
 @@ -118,11 +118,6 @@ static void _vu0Exec(VURegs* VU)
@@ -12353,7 +12629,7 @@ index 9b7502802..c34884f73 100644
  			{
  				_VI = VU0.VI[REG_CLIP_FLAG];
 diff --git a/pcsx2/VU1microInterp.cpp b/pcsx2/VU1microInterp.cpp
-index fde345122..499e37c77 100644
+index fde3451..499e37c 100644
 --- a/pcsx2/VU1microInterp.cpp
 +++ b/pcsx2/VU1microInterp.cpp
 @@ -122,11 +122,6 @@ static void _vu1Exec(VURegs* VU)
@@ -12369,7 +12645,7 @@ index fde345122..499e37c77 100644
  			{
  				//Console.Warning("*PCSX2*: Warning, VI read same cycle as write pc=%x", VU->VI[REG_TPC].UL);
 diff --git a/pcsx2/VUflags.cpp b/pcsx2/VUflags.cpp
-index e10ad5de2..9da204816 100644
+index e10ad5d..9da2048 100644
 --- a/pcsx2/VUflags.cpp
 +++ b/pcsx2/VUflags.cpp
 @@ -2,6 +2,7 @@
@@ -12446,7 +12722,7 @@ index e10ad5de2..9da204816 100644
 +	VU_STAT_UPDATE_INLINE(VU);
  }
 diff --git a/pcsx2/VUflags.h b/pcsx2/VUflags.h
-index c22339875..3ed7d60f4 100644
+index c223398..3ed7d60 100644
 --- a/pcsx2/VUflags.h
 +++ b/pcsx2/VUflags.h
 @@ -3,13 +3,58 @@
@@ -12509,7 +12785,7 @@ index c22339875..3ed7d60f4 100644
 +	VU->statusflag = (VU->statusflag & 0xFC0) | newflag;
 +}
 diff --git a/pcsx2/VUmicroMem.cpp b/pcsx2/VUmicroMem.cpp
-index 800f0adfe..7b2db80f0 100644
+index 800f0ad..7b2db80 100644
 --- a/pcsx2/VUmicroMem.cpp
 +++ b/pcsx2/VUmicroMem.cpp
 @@ -32,6 +32,7 @@ void vuMemReset()
@@ -12558,7 +12834,7 @@ index 800f0adfe..7b2db80f0 100644
  	Freeze(VU1.nextBlockCycles);
  	Freeze(VU1.xgkickaddr);
 diff --git a/pcsx2/VUops.cpp b/pcsx2/VUops.cpp
-index f3067e9da..2dcc1fa33 100644
+index f3067e9..2dcc1fa 100644
 --- a/pcsx2/VUops.cpp
 +++ b/pcsx2/VUops.cpp
 @@ -3,6 +3,7 @@
@@ -13925,7 +14201,7 @@ index f3067e9da..2dcc1fa33 100644
  void VXITOP()  { VU0.code = cpuRegs.code; _vuXITOP(&VU0); }
 -
 diff --git a/pcsx2/ps2/BiosTools.cpp b/pcsx2/ps2/BiosTools.cpp
-index 9043e14a3..fb30352e5 100644
+index 9043e14..fb30352 100644
 --- a/pcsx2/ps2/BiosTools.cpp
 +++ b/pcsx2/ps2/BiosTools.cpp
 @@ -12,6 +12,10 @@
@@ -14000,7 +14276,7 @@ index 9043e14a3..fb30352e5 100644
  	return std::string();
  }
 diff --git a/pcsx2/ps2/BiosTools.h b/pcsx2/ps2/BiosTools.h
-index 1dc382633..fb5ce08ef 100644
+index 1dc3826..fb5ce08 100644
 --- a/pcsx2/ps2/BiosTools.h
 +++ b/pcsx2/ps2/BiosTools.h
 @@ -114,6 +114,11 @@ extern std::vector<u8> BiosRom;
@@ -14016,7 +14292,7 @@ index 1dc382633..fb5ce08ef 100644
  extern bool IsBIOSAvailable(const std::string& full_path);
  
 diff --git a/pcsx2/vtlb.cpp b/pcsx2/vtlb.cpp
-index 51af0b415..98436123b 100644
+index 51af0b4..9843612 100644
 --- a/pcsx2/vtlb.cpp
 +++ b/pcsx2/vtlb.cpp
 @@ -937,12 +937,18 @@ static void vtlb_CreateFastmemMapping(u32 vaddr, u32 mainmem_offset, const PageP
@@ -14072,7 +14348,7 @@ index 51af0b415..98436123b 100644
  			mmap_ClearCpuBlock(offset);
 diff --git a/pcsx2/x86/SoftFloatEmitter.h b/pcsx2/x86/SoftFloatEmitter.h
 new file mode 100644
-index 000000000..d53a1f436
+index 0000000..d53a1f4
 --- /dev/null
 +++ b/pcsx2/x86/SoftFloatEmitter.h
 @@ -0,0 +1,169 @@
@@ -14246,7 +14522,7 @@ index 000000000..d53a1f436
 +	}
 +} // namespace X86SoftFloatEmitter
 diff --git a/pcsx2/x86/iFPU.cpp b/pcsx2/x86/iFPU.cpp
-index 02a2c07a5..36e9b02b2 100644
+index 02a2c07..36e9b02 100644
 --- a/pcsx2/x86/iFPU.cpp
 +++ b/pcsx2/x86/iFPU.cpp
 @@ -4,6 +4,8 @@
@@ -15693,7 +15969,7 @@ index 02a2c07a5..36e9b02b2 100644
  #endif // FPU_RECOMPILE
  
 diff --git a/pcsx2/x86/iR5900.h b/pcsx2/x86/iR5900.h
-index 40841bb0a..99f08db20 100644
+index 40841bb..99f08db 100644
 --- a/pcsx2/x86/iR5900.h
 +++ b/pcsx2/x86/iR5900.h
 @@ -25,6 +25,9 @@ extern bool s_nBlockInterlocked; // Current block has VU0 interlocking
@@ -15707,7 +15983,7 @@ index 40841bb0a..99f08db20 100644
  // This will allow us to reach r1-r16 with a shorter encoding
  // TODO: Actually figure out what things are used most often, maybe rearrange the cpuRegs struct, and point at that
 diff --git a/pcsx2/x86/iR5900Analysis.cpp b/pcsx2/x86/iR5900Analysis.cpp
-index ea33fa90b..ff4007dea 100644
+index ea33fa9..ff4007d 100644
 --- a/pcsx2/x86/iR5900Analysis.cpp
 +++ b/pcsx2/x86/iR5900Analysis.cpp
 @@ -79,6 +79,7 @@ void COP2FlagHackPass::Run(u32 start, u32 end, EEINST* inst_cache)
@@ -15727,7 +16003,7 @@ index ea33fa90b..ff4007dea 100644
  			if (m_cfc2_pc != apc)
  				DevCon.WriteLn("CTC2 at %08X paired with CFC2 %08X", apc, m_cfc2_pc);
 diff --git a/pcsx2/x86/ix86-32/iR5900.cpp b/pcsx2/x86/ix86-32/iR5900.cpp
-index 026197ca9..870783089 100644
+index 026197c..8707830 100644
 --- a/pcsx2/x86/ix86-32/iR5900.cpp
 +++ b/pcsx2/x86/ix86-32/iR5900.cpp
 @@ -18,6 +18,9 @@
@@ -15900,7 +16176,7 @@ index 026197ca9..870783089 100644
  	{
  		s_nEndBlock = i + n * 4;
 diff --git a/pcsx2/x86/microVU.cpp b/pcsx2/x86/microVU.cpp
-index 0f628f7d3..2f72f3574 100644
+index 0f628f7..2f72f35 100644
 --- a/pcsx2/x86/microVU.cpp
 +++ b/pcsx2/x86/microVU.cpp
 @@ -3,9 +3,11 @@
@@ -16073,7 +16349,7 @@ index 0f628f7d3..2f72f3574 100644
 -
 -#endif
 diff --git a/pcsx2/x86/microVU.h b/pcsx2/x86/microVU.h
-index 0950a0d10..9332dd8d3 100644
+index 0950a0d..9332dd8 100644
 --- a/pcsx2/x86/microVU.h
 +++ b/pcsx2/x86/microVU.h
 @@ -20,6 +20,9 @@
@@ -16212,7 +16488,7 @@ index 0950a0d10..9332dd8d3 100644
  typedef void (*mVUrecCall)(u32, u32);
  typedef void (*mVUrecCallXG)(void);
 diff --git a/pcsx2/x86/microVU_Alloc.inl b/pcsx2/x86/microVU_Alloc.inl
-index bd3d06514..df52852b1 100644
+index bd3d065..df52852 100644
 --- a/pcsx2/x86/microVU_Alloc.inl
 +++ b/pcsx2/x86/microVU_Alloc.inl
 @@ -47,12 +47,16 @@ __fi void mVUallocSFLAGb(const x32& reg, int fInstance)
@@ -16268,7 +16544,7 @@ index bd3d06514..df52852b1 100644
  
  __fi void mVUallocCFLAGa(mV, const x32& reg, int fInstance)
 diff --git a/pcsx2/x86/microVU_Analyze.inl b/pcsx2/x86/microVU_Analyze.inl
-index a3acd6a86..00d54b9f2 100644
+index a3acd6a..00d54b9 100644
 --- a/pcsx2/x86/microVU_Analyze.inl
 +++ b/pcsx2/x86/microVU_Analyze.inl
 @@ -383,6 +383,8 @@ __ri void flagSet(mV, bool setMacFlag)
@@ -16281,7 +16557,7 @@ index a3acd6a86..00d54b9f2 100644
  			calcOPS++;
  		}
 diff --git a/pcsx2/x86/microVU_Compile.inl b/pcsx2/x86/microVU_Compile.inl
-index 030fdc1bb..19b0d8321 100644
+index 030fdc1..19b0d83 100644
 --- a/pcsx2/x86/microVU_Compile.inl
 +++ b/pcsx2/x86/microVU_Compile.inl
 @@ -142,7 +142,9 @@ void doIbit(mV)
@@ -16323,7 +16599,7 @@ index 030fdc1bb..19b0d8321 100644
  			mVU_XGKICK_SYNC(mVU, false);
  		}
 diff --git a/pcsx2/x86/microVU_Execute.inl b/pcsx2/x86/microVU_Execute.inl
-index 711e99093..7b365071d 100644
+index 711e990..7b36507 100644
 --- a/pcsx2/x86/microVU_Execute.inl
 +++ b/pcsx2/x86/microVU_Execute.inl
 @@ -11,6 +11,11 @@
@@ -16375,7 +16651,7 @@ index 711e99093..7b365071d 100644
  
  	mVU.cycles = mVU.totalCycles - std::max(0, mVU.cycles);
 diff --git a/pcsx2/x86/microVU_Flags.inl b/pcsx2/x86/microVU_Flags.inl
-index 411861846..bb9739099 100644
+index 4118618..bb97390 100644
 --- a/pcsx2/x86/microVU_Flags.inl
 +++ b/pcsx2/x86/microVU_Flags.inl
 @@ -26,6 +26,7 @@ __fi void mVUstatusFlagOp(mV)
@@ -16427,7 +16703,7 @@ index 411861846..bb9739099 100644
  			}
  		}
 diff --git a/pcsx2/x86/microVU_IR.h b/pcsx2/x86/microVU_IR.h
-index dbbfb11dd..5f8285f48 100644
+index dbbfb11..5f8285f 100644
 --- a/pcsx2/x86/microVU_IR.h
 +++ b/pcsx2/x86/microVU_IR.h
 @@ -5,6 +5,8 @@
@@ -16550,7 +16826,7 @@ index dbbfb11dd..5f8285f48 100644
  		{
  			for (int i = 0; i < xmmTotal; i++)
 diff --git a/pcsx2/x86/microVU_Lower.inl b/pcsx2/x86/microVU_Lower.inl
-index 672195c22..a5395473b 100644
+index 672195c..a539547 100644
 --- a/pcsx2/x86/microVU_Lower.inl
 +++ b/pcsx2/x86/microVU_Lower.inl
 @@ -11,6 +11,903 @@
@@ -17645,7 +17921,7 @@ index 672195c22..a5395473b 100644
  }
  
 diff --git a/pcsx2/x86/microVU_Macro.inl b/pcsx2/x86/microVU_Macro.inl
-index bdd6dac5b..8a367fae6 100644
+index bdd6dac..8a367fa 100644
 --- a/pcsx2/x86/microVU_Macro.inl
 +++ b/pcsx2/x86/microVU_Macro.inl
 @@ -48,6 +48,7 @@ void setupMacroOp(int mode, const char* opName)
@@ -17890,7 +18166,7 @@ index bdd6dac5b..8a367fae6 100644
  REC_COP2_mVU0(IAND,  "IAND",  0x104);
 diff --git a/pcsx2/x86/microVU_SoftFloat.h b/pcsx2/x86/microVU_SoftFloat.h
 new file mode 100644
-index 000000000..adef192af
+index 0000000..adef192
 --- /dev/null
 +++ b/pcsx2/x86/microVU_SoftFloat.h
 @@ -0,0 +1,79 @@
@@ -17975,7 +18251,7 @@ index 000000000..adef192af
 +static_assert(sizeof(VuUpperFmacSoftDescriptor) == 4);
 diff --git a/pcsx2/x86/microVU_SoftFloatTables.cpp b/pcsx2/x86/microVU_SoftFloatTables.cpp
 new file mode 100644
-index 000000000..63d728e3d
+index 0000000..63d728e
 --- /dev/null
 +++ b/pcsx2/x86/microVU_SoftFloatTables.cpp
 @@ -0,0 +1,14114 @@
@@ -32095,7 +32371,7 @@ index 000000000..63d728e3d
 +} // namespace MicroVUSoftFloatTables
 diff --git a/pcsx2/x86/microVU_SoftFloatTables.h b/pcsx2/x86/microVU_SoftFloatTables.h
 new file mode 100644
-index 000000000..d6a49a475
+index 0000000..d6a49a4
 --- /dev/null
 +++ b/pcsx2/x86/microVU_SoftFloatTables.h
 @@ -0,0 +1,36 @@
@@ -32137,7 +32413,7 @@ index 000000000..d6a49a475
 +} // namespace MicroVUSoftFloatTables
 diff --git a/pcsx2/x86/microVU_SoftFloatTablesRuntime.cpp b/pcsx2/x86/microVU_SoftFloatTablesRuntime.cpp
 new file mode 100644
-index 000000000..b807cb2f0
+index 0000000..b807cb2
 --- /dev/null
 +++ b/pcsx2/x86/microVU_SoftFloatTablesRuntime.cpp
 @@ -0,0 +1,149 @@
@@ -32291,7 +32567,7 @@ index 000000000..b807cb2f0
 +	}
 +} // namespace MicroVUSoftFloatTables
 diff --git a/pcsx2/x86/microVU_Upper.inl b/pcsx2/x86/microVU_Upper.inl
-index 5a54af324..92e29d28a 100644
+index 5a54af3..92e29d2 100644
 --- a/pcsx2/x86/microVU_Upper.inl
 +++ b/pcsx2/x86/microVU_Upper.inl
 @@ -3,11 +3,25 @@
@@ -32583,7 +32859,7 @@ index 5a54af324..92e29d28a 100644
  		const xmm& ACC = mVU.regAlloc->allocReg(32, _Fd_, _X_Y_Z_W);
 diff --git a/pcsx2/x86/microVU_UpperSoft.inl b/pcsx2/x86/microVU_UpperSoft.inl
 new file mode 100644
-index 000000000..55a78ef36
+index 0000000..55a78ef
 --- /dev/null
 +++ b/pcsx2/x86/microVU_UpperSoft.inl
 @@ -0,0 +1,4104 @@

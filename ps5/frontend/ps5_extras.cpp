@@ -29,6 +29,10 @@
 #include "common/Timer.h"
 
 #include <atomic>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
+#include <vector>
 #include <mutex>
 
 namespace
@@ -199,6 +203,82 @@ void PS5Extras::GameStarting()
 	s_pack_folder.clear();
 }
 
+// v1.0.19: the safety save in memory. Up to v1.0.18 Sleep-safe saving wrote a whole state (about
+// 15 MB) to the console's drive every five minutes and at every opening of the console's menu: the
+// most Crux2 ever wrote. Now the five-minute state is zipped into memory only, and written to the
+// drive just when it can be needed: by the crash report, when Crux2 stops in a crash (the bytes and
+// the note are written by the signal handler as they are: open, write, close). The console's menu is
+// still a fresh state on the drive (the console can be put to rest or the title closed from there),
+// but not again within a minute of the last, and automatic states are zipped harder (zstd 10, on a
+// thread of their own). The states of "Auto-save every N minutes", a choice of the player's, stay on
+// the drive.
+namespace
+{
+	constexpr int AUTOMATIC_ZSTD = 10;
+	constexpr double MENU_SAVE_GAP = 60.0;
+
+	// Two slots, filled in turn: the crash report reads the one published (s_safety), never the one
+	// being filled. Fixed storage for the paths and the note: a signal handler reads them.
+	struct SafetySlot
+	{
+		std::vector<u8> data;
+		char state_path[512] = "";
+		char note_path[512] = "";
+		char note[2048] = "";
+		size_t note_length = 0;
+	};
+	SafetySlot s_slots[2];
+	std::atomic<int> s_safety{-1};      // the slot the crash report writes, -1: none
+	std::mutex s_safety_fill;           // one filling at a time
+	std::atomic<unsigned> s_safety_generation{0}; // a game closed or started: a fill under way is let go
+
+	std::string SafetyNote(const std::string& state_path)
+	{
+		return "game=" + VMManager::GetDiscPath() + "\nserial=" + VMManager::GetDiscSerial() + "\nstate=" + state_path + "\n";
+	}
+
+	void SafetyForget()
+	{
+		s_safety_generation.fetch_add(1, std::memory_order_acq_rel);
+		s_safety.store(-1, std::memory_order_release);
+	}
+}
+
+// The crash report's part (ps5_crash.cpp, in its signal handler): the safety state and its note onto
+// the drive, so that the library offers to go on from it. 1 when written, 0 when there was none.
+extern "C" int ps5px_safety_state_write(void)
+{
+	const int at = s_safety.load(std::memory_order_acquire);
+	if (at < 0 || at > 1)
+		return 0;
+	const SafetySlot& slot = s_slots[at];
+	if (slot.data.empty() || slot.state_path[0] == '\0')
+		return 0;
+	const int fd = open(slot.state_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if (fd < 0)
+		return 0;
+	size_t done = 0;
+	while (done < slot.data.size())
+	{
+		const ssize_t wrote = write(fd, slot.data.data() + done, slot.data.size() - done);
+		if (wrote <= 0)
+			break;
+		done += static_cast<size_t>(wrote);
+	}
+	fsync(fd);
+	close(fd);
+	if (done != slot.data.size())
+		return 0;
+	const int note = open(slot.note_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if (note >= 0)
+	{
+		(void)!write(note, slot.note, slot.note_length);
+		fsync(note);
+		close(note);
+	}
+	return 1;
+}
+
 void PS5Extras::FrameTick()
 {
 	// (Only the emulation thread comes here.)
@@ -208,11 +288,14 @@ void PS5Extras::FrameTick()
 	static int minutes = 0;
 	static bool sleep_safe = true;
 	static int menu_before = 0;
+	static double last_menu_save = -1e9;
 
 	if (s_clock_reset.exchange(false, std::memory_order_acq_rel))
 	{
 		clock.Reset();
 		menu_before = 0;
+		last_menu_save = -1e9;
+		SafetyForget();
 	}
 	// The settings are asked every other second: they are behind a lock.
 	if ((frames % 120) == 0)
@@ -235,8 +318,16 @@ void PS5Extras::FrameTick()
 		menu_before = menu;
 	}
 	frames++;
+	const double now = timer.GetTimeSeconds();
+	if (why != nullptr && now - last_menu_save < MENU_SAVE_GAP)
+	{
+		// The menu again within a minute (a notification looked at): the state on the drive is
+		// that recent, and a crash still has the one in memory.
+		ps5px_log("auto-save: the console's menu opened again within a minute of the last save: not saved again");
+		why = nullptr;
+	}
 	const double every = (minutes > 0) ? minutes * 60.0 : (sleep_safe ? 300.0 : 0.0);
-	if (why == nullptr && !clock.Tick(timer.GetTimeSeconds(), every))
+	if (why == nullptr && !clock.Tick(now, every))
 		return;
 	if (VMManager::GetState() != VMState::Running)
 		return;
@@ -256,21 +347,56 @@ void PS5Extras::FrameTick()
 	const std::string path = VMManager::GetCurrentSpecialSaveStateFileName("auto");
 	if (path.empty())
 		return;
+	const std::string note_path = InterruptedNotePath();
+	const std::string note = SafetyNote(path);
+	// Where it goes: the drive for the console's menu and for the player's own auto-save; memory
+	// only for the five-minute safety save.
+	const bool to_drive = (why != nullptr) || minutes > 0;
+	if (why != nullptr)
+		last_menu_save = now;
 	Common::Timer took;
-	VMManager::SaveState(path.c_str(), true, false,
-		[](const std::string& failure) { ps5px_log("auto-save: the state could not be saved: %s", failure.c_str()); });
+	const unsigned generation = s_safety_generation.load(std::memory_order_acquire);
+	VMManager::SaveStateAutomatic(to_drive ? path : std::string(), AUTOMATIC_ZSTD,
+		[to_drive, sleep_safe_now = sleep_safe, path, note_path, note, generation](std::vector<u8> data, std::string error) {
+			if (!error.empty())
+			{
+				ps5px_log("auto-save: the state could not be saved: %s", error.c_str());
+				return;
+			}
+			if (to_drive)
+			{
+				if (sleep_safe_now)
+					PS5Platform::WriteFileSafely(note_path.c_str(), note.data(), note.size());
+				PS5UI::StatesChanged();
+			}
+			// Either way the newest state is the one a crash writes out (the one on the drive may be
+			// older by then).
+			if (!sleep_safe_now || data.empty() || note.size() >= sizeof(SafetySlot::note) || path.size() >= sizeof(SafetySlot::state_path) ||
+				note_path.size() >= sizeof(SafetySlot::note_path))
+				return;
+			const std::lock_guard lock(s_safety_fill);
+			if (s_safety_generation.load(std::memory_order_acquire) != generation)
+				return; // (the game closed while it was zipped)
+			const int current = s_safety.load(std::memory_order_acquire);
+			const int next = (current == 0) ? 1 : 0;
+			SafetySlot& slot = s_slots[next];
+			slot.data = std::move(data);
+			std::memcpy(slot.state_path, path.c_str(), path.size() + 1);
+			std::memcpy(slot.note_path, note_path.c_str(), note_path.size() + 1);
+			std::memcpy(slot.note, note.data(), note.size());
+			slot.note_length = note.size();
+			s_safety.store(next, std::memory_order_release);
+			if (!to_drive)
+				ps5px_log("auto-save: the safety state kept in memory (%zu KB): written to the drive only if Crux2 stops in a crash",
+					slot.data.size() / 1024);
+		});
 	if (why != nullptr)
 		ps5px_log("auto-save: saved because %s; the game stood still for %.0f ms", why, took.GetTimeMilliseconds());
+	else if (minutes > 0)
+		ps5px_log("auto-save: saved after %d minute%s of play; the game stood still for %.0f ms", minutes, (minutes == 1) ? "" : "s",
+			took.GetTimeMilliseconds());
 	else
-		ps5px_log("auto-save: saved after %d minute%s of play; the game stood still for %.0f ms", minutes > 0 ? minutes : 5,
-			(minutes == 1) ? "" : "s", took.GetTimeMilliseconds());
-	if (sleep_safe)
-	{
-		// The note: the game's file and the state's.
-		const std::string note = "game=" + VMManager::GetDiscPath() + "\nserial=" + VMManager::GetDiscSerial() + "\nstate=" + path + "\n";
-		PS5Platform::WriteFileSafely(InterruptedNotePath().c_str(), note.data(), note.size());
-	}
-	PS5UI::StatesChanged();
+		ps5px_log("auto-save: the five-minute safety state taken (into memory); the game stood still for %.0f ms", took.GetTimeMilliseconds());
 }
 
 std::string PS5Extras::InterruptedNotePath()
@@ -280,7 +406,9 @@ std::string PS5Extras::InterruptedNotePath()
 
 void PS5Extras::GameClosed()
 {
-	// The game was closed in the title: nothing to go on with at the next start.
+	// The game was closed in the title: nothing to go on with at the next start, and no safety
+	// state for a crash to write.
+	SafetyForget();
 	const std::string note = InterruptedNotePath();
 	if (FileSystem::FileExists(note.c_str()))
 		FileSystem::DeleteFilePath(note.c_str());

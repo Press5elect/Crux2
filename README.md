@@ -474,6 +474,11 @@ TCP or UDP.
 ## What v1.0.19 changed
 
 Added:
+- **Settings > Debug > Logs: what is logged, and where.** *Logs* off turns every log off (no
+  crux2-boot.log, no emulog.txt, no copy in the console's kernel log). *Logs go to* chooses the
+  console or a USB drive's Crux2-logs folder (a drive that is out at the start keeps the boot log in
+  memory for that session, shown on the same page). Each log has its own switch: Crux2's boot log,
+  the graphics driver's messages, the emulator's own log, and the copy in klog.
 - **Network shares in Settings > Folders**: *Add a network share* asks for the kind (SMB or NFS),
   the server (found on the network, or typed), the share and folder, a name, and an account of its
   own if it has one, all typed with the on-screen keyboard. The share is connected at once and its
@@ -489,7 +494,16 @@ Changed:
   18 MB/s whatever the link.
 - **The boot log is written by a thread of its own**: a line no longer waits for the file system
   on the thread that logged it (OGBox measured 600 to 900 ms a line while a game's own writes were
-  in flight), and the file is synced every 2 seconds.
+  in flight). It is synced to the drive only when a game starts or closes and at the end.
+- **The five-minute safety save is kept in memory**: Sleep-safe saving wrote a whole state (about
+  15 MB) to the console's drive every five minutes, the most Crux2 wrote. That state is now zipped
+  into memory and written to the drive only if Crux2 crashes, so the library can still offer to go
+  on. The PS5 menu still saves to the drive, but not again within a minute, and automatic states
+  are compressed harder (in the background). *Auto-save every N minutes*, when you choose it, still
+  saves to the drive.
+- **PCSX2's own pipeline cache file is gone**: the graphics driver's shader cache already keeps
+  every compiled pipeline, so `cache/vulkan_pipelines.bin` (1 to 2 MB, written whole at every close
+  it had grown) held the same thing twice. The old file is removed once.
 - **The graphics driver carries two newer fixes of PS5_Mesa's**: a large GPU buffer is backed by
   several pieces of the console's memory when no single free piece is big enough, instead of
   failing, and each piece is placed only where nothing else is.

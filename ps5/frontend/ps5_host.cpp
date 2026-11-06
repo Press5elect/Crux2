@@ -1382,6 +1382,7 @@ void Host::OnVMDestroyed()
 	}
 	// (For the notice after a crash: what the log says from here on is not while a game was loaded.)
 	ps5px_log("game: closed");
+	ps5px_log_checkpoint();
 	// The memory cards are whole on the disk again: backed up, when that is asked for and they changed.
 	PS5Jobs::GameClosed();
 	// Closed in the title: sleep-safe saving's note goes (nothing to go on with at the next start).
@@ -1414,6 +1415,7 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 	if (!disc_path.empty() || !title.empty())
 	{
 		ps5px_log("game: %s [%s, CRC %08X] %s", title.c_str(), disc_serial.c_str(), disc_crc, disc_path.c_str());
+		ps5px_log_checkpoint();
 		// What its picture costs: the settings that decide most of the GPU's work, as this game has them
 		// (its own options and the game database's fixes applied).
 		static constexpr const char* blending[] = {"minimum", "basic", "medium", "high", "full", "maximum"};

@@ -2,10 +2,17 @@
 
 ## v1.0.19 (2026-11-05)
 
+- Added: Settings > Debug > Logs: logs on or off, where they go (the console or a USB drive), and a
+  switch for each (Crux2's boot log, the graphics driver's messages, the emulator's log, the klog copy).
 - Added: network shares in Settings > Folders: added, changed and taken away with the on-screen
   keyboard, servers found on the network, connected at once; network.cfg is written for you.
 - Changed: games on a network share are read faster (large buffers on the share's connection).
-- Changed: the boot log is written by a thread of its own, so no line waits for the file system.
+- Changed: the boot log is written by a thread of its own, so no line waits for the file system;
+  it is synced to the drive only when a game starts or closes and at the end.
+- Changed: the five-minute safety save is kept in memory and written to the drive only if Crux2
+  crashes; the PS5 menu's save is made at most once a minute; automatic states are compressed harder.
+- Changed: PCSX2's own pipeline cache file is no longer written (the graphics driver's cache keeps
+  the same pipelines).
 - Changed: the graphics driver backs a large buffer with several pieces of memory when no single
   free piece is big enough.
 - Changed: built on PCSX2 v2.9.152 (was v2.9.150): out-of-bounds reads fixed when replacement

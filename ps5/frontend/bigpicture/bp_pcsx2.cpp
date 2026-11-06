@@ -3724,6 +3724,7 @@ public:
 	bp::Page logPage() override
 	{
 		bp::Page page{"\xef\x85\x9c", "Log", {}};
+		LogSettingsRows(page);
 		page.rows.push_back(Heading("WHAT CRUX2 WROTE DOWN"));
 		const auto show = [](const char* title, std::string path) {
 			return [title, path = std::move(path)] {
@@ -3737,7 +3738,21 @@ public:
 		const PS5Logs::Files files = PS5Jobs::LogFiles();
 		page.rows.push_back(Action("This run",
 			"Shows the log of this session.",
-			show("The log of this run", files.now), bp::Option::AllGames));
+			[show, now = files.now] {
+				// (kept in memory only: its folder's drive is out)
+				std::string text;
+				if (PS5Platform::LogInMemory(&text))
+				{
+					std::vector<std::string> lines = PS5Logs::TailText(text, 800, 2000);
+					if (lines.empty())
+						bp::toast("There is no such log (yet).");
+					else
+						bp::showText("The log of this run (kept in memory)", std::move(lines));
+					return;
+				}
+				show("The log of this run", now)();
+			},
+			bp::Option::AllGames));
 		{
 			bp::Option before = Action("The run before",
 				"Shows the log of the previous session, including a crash report if it crashed.",
@@ -3763,8 +3778,70 @@ public:
 		}
 		if (places.empty())
 			page.rows.push_back(Line("Copy the logs", "Put a USB drive in, or name a share in network.cfg; then open this page again"));
-		page.rows.push_back(Line("On the console", Shown(ps5px_title_dir()) + "crux2-boot.log"));
+		page.rows.push_back(Line("This run's log", files.now.empty() ? std::string("No file (kept in memory, or off)") : Shown(files.now)));
 		return page;
+	}
+
+	// v1.0.19: what is logged and where (ps5_platform.cpp reads these at the start, by hand).
+	void LogSettingsRows(bp::Page& page)
+	{
+		constexpr unsigned flags = bp::Option::AllGames;
+		page.rows.push_back(Heading("WHAT IS LOGGED, AND WHERE"));
+		page.rows.push_back(Toggle("Logs",
+			"Off: no logs at all, from the next start: no crux2-boot.log, no emulog.txt, no copy in the console's kernel log, the "
+			"graphics driver's messages dropped. A problem can then not be looked into; turn them on again to report one.",
+			"PS5", "Logs", true, flags));
+
+		bp::Option place = Action("Logs go to",
+			"The console's own drive (the title folder), or a USB drive's Crux2-logs folder, which spares the console's drive the "
+			"writes. A drive that is out at the start: the boot log is kept in memory for that session. From the next start.",
+			[this] {
+				std::vector<std::string> names = {"This console (the title folder)"};
+				std::vector<std::string> paths = {""};
+				for (const PS5Jobs::Place& p : PS5Jobs::Places())
+				{
+					if (p.path.rfind("/mnt/usb", 0) != 0)
+						continue; // (a share takes whole files only: a log can't be written to one as it grows)
+					names.push_back(p.name + " (" + p.path + "/Crux2-logs)");
+					paths.push_back(p.path + "/Crux2-logs");
+				}
+				const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
+				int at = 0;
+				for (size_t i = 0; i < paths.size(); i++)
+					if (paths[i] == now)
+						at = static_cast<int>(i);
+				if (names.size() == 1)
+					names[0] += " (put a USB drive in for another place)";
+				bp::pick("Logs go to", names, at, [this, paths](int i) {
+					if (i < 0 || i >= static_cast<int>(paths.size()))
+						return;
+					Host::SetBaseStringSettingValue("PS5", "LogPlace", paths[static_cast<size_t>(i)].c_str());
+					Host::CommitBaseSettingChanges();
+					ps5px_log("logs: from the next start in %s", paths[static_cast<size_t>(i)].empty() ? "the title folder" : paths[static_cast<size_t>(i)].c_str());
+					bp::toast("The logs go there from the next start.");
+					m_pages++;
+				});
+			},
+			flags);
+		place.info = [] {
+			const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
+			return now.empty() ? std::string("This console") : now;
+		};
+		page.rows.push_back(std::move(place));
+		page.rows.push_back(Toggle("Crux2's boot log",
+			"crux2-boot.log: the start, each game, its speed and pacing, and what went wrong (and a crash report). The file to "
+			"send with a report. From the next start.",
+			"PS5", "LogBoot", true, flags));
+		page.rows.push_back(Toggle("The graphics driver's messages",
+			"What the graphics driver prints, in the boot log: needed for a report of a graphics fault. From the next start.",
+			"PS5", "LogDriver", true, flags));
+		page.rows.push_back(Toggle("The emulator's own log",
+			"emulog.txt: PCSX2's own messages about the game (its disc, memory cards, the game's own debug output).",
+			"Logging", "EnableFileLogging", true, flags));
+		page.rows.push_back(Toggle("A copy in the console's kernel log",
+			"Each line of the boot log also to klog, for a computer that reads the console's log as it runs. Nothing is written "
+			"to a drive for it. From the next start.",
+			"PS5", "LogKlog", true, flags));
 	}
 
 	// What PCSX2's game database recommends for the open game and does not set by itself: the
@@ -3818,7 +3895,7 @@ public:
 		page.rows.push_back(Line("Build", ps5px_build_identity()));
 		page.rows.push_back(Line("Licence", "GPL-3.0 or later, with credit to Press5elect required (NOTICE.txt). LEGAL.txt and licenses/ in the title "
 											 "folder name every part"));
-		page.rows.push_back(Line("Log", Shown(ps5px_title_dir()) + "crux2-boot.log"));
+		page.rows.push_back(Line("Log", PS5Platform::LogPath().empty() ? std::string("No file this run (Settings > Debug > Logs)") : Shown(PS5Platform::LogPath())));
 		page.rows.push_back(Line("Crux2's files", PS5Platform::OutsideFolder().empty() ?
 			fmt::format("{} (a folder /data/crux2 is used in its place when there is one)", Shown(EmuFolders::DataRoot)) :
 			fmt::format("{}, outside the title folder", Shown(EmuFolders::DataRoot))));
@@ -4057,8 +4134,9 @@ public:
 		else if (w == "saves")
 		{
 			rows.push_back(Toggle("Sleep-safe saving",
-				"Saves the game's state when you open the PS5 menu and every five minutes, so you can continue after the "
-					"console goes to rest mode.",
+				"Saves the game's state when you open the PS5 menu (at most once a minute), so you can continue after the console "
+					"goes to rest mode. Every five minutes a state is also kept in memory, and written to the console only if "
+					"Crux2 crashes: the console's drive is spared the writes.",
 				"PS5", "SleepSafe", true, A));
 		}
 		else if (w == "network")
