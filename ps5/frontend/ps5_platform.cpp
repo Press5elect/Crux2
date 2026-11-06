@@ -462,6 +462,16 @@ extern "C" void ps5px_log_checkpoint(void)
   }
 }
 
+extern "C" const char* ps5px_title_dir(void)
+{
+  return s_title_dir;
+}
+
+extern "C" const char* ps5px_ca_bundle(void)
+{
+  return s_ca_bundle;
+}
+
 // The boot log as it is now, for Settings > Debug when it is kept in memory only: true and the
 // text, or false when it has a file (or there is none).
 bool PS5Platform::LogInMemory(std::string* text)
