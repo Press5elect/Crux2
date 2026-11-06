@@ -486,6 +486,9 @@ Changed:
 - The content version is 01.020.000.
 
 Fixed:
+- **Every look, and SMAA, left the screen black with no overlay** (the boot log showed the look loaded and
+  the game running): the look's picture was handed to the screen's render pass in the wrong layout,
+  which ended the pass, so the picture and the overlay were never drawn.
 - **A look that drew only black left the screen black.** The first pictures of a look and of SMAA are
   now checked (a small part of the middle is read back); one that is black while the game's own is
   not is switched off, said on the screen and in the log, and the picture is shown as it was.

@@ -4,6 +4,8 @@
 
 - Changed: SMAA is a switch beside FXAA (Settings > Picture > Post-processing) instead of an entry of
   the Look list, and runs before a Look, so the two can be used together.
+- Fixed: every look, and SMAA, left the screen black with no overlay: the look's picture was handed to
+  the screen's render pass in the wrong layout, which ended the pass, so nothing after it was drawn.
 - Fixed: a look that drew only black left the screen black: the first pictures of a look and of SMAA
   are checked, and one that is black while the game's own is not is switched off with a message.
 - Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
