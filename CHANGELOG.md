@@ -17,9 +17,9 @@
   the same pipelines).
 - Changed: the graphics driver backs a large buffer with several pieces of memory when no single
   free piece is big enough.
-- Changed: built on PCSX2 v2.9.155 (was v2.9.150): out-of-bounds reads fixed when replacement
+- Changed: built on PCSX2 v2.9.158 (was v2.9.150): out-of-bounds reads fixed when replacement
   textures load, a Vulkan feedback-loop fix (a texture is marked changed when it switches layout),
-  more Japanese serials and corrected titles in the game database, a newer controller database,
+  a guard against out-of-bounds 4-bit texture reads from bad GS registers, more Japanese serials and corrected titles in the game database, a newer controller database,
   and LZMA 26.05.
 - Changed: the content version in param.json is 01.019.000.
 - Fixed: the console could go down after Crux2 was closed many times with USB drives on.

@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 1ccd6a8dc3574771c138849039d71951a3a1c175.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 993f6fc3b18e3feb0151ea1fa16b8a0783fe6fca.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -5153,7 +5153,7 @@ index 14c6efa..8b173c6 100644
  
  	void GenerateMipmapsIfNeeded();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 8b058e1..f963797 100644
+index be2145c..f149379 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -11,6 +11,9 @@
@@ -9337,7 +9337,7 @@ index 91abe00..c65971f 100644
  	decoder.coding_type			= I_TYPE;
  	decoder.mpeg1				= ipuRegs.ctrl.MP1;
 diff --git a/pcsx2/ImGui/ImGuiManager.cpp b/pcsx2/ImGui/ImGuiManager.cpp
-index 53abe0f..21a7919 100644
+index 53abe0f..1943466 100644
 --- a/pcsx2/ImGui/ImGuiManager.cpp
 +++ b/pcsx2/ImGui/ImGuiManager.cpp
 @@ -113,6 +113,12 @@ struct ControllerNavState
@@ -9368,7 +9368,7 @@ index 53abe0f..21a7919 100644
  	s_imgui_wants_mouse.store(io.WantCaptureMouse, std::memory_order_release);
  
  	const bool want_text_input = io.WantTextInput;
-@@ -754,6 +767,88 @@ bool ImGuiManager::AddEmojiFont()
+@@ -754,6 +767,95 @@ bool ImGuiManager::AddEmojiFont()
  	return true;
  }
  
@@ -9410,12 +9410,19 @@ index 53abe0f..21a7919 100644
 +			if (bold != 0 && !s_ps5_bold_font_data.empty())
 +			{
 +				// The text font's own recipe, with the bold face as the only text face.
++				const std::vector<FontInfo> faces_text = s_font_info;
 +				std::vector<FontInfo> faces;
 +				FontInfo& face = faces.emplace_back();
 +				face.data = s_ps5_bold_font_data;
 +				face.exclude_ranges = {};
 +				face.face_name = nullptr;
 +				face.is_emoji_font = false;
++				// ...and the letters of Japanese, Chinese and Korean names behind it, as the text font has them.
++				for (size_t i = 1; i < faces_text.size(); i++)
++				{
++					if (!faces_text[i].is_emoji_font)
++						faces.push_back(faces_text[i]);
++				}
 +				faces.swap(s_font_info);
 +				font = AddTextFont();
 +				faces.swap(s_font_info);
@@ -9457,7 +9464,7 @@ index 53abe0f..21a7919 100644
  bool ImGuiManager::AddImGuiFonts()
  {
  	ImGuiIO& io = ImGui::GetIO();
-@@ -771,6 +866,11 @@ bool ImGuiManager::AddImGuiFonts()
+@@ -771,6 +873,11 @@ bool ImGuiManager::AddImGuiFonts()
  	if (!s_osd_font || !AddIconFonts() || !AddEmojiFont())
  		return false;
  
@@ -9469,7 +9476,7 @@ index 53abe0f..21a7919 100644
  	ImGuiFullscreen::SetFont(s_standard_font);
  	return true;
  }
-@@ -1228,16 +1328,25 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+@@ -1228,16 +1335,25 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
  		ImGuiKey_GamepadL1, // L1
  		ImGuiKey_GamepadL2, // L2
  		ImGuiKey_GamepadR1, // R1
@@ -9495,7 +9502,7 @@ index 53abe0f..21a7919 100644
  	const bool is_dpad_h = (key == GenericInputBinding::DPadLeft || key == GenericInputBinding::DPadRight);
  	const bool is_dpad_v = (key == GenericInputBinding::DPadUp || key == GenericInputBinding::DPadDown);
  	if (is_dpad_h || is_dpad_v)
-@@ -1252,6 +1361,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+@@ -1252,6 +1368,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
  			return false;
  	}
  
@@ -9507,7 +9514,7 @@ index 53abe0f..21a7919 100644
  	MTGS::RunOnGSThread(
  		[key = key_map[static_cast<u32>(key)], value, layout]() mutable {
  			if (s_gamepad_swap_noth_west)
-@@ -1317,6 +1431,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
+@@ -1317,6 +1438,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
  	// Treat as binary like the D-pad: either fully pressed or released, with a deadzone.
  	bool* neg_active_ptr = state ? (is_x_axis ? &state->x_neg_active : &state->y_neg_active) : nullptr;
  	bool* pos_active_ptr = state ? (is_x_axis ? &state->x_pos_active : &state->y_pos_active) : nullptr;
