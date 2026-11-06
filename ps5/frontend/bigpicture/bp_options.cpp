@@ -961,17 +961,18 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games. For SMAA, choose it under Look. For supersampling (SSAA), raise the internal resolution, or use paraLLEl-GS with 4 or more samples.", GS, "fxaa", false));
+	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games. For supersampling (SSAA), raise the internal resolution, or use paraLLEl-GS with 4 or more samples.", GS, "fxaa", false));
+	rows.push_back(toggle("SMAA", "Applies SMAA anti-aliasing: sharper edges than FXAA for a little more GPU time. It runs before a Look, so the two can be used together.", GS, "SMAA", false));
 	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",
-		"Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain. SMAA is an anti-aliasing look (sharper edges than FXAA, a little dearer); a look is one preset, so SMAA replaces a CRT look.",
+		"Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain.",
 		GS, "Look", "",
 		{"None", "CRT (fast)", "CRT (fastest)", "CRT (finest; demanding at 4K)", "CRT through a composite signal", "Composite signal",
-			"S-Video signal", "Film grain", "Warmer colours", "SMAA (anti-aliasing)"},
+			"S-Video signal", "Film grain", "Warmer colours"},
 		{"", "crt/crt-guest-advanced-fast.slangp", "crt/crt-guest-advanced-fastest.slangp", "crt/crt-guest-advanced.slangp",
 			"crux2/crt-guest-advanced-composite.slangp", "crux2/composite.slangp", "crux2/s-video.slangp", "crux2/film-grain.slangp",
-			"crux2/colour.slangp", "crux2/smaa.slangp"}));
+			"crux2/colour.slangp"}));
 	addRows(rows, be->extraRows("picture", layer));
 	rows.push_back(toggle("Shade boost", "Enables brightness/contrast/gamma/saturation adjustment.", GS, "ShadeBoost", false));
 	rows.push_back(when(range("Brightness", "Adjusts brightness. 50 is normal.", GS, "ShadeBoost_Brightness", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));

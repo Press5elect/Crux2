@@ -2,6 +2,10 @@
 
 ## v1.0.20 (2026-11-06)
 
+- Changed: SMAA is a switch beside FXAA (Settings > Picture > Post-processing) instead of an entry of
+  the Look list, and runs before a Look, so the two can be used together.
+- Fixed: a look that drew only black left the screen black: the first pictures of a look and of SMAA
+  are checked, and one that is black while the game's own is not is switched off with a message.
 - Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
   add, instead of the PS2's; in games with a VU rounding fix, later results came out slightly
   wrong.

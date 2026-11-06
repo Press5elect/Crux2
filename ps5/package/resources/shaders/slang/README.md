@@ -20,7 +20,7 @@ paths and `../` work as they do in RetroArch; Crux2's own presets are in `crux2/
 | `crux2/composite.slangp` | 2 | a television's composite input: colour cut to a narrow band and late, rainbow on fine detail, crawling dots on colour edges | about 0.1 ms |
 | `crux2/s-video.slangp` | 2 | a television's S-Video input: colour cut to a band and a little late, brightness a little soft | about 0.1 ms |
 | `crux2/film-grain.slangp` | 1 | film grain, new every frame, strongest in the middle tones | about 0.5 ms |
-| `crux2/smaa.slangp` | 4 | SMAA (anti-aliasing: edges found, their shape measured, the blend made); not to be run with a CRT look, a look is one preset | not measured yet |
+| `crux2/smaa.slangp` | 4 | SMAA (anti-aliasing: edges found, their shape measured, the blend made); run by Settings > Picture > Post-processing > SMAA, before a look, not chosen as a look | not measured yet |
 | `crux2/colour.slangp` | 1 | colour temperature, vibrance, saturation, brightness, contrast, gamma | about 0.1 ms |
 
 The estimates are from the PC tests (`ps5/tests/slang/run-slang-tests.sh`): each pass's texture
