@@ -1,6 +1,6 @@
 # Crux2 - what changed
 
-## Unreleased
+## v1.0.20 (2026-11-06)
 
 - Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
   add, instead of the PS2's; in games with a VU rounding fix, later results came out slightly
@@ -23,6 +23,7 @@
 - Changed: smaller fixes: the game's pipeline list is merged without a quadratic search, the
   pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
   invalidate its copies.
+- Changed: the content version in param.json is 01.020.000.
 
 ## v1.0.19 (2026-11-06)
 

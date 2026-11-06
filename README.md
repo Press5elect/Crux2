@@ -471,6 +471,28 @@ answered about its network, and count the adapter's name lookups and connections
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
 
+## What v1.0.20 changed
+
+Fixed:
+- **Accurate floating point on the VUs** kept the game's own VU rounding mode after one rare add,
+  instead of the PS2's, so later results in games with a VU rounding fix came out slightly wrong;
+  on VU0 the instructions the EE runs itself (COP2) ran in the EE's rounding mode.
+- **The EE interpreter compared floats differently from the recompiler** when accurate floating
+  point was off (infinities and NaNs); SQRT.S no longer clears the FPU's overflow and underflow
+  flags (the PS2's only touches invalid and divide).
+- **A picture FSR enlarged long ago** could be shown under a menu or while paused after FSR had
+  stopped enlarging.
+
+Changed:
+- Less work in the EE's recompiled ADDA, MADDA, MSUBA and MULA; accurate floating point keeps more
+  of the EE's registers around its calls and compares without branches; VU adds take their fast path.
+- The pipelines a game needed last time are made on the optimiser's thread, not the GS thread: no
+  stalls in a game's first frames.
+- A picture shown twice gets its look and side picture once; the side picture builds only its own pass.
+- The pipeline list is merged without a quadratic search, the pipeline cache's dirty flag is
+  atomic, and draws that leave colour or depth alone no longer invalidate its copies.
+- The content version is 01.020.000.
+
 ## What v1.0.19 changed
 
 Added:
