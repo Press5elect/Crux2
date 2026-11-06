@@ -2,6 +2,7 @@ Crux2's changes to PCSX2 (the PS5 port), on PCSX2 993f6fc3b18e3feb0151ea1fa16b8a
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
+
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index b0c3945..220d859 100644
 --- a/CMakeLists.txt
@@ -2843,7 +2844,7 @@ index a962a74..0178070 100644
  
  SocketAdapter::~SocketAdapter()
 diff --git a/pcsx2/FPU.cpp b/pcsx2/FPU.cpp
-index 89d0504..77d5c7c 100644
+index 89d0504..fefcdce 100644
 --- a/pcsx2/FPU.cpp
 +++ b/pcsx2/FPU.cpp
 @@ -2,6 +2,7 @@
@@ -2906,16 +2907,22 @@ index 89d0504..77d5c7c 100644
  /*	Clears the "Cause Flags" of the Control/Status Reg
  	The "EE Core Users Manual" implies that all the Cause flags are cleared every instruction...
  	But, the "EE Core Instruction Set Manual" says that only certain Cause Flags are cleared
-@@ -138,7 +166,7 @@ bool checkDivideByZero(u32& xReg, u32 yDivisorReg, u32 zDividendReg, u32 cFlagsT
+@@ -137,8 +165,13 @@ bool checkDivideByZero(u32& xReg, u32 yDivisorReg, u32 zDividendReg, u32 cFlagsT
+ 	}
  #else
  // Used for Comparing; This compares if the floats are exactly the same.
++// PS5: accurate floating point compares the raw values as the PS2 does; otherwise the clamped
++// compare, as the recompiler does (recC_EQ/LE/LT_xmm), so both agree.
  	#define C_cond_S(cond) {  \
 -	   _ContVal_ = ( fpuDouble(_FsValUl_) cond fpuDouble(_FtValUl_) ) ?  \
-+	   _ContVal_ = (fpuCompareFull(_FsValUl_) cond fpuCompareFull(_FtValUl_)) ?  \
++	   const bool cond_true = CHECK_FPU_SOFT ?  \
++				   (fpuCompareFull(_FsValUl_) cond fpuCompareFull(_FtValUl_)) :  \
++				   (fpuDouble(_FsValUl_) cond fpuDouble(_FtValUl_));  \
++	   _ContVal_ = cond_true ?  \
  				   ( _ContVal_ | FPUflagC ) :  \
  				   ( _ContVal_ & ~FPUflagC );  \
  	}
-@@ -182,21 +210,89 @@ float fpuDouble(u32 f)
+@@ -182,21 +215,88 @@ float fpuDouble(u32 f)
  	}
  }
  
@@ -3004,14 +3011,13 @@ index 89d0504..77d5c7c 100644
 +	else
 +	{
 +		_FAValf_  = fpuDouble( _FsValUl_ ) + fpuDouble( _FtValUl_ );
-+		fpuRegs.ACCflag = checkOverflow( _FAValUl_, FPUflagO | FPUflagSO);
-+		if (fpuRegs.ACCflag) return;
++		if (checkOverflow( _FAValUl_, FPUflagO | FPUflagSO)) return;
 +		checkUnderflow( _FAValUl_, FPUflagU | FPUflagSU);
 +	}
  }
  
  void BC1F() {
-@@ -258,28 +354,65 @@ void CVT_W() {
+@@ -258,28 +358,64 @@ void CVT_W() {
  }
  
  void DIV_S() {
@@ -3083,14 +3089,13 @@ index 89d0504..77d5c7c 100644
 +	else
 +	{
 +		_FAValf_ += fpuDouble( _FsValUl_ ) * fpuDouble( _FtValUl_ );
-+		fpuRegs.ACCflag = checkOverflow( _FAValUl_, FPUflagO | FPUflagSO);
-+		if (fpuRegs.ACCflag) return;
++		if (checkOverflow( _FAValUl_, FPUflagO | FPUflagSO)) return;
 +		checkUnderflow( _FAValUl_, FPUflagU | FPUflagSU);
 +	}
  }
  
  void MAX_S() {
-@@ -302,17 +435,45 @@ void MOV_S() {
+@@ -302,17 +438,44 @@ void MOV_S() {
  }
  
  void MSUB_S() {
@@ -3137,14 +3142,13 @@ index 89d0504..77d5c7c 100644
 +	else
 +	{
 +		_FAValf_ -= fpuDouble( _FsValUl_ ) * fpuDouble( _FtValUl_ );
-+		fpuRegs.ACCflag = checkOverflow( _FAValUl_, FPUflagO | FPUflagSO);
-+		if (fpuRegs.ACCflag) return;
++		if (checkOverflow( _FAValUl_, FPUflagO | FPUflagSO)) return;
 +		checkUnderflow( _FAValUl_, FPUflagU | FPUflagSU);
 +	}
  }
  
  void MTC1() {
-@@ -320,15 +481,37 @@ void MTC1() {
+@@ -320,15 +483,36 @@ void MTC1() {
  }
  
  void MUL_S() {
@@ -3181,14 +3185,13 @@ index 89d0504..77d5c7c 100644
 +	else
 +	{
 +		_FAValf_  = fpuDouble( _FsValUl_ ) * fpuDouble( _FtValUl_ );
-+		fpuRegs.ACCflag = checkOverflow( _FAValUl_, FPUflagO | FPUflagSO);
-+		if (fpuRegs.ACCflag) return;
++		if (checkOverflow( _FAValUl_, FPUflagO | FPUflagSO)) return;
 +		checkUnderflow( _FAValUl_, FPUflagU | FPUflagSU);
 +	}
  }
  
  void NEG_S() {
-@@ -337,47 +520,93 @@ void NEG_S() {
+@@ -337,47 +521,92 @@ void NEG_S() {
  }
  
  void RSQRT_S() {
@@ -3247,9 +3250,9 @@ index 89d0504..77d5c7c 100644
 +	{
 +		PS2Float sqrtres = PS2Float(_FtValUl_).Sqrt();
 +		_FdValUl_ = sqrtres.raw;
-+		if (checkDivideByZeroInvalidSoft(sqrtres, FPUflagD | FPUflagSD, FPUflagI | FPUflagSI)) return;
-+		if (checkOverflowUnderflowSoft(sqrtres, FPUflagO | FPUflagSO, true)) return;
-+		checkOverflowUnderflowSoft(sqrtres, FPUflagU | FPUflagSU, false);
++		// PS5: SQRT.S sets only I and D (it cannot overflow or underflow); O and U from an earlier
++		// instruction stay as they are.
++		checkDivideByZeroInvalidSoft(sqrtres, FPUflagD | FPUflagSD, FPUflagI | FPUflagSI);
 +	}
 +	else if ((_FtValUl_ & 0x7F800000) == 0) // If Ft = +/-0
 +		_FdValUl_ = _FtValUl_ & 0x80000000; // result is 0
@@ -3300,8 +3303,7 @@ index 89d0504..77d5c7c 100644
 +	else
 +	{
 +		_FAValf_  = fpuDouble( _FsValUl_ ) - fpuDouble( _FtValUl_ );
-+		fpuRegs.ACCflag = checkOverflow( _FAValUl_, FPUflagO | FPUflagSO);
-+		if (fpuRegs.ACCflag) return;
++		if (checkOverflow( _FAValUl_, FPUflagO | FPUflagSO)) return;
 +		checkUnderflow( _FAValUl_, FPUflagU | FPUflagSU);
 +	}
  }
@@ -3948,7 +3950,7 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..f7188a8 100644
+index b3c8d65..0a3a4b5 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
@@ -4370,7 +4372,7 @@ index b3c8d65..f7188a8 100644
 +	const int screen_w = GetWindowWidth(), screen_h = GetWindowHeight();
 +	if (!tex || screen_w <= 0 || screen_h <= 0 || (draw_rect.x < 8.0f && draw_rect.y < 8.0f))
 +		return nullptr;
-+	if (!HasFrameGen()) // (the pass is one of frame generation's)
++	if (!HasFrameGenPass(8)) // (the pass is one of frame generation's: only it is made)
 +		return nullptr;
 +	const int w = std::max(8, screen_w / 24), h = std::max(8, screen_h / 24);
 +	for (GSTexture*& t : m_side)
@@ -4402,7 +4404,7 @@ index b3c8d65..f7188a8 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8ea..b0a9f11 100644
+index 421f8ea..50a0f6f 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -4479,7 +4481,7 @@ index 421f8ea..b0a9f11 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1738,6 +1791,79 @@ public:
+@@ -1738,6 +1791,85 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -4488,6 +4490,9 @@ index 421f8ea..b0a9f11 100644
 +	void FSR(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect);
 +	/// PS5: the enlarged picture FSR last made of `tex` for a place of this size, or null.
 +	GSTexture* LastFSR(GSTexture* tex, const GSVector4& draw_rect) const;
++	/// PS5: a vsync that did not enlarge its picture with FSR: LastFSR has nothing until FSR runs
++	/// again (the picture is nearly always the same texture, so it alone does not tell).
++	void ForgetFSR() { m_fsr_of = nullptr; }
 +
 +	/// PS5: the pipelines a game needed are kept by its serial: the list of the game that ends is
 +	/// written (together with what it had), and the new game's is made ready ahead, a few each
@@ -4532,6 +4537,9 @@ index 421f8ea..b0a9f11 100644
 +	/// PS5: whether the device can make a picture between two pictures (frame generation). Its
 +	/// passes are made the first time this is asked, which is when it is first switched on.
 +	virtual bool HasFrameGen() { return false; }
++	/// PS5: whether one of frame generation's passes could be made, made alone the first time it is
++	/// asked (the side picture uses one, and need not make them all).
++	virtual bool HasFrameGenPass(u32 pass) { return false; }
 +	/// PS5: takes a new picture of the game for frame generation: the part `src_uv` of `tex`, as it
 +	/// is shown in `draw_rect`. False when it cannot be kept (then nothing is kept at all).
 +	bool FrameGenPush(GSTexture* tex, const GSVector4& src_uv, const GSVector4& draw_rect, bool linear);
@@ -4560,7 +4568,7 @@ index 421f8ea..b0a9f11 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc..db02fb2 100644
+index 35ab6fc..201209b 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -4791,7 +4799,19 @@ index 35ab6fc..db02fb2 100644
  	m_last_draw_n = s_n;
  	m_last_transfer_n = s_transfer_n;
  	m_background_blurred = false;
-@@ -668,18 +843,43 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -659,6 +834,11 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+ 		GSVector4i src_rect;
+ 		GSVector4 src_uv, draw_rect;
+ 		GSTexture* current = g_gs_device->GetCurrent();
++#ifdef __PROSPERO__
++		// PS5: set when this vsync's picture was enlarged by FSR; otherwise the last one FSR made is
++		// of an older picture and must not be shown again under a menu (PresentCurrentFrame).
++		bool fsr_ran = false;
++#endif
+ 		if (current && !blank_frame)
+ 		{
+ 			src_rect = CalculateDrawSrcRect(current, m_real_size);
+@@ -668,18 +848,48 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  				GetVideoMode() == GSVideoMode::SDTV_480P);
  			s_last_draw_rect = draw_rect;
  
@@ -4830,7 +4850,12 @@ index 35ab6fc..db02fb2 100644
 +#else
 +					if (fsr && enlarged)
 +#endif
++					{
 +						g_gs_device->FSR(current, src_rect, src_uv, draw_rect);
++#ifdef __PROSPERO__
++						fsr_ran = true;
++#endif
++					}
 +					else if (cas_mode == GSCASMode::NIS && enlarged)
 +						g_gs_device->NIS(current, src_rect, src_uv, draw_rect);
 +					else
@@ -4838,11 +4863,14 @@ index 35ab6fc..db02fb2 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -691,6 +891,104 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -691,6 +901,130 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			}
  		}
  
 +#ifdef __PROSPERO__
++		if (!fsr_ran)
++			g_gs_device->ForgetFSR();
++
 +		// PS5: a few of the pipelines this game needed last time, made ahead (GSDeviceVK_PS5.cpp).
 +		g_gs_device->PipelinesTick();
 +
@@ -4866,6 +4894,14 @@ index 35ab6fc..db02fb2 100644
 +		const bool black_second = PS5Pacing::SecondIsBlack();
 +		bool fg_making = false;
 +		const u32 fg_presents = FrameGenVSync(current, src_uv, draw_rect, blank_frame, fresh_frame, presents, &fg_making);
++		// (The look and the side picture of the picture last shown this vsync: a second present of
++		// the same picture, with no picture made between, shows them again rather than making them
++		// twice. They are the device's own textures, kept until the next Look/SidePicture.)
++		GSTexture* last_shown_tex = nullptr;
++		GSVector4 last_shown_uv;
++		GSTexture* last_look = nullptr;
++		GSTexture* last_side = nullptr;
++		bool last_made = true; // (nothing shown yet: nothing to reuse)
 +		for (u32 shown = 0; shown < presents; shown++)
 +		{
 +			const bool black = (black_second && shown == 1);
@@ -4892,10 +4928,25 @@ index 35ab6fc..db02fb2 100644
 +			{
 +				GSTexture* const shown_tex = fg_picture ? fg_picture : current;
 +				const GSVector4 shown_uv = fg_picture ? GSVector4(0.0f, 0.0f, 1.0f, 1.0f) : src_uv;
-+				if (GSConfig.PS5SidePicture)
-+					side = g_gs_device->SidePicture(shown_tex, shown_uv, draw_rect);
-+				if (!GSConfig.PS5Look.empty())
-+					look = g_gs_device->Look(shown_tex, shown_uv, draw_rect);
++				// (A picture made by frame generation may come back in the same texture with other
++				// contents, so only an unmade picture shown twice is reused.)
++				if (!made && !last_made && shown_tex == last_shown_tex && (shown_uv == last_shown_uv).alltrue())
++				{
++					side = last_side;
++					look = last_look;
++				}
++				else
++				{
++					if (GSConfig.PS5SidePicture)
++						side = g_gs_device->SidePicture(shown_tex, shown_uv, draw_rect);
++					if (!GSConfig.PS5Look.empty())
++						look = g_gs_device->Look(shown_tex, shown_uv, draw_rect);
++					last_shown_tex = shown_tex;
++					last_shown_uv = shown_uv;
++					last_side = side;
++					last_look = look;
++				}
++				last_made = made;
 +			}
 +
 +			if (BeginPresentFrame(false))
@@ -4943,7 +4994,7 @@ index 35ab6fc..db02fb2 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -709,8 +1007,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +1043,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -4957,7 +5008,7 @@ index 35ab6fc..db02fb2 100644
  	}
  
  	// snapshot
-@@ -774,6 +1077,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -774,6 +1113,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  					(m_dump_frames == 1) ? TRANSLATE_SV("GS", "single frame") : TRANSLATE_SV("GS", "multi-frame"), compression_str,
  					Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -4973,7 +5024,7 @@ index 35ab6fc..db02fb2 100644
  		}
  
  		const bool internal_resolution = (GSConfig.ScreenshotSize >= GSScreenshotSize::InternalResolution);
-@@ -804,7 +1116,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -804,7 +1152,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			Host::AddKeyedOSDMessage("GSDump",
  				fmt::format(TRANSLATE_FS("GS", "Saved GS dump to '{}'."), Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -4981,18 +5032,18 @@ index 35ab6fc..db02fb2 100644
 +			// Crux2: the file is whole once the dump is closed; its size goes with the message, so the size of
 +			// what would be copied off the console is known before it is.
 +			const std::string ps5_dump_path = m_dump->GetPath();
- 			m_dump.reset();
++			m_dump.reset();
 +			const s64 ps5_dump_bytes = FileSystem::GetPathFileSize(ps5_dump_path.c_str());
 +			const double ps5_dump_mb = static_cast<double>(std::max<s64>(0, ps5_dump_bytes)) / (1024.0 * 1024.0);
 +			ps5px_log("GS dump: saved %s (%.1f MB)", ps5_dump_path.c_str(), ps5_dump_mb);
 +			PS5UI::Toast(fmt::format("GS dump saved ({:.0f} MB): {}", ps5_dump_mb, Path::GetFileName(ps5_dump_path)));
 +#else
-+			m_dump.reset();
+ 			m_dump.reset();
 +#endif
  		}
  		else if (!last)
  		{
-@@ -960,6 +1283,15 @@ std::string GSGetBaseVideoFilename()
+@@ -960,6 +1319,15 @@ std::string GSGetBaseVideoFilename()
  
  void GSRenderer::StopGSDump()
  {
@@ -5008,7 +5059,7 @@ index 35ab6fc..db02fb2 100644
  	m_snapshot = {};
  	m_dump_frames = 0;
  }
-@@ -1000,7 +1332,11 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1368,11 @@ void GSRenderer::PresentCurrentFrame()
  			GetVideoMode() == GSVideoMode::SDTV_480P);
  		s_last_draw_rect = draw_rect;
  		const bool refresh_blur = !m_background_blurred;
@@ -5020,7 +5071,7 @@ index 35ab6fc..db02fb2 100644
  		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
  	}
  
-@@ -1011,9 +1347,20 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1011,9 +1383,20 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
@@ -5089,7 +5140,7 @@ index b9a2cc7..747d0ac 100644
  	GSVector2i m_real_size{0, 0};
  
 diff --git a/pcsx2/GS/Renderers/Common/GSTexture.h b/pcsx2/GS/Renderers/Common/GSTexture.h
-index 14c6efa..8b173c6 100644
+index 14c6efa..130750a 100644
 --- a/pcsx2/GS/Renderers/Common/GSTexture.h
 +++ b/pcsx2/GS/Renderers/Common/GSTexture.h
 @@ -8,6 +8,9 @@
@@ -5119,7 +5170,7 @@ index 14c6efa..8b173c6 100644
  #ifdef PCSX2_DEVBUILD
  	std::string m_debug_name;
  #endif
-@@ -226,7 +239,14 @@ public:
+@@ -226,7 +239,18 @@ public:
  	}
  
  	__fi State GetState() const { return m_state; }
@@ -5128,13 +5179,17 @@ index 14c6efa..8b173c6 100644
 +
 +	__fi u64 PS5WriteGen() const { return m_ps5_write_gen; }
 +	__fi void PS5NoteWrite() { m_ps5_write_gen = s_ps5_write_counter.fetch_add(1, std::memory_order_relaxed); }
++	/// A new generation for several textures written by one draw: one count of the counter for all of them (a
++	/// value is still never seen twice at one texture's address: a texture made later takes a newer one).
++	static __fi u64 PS5NewWriteGen() { return s_ps5_write_counter.fetch_add(1, std::memory_order_relaxed); }
++	__fi void PS5NoteWrite(u64 gen) { m_ps5_write_gen = gen; }
 +#else
  	__fi void SetState(State state) { m_state = state; }
 +#endif
  
  	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
  	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
-@@ -243,11 +263,17 @@ public:
+@@ -243,11 +267,17 @@ public:
  	{
  		m_state = State::Cleared;
  		m_clear_value.color = color;
@@ -5654,7 +5709,7 @@ index 77a28df..0b3229c 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 20c80b8..fe1e928 100644
+index 20c80b8..503d579 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -5917,7 +5972,7 @@ index 20c80b8..fe1e928 100644
  				vkCmdDrawIndexed(GetCurrentCommandBuffer(), pcmd->ElemCount, 1, m_index.start + pcmd->IdxOffset,
  					vertex_offset + pcmd->VtxOffset, 0);
  			}
-@@ -4819,6 +4933,236 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4819,6 +4933,262 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -6021,18 +6076,20 @@ index 20c80b8..fe1e928 100644
 +// PS5: frame generation. Eight pipelines over resources/shaders/vulkan/framegen.glsl, made as
 +// FSR's are: seven that write the small pictures the search works in (a format with room for a
 +// move: sixteen bits a number), and one that writes the picture itself.
-+void GSDeviceVK::CompileFrameGenPipelines()
++// (`first` to `end`: the passes asked for; one already made is kept. The side picture asks for its
++// one pass alone, so switching it on does not make all of them.)
++bool GSDeviceVK::CompileFrameGenPipelines(u32 first, u32 end)
 +{
 +	const std::optional<std::string> source = ReadShaderSource("shaders/vulkan/framegen.glsl");
 +	if (!source.has_value())
 +	{
 +		Console.Warning("VK: Frame generation's shader is not in the resources: it is not available.");
-+		return;
++		return false;
 +	}
 +
 +	VkShaderModule vs = GetUtilityVertexShader(m_convert_source);
 +	if (vs == VK_NULL_HANDLE)
-+		return;
++		return false;
 +	ScopedGuard vs_guard([this, &vs]() { vkDestroyShaderModule(m_device, vs, nullptr); });
 +
 +	Vulkan::GraphicsPipelineBuilder gpb;
@@ -6050,8 +6107,12 @@ index 20c80b8..fe1e928 100644
 +		GetRenderPass(LookupNativeFormat(GSTexture::Format::ColorHDR), VK_FORMAT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 +	const VkRenderPass picture = GetRenderPass(VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 +	bool ok = (small != VK_NULL_HANDLE && picture != VK_NULL_HANDLE);
-+	for (u32 pass = 0; ok && pass < NUM_FRAMEGEN_PASSES; pass++)
++	u32 made = 0; // (the passes this call made: the only ones it may take back, the others may be in flight)
++	for (u32 pass = first; ok && pass < end && pass < NUM_FRAMEGEN_PASSES; pass++)
 +	{
++		if (m_fg_pipelines[pass] != VK_NULL_HANDLE)
++			continue;
++
 +		std::stringstream source_with_header;
 +		AddMacro(source_with_header, "FG_PASS", static_cast<int>(pass));
 +		source_with_header << *source;
@@ -6066,6 +6127,7 @@ index 20c80b8..fe1e928 100644
 +			gpb.SetRenderPass((pass >= 7) ? picture : small, 0); // (7 and 8 write pictures)
 +			gpb.SetFragmentShader(mod);
 +			m_fg_pipelines[pass] = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
++			made |= (m_fg_pipelines[pass] != VK_NULL_HANDLE) ? (1u << pass) : 0u;
 +		}
 +		if (m_fg_pipelines[pass] == VK_NULL_HANDLE)
 +		{
@@ -6078,18 +6140,24 @@ index 20c80b8..fe1e928 100644
 +	}
 +	if (!ok)
 +	{
-+		for (VkPipeline& it : m_fg_pipelines)
++		for (u32 pass = 0; pass < NUM_FRAMEGEN_PASSES; pass++)
 +		{
-+			if (it != VK_NULL_HANDLE)
-+				vkDestroyPipeline(m_device, it, nullptr);
-+			it = VK_NULL_HANDLE;
++			if (made & (1u << pass))
++			{
++				vkDestroyPipeline(m_device, m_fg_pipelines[pass], nullptr);
++				m_fg_pipelines[pass] = VK_NULL_HANDLE;
++			}
 +		}
-+		return;
++		return false;
 +	}
-+	Console.WriteLn("VK: Frame generation is available.");
++	if (first == 0 && end >= NUM_FRAMEGEN_PASSES)
++	{
++		Console.WriteLn("VK: Frame generation is available.");
 +#ifdef __PROSPERO__
-+	ps5px_log("picture: frame generation's %u passes were made by the graphics driver", NUM_FRAMEGEN_PASSES);
++		ps5px_log("picture: frame generation's %u passes were made by the graphics driver", NUM_FRAMEGEN_PASSES);
 +#endif
++	}
++	return true;
 +}
 +
 +bool GSDeviceVK::HasFrameGen()
@@ -6099,9 +6167,22 @@ index 20c80b8..fe1e928 100644
 +	if (!m_fg_pipelines_tried)
 +	{
 +		m_fg_pipelines_tried = true;
-+		CompileFrameGenPipelines();
++		CompileFrameGenPipelines(0, NUM_FRAMEGEN_PASSES);
 +	}
-+	return m_fg_pipelines[NUM_FRAMEGEN_PASSES - 1] != VK_NULL_HANDLE;
++	return std::all_of(m_fg_pipelines.begin(), m_fg_pipelines.end(), [](VkPipeline p) { return p != VK_NULL_HANDLE; });
++}
++
++bool GSDeviceVK::HasFrameGenPass(u32 pass)
++{
++	// PS5: one pass alone (the side picture's), made the first time it is asked for.
++	if (pass >= NUM_FRAMEGEN_PASSES)
++		return false;
++	if (m_fg_pipelines[pass] == VK_NULL_HANDLE && !(m_fg_pass_tried & (1u << pass)))
++	{
++		m_fg_pass_tried |= (1u << pass);
++		CompileFrameGenPipelines(pass, pass + 1);
++	}
++	return m_fg_pipelines[pass] != VK_NULL_HANDLE;
 +}
 +
 +bool GSDeviceVK::DoFrameGenPass(u32 pass, GSTexture* dTex, GSTexture* const* sTex, u32 count, const GSVector4& params)
@@ -6154,7 +6235,7 @@ index 20c80b8..fe1e928 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4904,6 +5248,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4904,6 +5274,20 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -6171,10 +6252,11 @@ index 20c80b8..fe1e928 100644
 +		it = VK_NULL_HANDLE;
 +	}
 +	m_fg_pipelines_tried = false;
++	m_fg_pass_tried = 0;
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -4963,6 +5320,9 @@ void GSDeviceVK::DestroyResources()
+@@ -4963,6 +5347,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -6184,7 +6266,7 @@ index 20c80b8..fe1e928 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5086,7 +5446,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5086,7 +5473,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -6231,7 +6313,7 @@ index 20c80b8..fe1e928 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5095,38 +5494,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5095,38 +5521,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -6271,7 +6353,7 @@ index 20c80b8..fe1e928 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5210,6 +5589,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5210,6 +5616,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	
  	if (p.IsTestingAndSamplingDepth() && UseFeedbackLoopLayout())
  		gpb.AddFlags(VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT);
@@ -6280,7 +6362,7 @@ index 20c80b8..fe1e928 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5227,8 +5608,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5227,8 +5635,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -6299,7 +6381,7 @@ index 20c80b8..fe1e928 100644
  	return pipeline;
  }
  
-@@ -5239,6 +5630,14 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
+@@ -5239,6 +5657,14 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
  		return false;
  
  	SetPipeline(pipeline);
@@ -6314,7 +6396,7 @@ index 20c80b8..fe1e928 100644
  
  	return ApplyTFXState();
  }
-@@ -5247,6 +5646,10 @@ void GSDeviceVK::InitializeState()
+@@ -5247,6 +5673,10 @@ void GSDeviceVK::InitializeState()
  {
  	m_current_framebuffer = VK_NULL_HANDLE;
  	m_current_render_pass = VK_NULL_HANDLE;
@@ -6325,7 +6407,7 @@ index 20c80b8..fe1e928 100644
  
  	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
  		m_tfx_textures[i] = m_null_texture.get();
-@@ -5370,6 +5773,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
+@@ -5370,6 +5800,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
  	rp.framebuffer = fb;
  	rp.renderArea.extent.width  = swap_chain_texture->GetWidth();
  	rp.renderArea.extent.height = swap_chain_texture->GetHeight();
@@ -6335,7 +6417,7 @@ index 20c80b8..fe1e928 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &rp, VK_SUBPASS_CONTENTS_INLINE);
  }
  
-@@ -5547,6 +5953,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
+@@ -5547,6 +5980,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
  
  			vkTex->CommitClear();
  
@@ -6352,7 +6434,7 @@ index 20c80b8..fe1e928 100644
  			if (vkTex->GetLayout() != layout)
  			{
  				update_layout = true;
-@@ -5585,9 +6001,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
+@@ -5585,9 +6028,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
  void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  {
  	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
@@ -6371,7 +6453,7 @@ index 20c80b8..fe1e928 100644
  		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
  		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
  	}
-@@ -5596,7 +6021,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
+@@ -5596,7 +6048,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  		vkTex = m_null_texture.get();
  	}
  
@@ -6384,7 +6466,7 @@ index 20c80b8..fe1e928 100644
  		return;
  
  	m_utility_texture = vkTex;
-@@ -5646,6 +6075,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5646,6 +6102,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -6394,7 +6476,7 @@ index 20c80b8..fe1e928 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass  = m_current_render_pass;
-@@ -5654,6 +6086,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5654,6 +6113,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -6404,7 +6486,7 @@ index 20c80b8..fe1e928 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5666,6 +6101,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5666,6 +6128,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -6414,7 +6496,7 @@ index 20c80b8..fe1e928 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass  = m_current_render_pass;
-@@ -5676,6 +6114,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5676,6 +6141,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -6425,7 +6507,7 @@ index 20c80b8..fe1e928 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5715,6 +6157,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5715,6 +6184,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -6436,7 +6518,7 @@ index 20c80b8..fe1e928 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5729,13 +6175,23 @@ void GSDeviceVK::EndRenderPass()
+@@ -5729,13 +6202,23 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -6460,7 +6542,7 @@ index 20c80b8..fe1e928 100644
  
  	m_is_presenting = false;
  }
-@@ -5760,6 +6216,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
+@@ -5760,6 +6243,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
  
  void GSDeviceVK::SetPipeline(VkPipeline pipeline)
  {
@@ -6471,7 +6553,7 @@ index 20c80b8..fe1e928 100644
  	if (m_current_pipeline == pipeline)
  		return;
  
-@@ -5965,6 +6425,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -5965,6 +6452,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -6484,7 +6566,7 @@ index 20c80b8..fe1e928 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6030,6 +6496,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+@@ -6030,6 +6523,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
  GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -6492,7 +6574,7 @@ index 20c80b8..fe1e928 100644
  
  	// How this is done:
  	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-@@ -6128,6 +6595,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6128,6 +6622,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  	}
  
  	g_perfmon.Put(GSPerfMon::Barriers, 1);
@@ -6500,7 +6582,7 @@ index 20c80b8..fe1e928 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6151,7 +6619,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6151,7 +6646,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -6525,7 +6607,7 @@ index 20c80b8..fe1e928 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6384,6 +6869,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6384,6 +6896,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  				(FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth));
  	}
  
@@ -6588,7 +6670,7 @@ index 20c80b8..fe1e928 100644
  	if (draw_rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6520,6 +7061,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6520,6 +7088,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
@@ -6598,7 +6680,7 @@ index 20c80b8..fe1e928 100644
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6542,6 +7086,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6542,6 +7113,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -6612,7 +6694,7 @@ index 20c80b8..fe1e928 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-@@ -6754,9 +7305,208 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6754,9 +7332,219 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -6756,16 +6838,27 @@ index 20c80b8..fe1e928 100644
 +	if (writes & 2)
 +		m_ps5_fb_clean_ds = nullptr;
 +
-+	// The write generation of everything a draw can write (GSTexture::PS5WriteGen): the bound attachments and
-+	// the ordered views, whatever the masks say (counting a write that did not happen only costs a reuse).
-+	if (m_current_render_target)
-+		m_current_render_target->PS5NoteWrite();
-+	if (m_current_depth_target)
-+		m_current_depth_target->PS5NoteWrite();
-+	if (m_tfx_textures[TFX_TEXTURE_RT_ROV])
-+		m_tfx_textures[TFX_TEXTURE_RT_ROV]->PS5NoteWrite();
-+	if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV])
-+		m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->PS5NoteWrite();
++	// The write generation of what a draw can write (GSTexture::PS5WriteGen): the bound attachments and the
++	// ordered views, by the same mask as the barriers above (m_ps5_draw_writes: colour, ordered colour view and
++	// the primitive ID setup are 1, depth/stencil and the ordered depth view 2), so a draw with colour masked
++	// off leaves a copy of its target reusable. One count of the counter for the lot.
++	if (!(writes & 3))
++		return;
++	const u64 gen = GSTexture::PS5NewWriteGen();
++	if (writes & 1)
++	{
++		if (m_current_render_target)
++			m_current_render_target->PS5NoteWrite(gen);
++		if (m_tfx_textures[TFX_TEXTURE_RT_ROV])
++			m_tfx_textures[TFX_TEXTURE_RT_ROV]->PS5NoteWrite(gen);
++	}
++	if (writes & 2)
++	{
++		if (m_current_depth_target)
++			m_current_depth_target->PS5NoteWrite(gen);
++		if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV])
++			m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->PS5NoteWrite(gen);
++	}
 +}
 +
 +void GSDeviceVK::PS5FeedbackBarrierIfOwed(GSTextureVK* rt, GSTextureVK* ds)
@@ -6821,7 +6914,7 @@ index 20c80b8..fe1e928 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6767,7 +7517,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6767,7 +7555,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -6830,7 +6923,7 @@ index 20c80b8..fe1e928 100644
  
  	if (full_barrier)
  	{
-@@ -6777,11 +7527,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6777,11 +7565,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -6851,7 +6944,7 @@ index 20c80b8..fe1e928 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6793,8 +7552,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6793,8 +7590,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -6865,7 +6958,7 @@ index 20c80b8..fe1e928 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 4230238..3fc3c67 100644
+index 4230238..4f73818 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,8 @@ public:
@@ -6891,13 +6984,14 @@ index 4230238..3fc3c67 100644
  	};
  	enum TFX_DESCRIPTOR_SET : u32
  	{
-@@ -472,6 +478,40 @@ private:
+@@ -472,6 +478,42 @@ private:
  	VkRenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
  
  	std::array<VkPipeline, NUM_CAS_PIPELINES> m_cas_pipelines = {};
 +	std::array<VkPipeline, NUM_FSR_PIPELINES> m_fsr_pipelines = {};
 +	std::array<VkPipeline, NUM_FRAMEGEN_PASSES> m_fg_pipelines = {}; // PS5: frame generation
 +	bool m_fg_pipelines_tried = false;
++	u32 m_fg_pass_tried = 0; // PS5: the passes HasFrameGenPass tried alone
 +#ifdef __PROSPERO__
 +	// PS5: the picture tools on compute shaders and the look's chain (GSDeviceVK_PS5.cpp).
 +	struct PS5Tools;
@@ -6911,6 +7005,7 @@ index 4230238..3fc3c67 100644
 +	struct PS5Optimiser;
 +	PS5Optimiser* m_ps5_optimiser = nullptr;
 +	VkPipeline PS5CreateTFXPipelineFast(const PipelineSelector& p);
++	PS5Optimiser* PS5StartOptimiser(); // (the thread is started the first time it is needed)
 +	void PS5SwapOptimised();
 +	void PS5StopOptimiser();
 +	PS5Tools& Tools();
@@ -6932,7 +7027,7 @@ index 4230238..3fc3c67 100644
  	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
  
  	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
-@@ -492,6 +532,17 @@ private:
+@@ -492,6 +534,17 @@ private:
  
  	bool DoCAS(
  		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
@@ -6950,7 +7045,7 @@ index 4230238..3fc3c67 100644
  
  	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
  	void ClearSamplerCache() final;
-@@ -499,6 +550,9 @@ private:
+@@ -499,6 +552,9 @@ private:
  	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
  	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
  	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
@@ -6960,26 +7055,27 @@ index 4230238..3fc3c67 100644
  	VkPipeline GetTFXPipeline(const PipelineSelector& p);
  
  	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
-@@ -517,6 +571,8 @@ private:
+@@ -517,6 +573,8 @@ private:
  	bool CompileMergePipelines();
  	bool CompilePostProcessingPipelines();
  	bool CompileCASPipelines();
 +	void CompileFSRPipelines();
-+	void CompileFrameGenPipelines();
++	bool CompileFrameGenPipelines(u32 first, u32 end);
  
  	bool CompileImGuiPipeline();
  	void RenderImGui();
-@@ -531,6 +587,9 @@ protected:
+@@ -531,6 +589,10 @@ protected:
  	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
  		PresentShader shader, Filter filter) override;
  public:
 +	/// PS5: whether frame generation's passes could be made (they are made when this is first asked).
 +	bool HasFrameGen() final;
++	bool HasFrameGenPass(u32 pass) final;
 +
  	GSDeviceVK();
  	~GSDeviceVK() override;
  
-@@ -572,6 +631,28 @@ public:
+@@ -572,6 +634,28 @@ public:
  	bool IsPresenting() const;
  
  	bool SetGPUTimingEnabled(bool enabled) override;
@@ -7008,7 +7104,7 @@ index 4230238..3fc3c67 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -648,6 +729,53 @@ public:
+@@ -648,6 +732,53 @@ public:
  	void FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_region);
  	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  		bool one_barrier, bool full_barrier);
@@ -7062,7 +7158,7 @@ index 4230238..3fc3c67 100644
  
  	//////////////////////////////////////////////////////////////////////////
  	// Vulkan State
-@@ -774,6 +902,9 @@ private:
+@@ -774,6 +905,9 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -7074,10 +7170,10 @@ index 4230238..3fc3c67 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..6680d26
+index 0000000..055fc9f
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1161 @@
+@@ -0,0 +1,1212 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -7121,6 +7217,7 @@ index 0000000..6680d26
 +#include <deque>
 +#include <mutex>
 +#include <thread>
++#include <unordered_set>
 +#include <cstring>
 +#include <memory>
 +
@@ -7728,9 +7825,11 @@ index 0000000..6680d26
 +			all.resize(count);
 +			std::memcpy(all.data(), old->data() + 72, count * sizeof(PipelineSelector));
 +		}
++		// (A set to merge by: a list can hold tens of thousands, and this is on the GS thread.)
++		std::unordered_set<PipelineSelector, PipelineSelectorHash> kept(all.begin(), all.end());
 +		for (const PipelineSelector& p : m_ps5_new_pipelines)
 +		{
-+			if (std::find(all.begin(), all.end(), p) == all.end())
++			if (kept.insert(p).second)
 +				all.push_back(p);
 +		}
 +		std::vector<u8> data(72 + all.size() * sizeof(PipelineSelector));
@@ -7780,12 +7879,24 @@ index 0000000..6680d26
 +		PipelineSelector p;
 +		VkShaderModule vs, fs;
 +		VkRenderPass rp;
++		bool warm; // one of the game's list made ahead (no draw has it yet): put in when done
 +	};
++	struct Done
++	{
++		PipelineSelector p;
++		VkPipeline pipeline;
++		bool warm;
++	};
++
++	// The list made ahead is given a few at a time, so that a draw's own pipeline is not queued
++	// behind hundreds of them.
++	static constexpr u32 MAX_WARM_QUEUED = 8;
 +
 +	std::mutex mutex;
 +	std::condition_variable wake;
 +	std::deque<Job> jobs;
-+	std::vector<std::pair<PipelineSelector, VkPipeline>> done;
++	std::vector<Done> done;
++	u32 warm_queued = 0; // warm jobs not yet built
 +	bool stop = false;
 +	std::thread thread;
 +
@@ -7810,6 +7921,19 @@ index 0000000..6680d26
 +	if (pipeline == VK_NULL_HANDLE)
 +		return CreateTFXPipeline(p);
 +
++	PS5Optimiser* const o = PS5StartOptimiser();
++	{
++		const std::lock_guard lock(o->mutex);
++		o->fast++;
++		o->fast_ms += ms;
++		o->jobs.push_back({p, vs, fs, rp, false});
++	}
++	o->wake.notify_one();
++	return pipeline;
++}
++
++GSDeviceVK::PS5Optimiser* GSDeviceVK::PS5StartOptimiser()
++{
 +	if (!m_ps5_optimiser)
 +	{
 +		m_ps5_optimiser = new PS5Optimiser();
@@ -7829,6 +7953,7 @@ index 0000000..6680d26
 +				const VkPipeline optimised = BuildTFXPipeline(job.p, job.vs, job.fs, job.rp, 0);
 +				const double took = built.GetTimeMilliseconds();
 +				lock.lock();
++				o->warm_queued -= job.warm ? 1 : 0;
 +				if (optimised == VK_NULL_HANDLE)
 +				{
 +					o->failed++;
@@ -7836,19 +7961,12 @@ index 0000000..6680d26
 +				}
 +				o->optimised++;
 +				o->optimised_ms += took;
-+				o->done.emplace_back(job.p, optimised);
++				o->done.push_back({job.p, optimised, job.warm});
 +			}
 +		});
-+		ps5px_log("pipelines: built quickly first, optimised on a thread of their own ([PS5] FastPipelines)");
++		ps5px_log("pipelines: optimised on a thread of their own (a draw's built quickly first: [PS5] FastPipelines)");
 +	}
-+	{
-+		const std::lock_guard lock(m_ps5_optimiser->mutex);
-+		m_ps5_optimiser->fast++;
-+		m_ps5_optimiser->fast_ms += ms;
-+		m_ps5_optimiser->jobs.push_back({p, vs, fs, rp});
-+	}
-+	m_ps5_optimiser->wake.notify_one();
-+	return pipeline;
++	return m_ps5_optimiser;
 +}
 +
 +void GSDeviceVK::PS5SwapOptimised()
@@ -7856,7 +7974,7 @@ index 0000000..6680d26
 +	PS5Optimiser* const o = m_ps5_optimiser;
 +	if (!o)
 +		return;
-+	std::vector<std::pair<PipelineSelector, VkPipeline>> done;
++	std::vector<PS5Optimiser::Done> done;
 +	u32 fast, optimised, failed;
 +	double fast_ms, optimised_ms;
 +	{
@@ -7871,9 +7989,19 @@ index 0000000..6680d26
 +		optimised_ms = o->optimised_ms;
 +	}
 +	const u32 before = optimised - static_cast<u32>(done.size());
-+	for (const auto& [p, pipeline] : done)
++	for (const auto& [p, pipeline, warm] : done)
 +	{
 +		const auto it = m_tfx_pipelines.find(p);
++		if (warm && (it == m_tfx_pipelines.end() || it->second == VK_NULL_HANDLE))
++		{
++			// One of the list made ahead that no draw has needed yet (or whose own build failed):
++			// no command buffer has the selector's pipeline, so it is simply put in.
++			if (it == m_tfx_pipelines.end())
++				m_tfx_pipelines.emplace(p, pipeline);
++			else
++				it->second = pipeline;
++			continue;
++		}
 +		if (it == m_tfx_pipelines.end() || it->second == VK_NULL_HANDLE)
 +		{
 +			vkDestroyPipeline(m_device, pipeline, nullptr);
@@ -7909,7 +8037,7 @@ index 0000000..6680d26
 +		o->thread.join();
 +	// (The GPU is idle here: Destroy waited for it.)
 +	for (const auto& entry : o->done)
-+		vkDestroyPipeline(m_device, entry.second, nullptr);
++		vkDestroyPipeline(m_device, entry.pipeline, nullptr);
 +	ps5px_log("pipelines: %u built quickly (%.1f ms each on average), %u optimised behind them (%.1f ms each)", o->fast,
 +		o->fast ? o->fast_ms / o->fast : 0.0, o->optimised, o->optimised ? o->optimised_ms / o->optimised : 0.0);
 +	delete o;
@@ -7921,20 +8049,39 @@ index 0000000..6680d26
 +	PS5SwapOptimised();
 +	if (m_ps5_warm_queue.empty())
 +		return;
-+	// About 3 ms a frame: the first frames of a game are a little slower, its scenes later not.
++	// The pipelines themselves are built optimised on the optimiser's thread, a few queued at a
++	// time, and put in when done (PS5SwapOptimised): the GS thread only finds their shaders and
++	// render pass (it alone may touch those caches), within about 3 ms a frame. A draw that needs
++	// one still being built builds its own quickly, as any other; the optimised one replaces it.
++	PS5Optimiser* const o = PS5StartOptimiser();
++	u32 room;
++	{
++		const std::lock_guard lock(o->mutex);
++		room = (o->warm_queued < PS5Optimiser::MAX_WARM_QUEUED) ? (PS5Optimiser::MAX_WARM_QUEUED - o->warm_queued) : 0;
++	}
 +	Common::Timer budget;
-+	while (!m_ps5_warm_queue.empty() && budget.GetTimeMilliseconds() < 3.0)
++	u32 queued = 0;
++	while (!m_ps5_warm_queue.empty() && queued < room && budget.GetTimeMilliseconds() < 3.0)
 +	{
 +		const PipelineSelector p = m_ps5_warm_queue.back();
 +		m_ps5_warm_queue.pop_back();
-+		if (m_tfx_pipelines.find(p) == m_tfx_pipelines.end())
++		if (m_tfx_pipelines.find(p) != m_tfx_pipelines.end())
++			continue;
++		VkShaderModule vs, fs;
++		VkRenderPass rp;
++		if (!ResolveTFXPipelineParts(p, &vs, &fs, &rp))
++			continue;
 +		{
-+			const VkPipeline pipeline = CreateTFXPipeline(p);
-+			m_tfx_pipelines.emplace(p, pipeline);
++			const std::lock_guard lock(o->mutex);
++			o->jobs.push_back({p, vs, fs, rp, true});
++			o->warm_queued++;
 +		}
++		queued++;
 +	}
++	if (queued)
++		o->wake.notify_one();
 +	if (m_ps5_warm_queue.empty())
-+		ps5px_log("pipelines: the game's list is ready");
++		ps5px_log("pipelines: the game's list is queued to be made");
 +}
 +
 +// ------------------------------------------------------------------------------------------------
@@ -8492,7 +8639,7 @@ index e094dd9..523d6f8 100644
  {
  	bool required_functions_missing = false;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
-index 5f8b2ba..229ea39 100644
+index 5f8b2ba..5439c5f 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.cpp
 @@ -134,6 +134,25 @@ namespace dyn_shaderc
@@ -8561,6 +8708,38 @@ index 5f8b2ba..229ea39 100644
  			CreateNewPipelineCache();
  	}
  	else
+@@ -338,7 +373,9 @@ VkPipelineCache VKShaderCache::GetPipelineCache(bool set_dirty /*= true*/)
+ 	if (m_pipeline_cache == VK_NULL_HANDLE)
+ 		return VK_NULL_HANDLE;
+ 
+-	m_pipeline_cache_dirty |= set_dirty;
++	// (PS5: the pipeline optimiser's thread asks for it as well as the GS thread: an atomic.)
++	if (set_dirty)
++		m_pipeline_cache_dirty.store(true, std::memory_order_relaxed);
+ 	return m_pipeline_cache;
+ }
+ 
+diff --git a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.h b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.h
+index 5a3a851..05a7523 100644
+--- a/pcsx2/GS/Renderers/Vulkan/VKShaderCache.h
++++ b/pcsx2/GS/Renderers/Vulkan/VKShaderCache.h
+@@ -7,6 +7,7 @@
+ 
+ #include "common/HashCombine.h"
+ 
++#include <atomic>
+ #include <cstdio>
+ #include <memory>
+ #include <optional>
+@@ -96,7 +97,7 @@ private:
+ 	CacheIndex m_index;
+ 
+ 	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+-	bool m_pipeline_cache_dirty = false;
++	std::atomic<bool> m_pipeline_cache_dirty{false};
+ };
+ 
+ extern std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
 index c0a6a4c..4ef24b6 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
@@ -11884,7 +12063,7 @@ index 3356134..1324012 100644
  
  	static void pad_handle_data(USBDevice* dev, USBPacket* p)
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index f6fda22..163f1b6 100644
+index f6fda22..33d5f1f 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
 @@ -40,8 +40,17 @@
@@ -12429,7 +12608,7 @@ index f6fda22..163f1b6 100644
  #else
  	Cpu = &intCpu;
  	psxCpu = &psxInt;
-@@ -3005,6 +3315,10 @@ void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)
+@@ -3005,6 +3315,14 @@ void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)
  
  	Console.WriteLn("Updating CPU configuration...");
  	FPControlRegister::SetCurrent(EmuConfig.Cpu.FPUFPCR);
@@ -12437,10 +12616,14 @@ index f6fda22..163f1b6 100644
 +		VU0.accflag = 0;
 +	if (EmuConfig.Cpu.VU1SoftFloat != old_config.Cpu.VU1SoftFloat)
 +		VU1.accflag = 0;
++	// PS5: the EE's ACC overflow flag is kept only by accurate floating point (and the Full
++	// clamp mode's recompiler); a value left by the other mode must not reach a later MADD.
++	if (EmuConfig.Cpu.FPUSoftFloat != old_config.Cpu.FPUSoftFloat)
++		fpuRegs.ACCflag = 0;
  	Internal::ClearCPUExecutionCaches();
  	memBindConditionalHandlers();
  
-@@ -3043,6 +3357,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
+@@ -3043,6 +3361,13 @@ void VMManager::CheckForGSConfigChanges(const Pcsx2Config& old_config)
  		UpdateTargetSpeed();
  		MTGS::UpdateVSyncMode();
  	}
@@ -12454,7 +12637,7 @@ index f6fda22..163f1b6 100644
  
  	MTGS::ApplySettings();
  }
-@@ -3707,7 +4028,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
+@@ -3707,7 +4032,21 @@ void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
  
  static void InitializeProcessorList()
  {
@@ -12476,7 +12659,7 @@ index f6fda22..163f1b6 100644
  }
  
  void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
-@@ -3722,8 +4057,57 @@ void VMManager::EnsureCPUInfoInitialized()
+@@ -3722,8 +4061,57 @@ void VMManager::EnsureCPUInfoInitialized()
  	std::call_once(s_processor_list_initialized, InitializeProcessorList);
  }
  
@@ -14529,7 +14712,7 @@ index 0000000..d53a1f4
 +	}
 +} // namespace X86SoftFloatEmitter
 diff --git a/pcsx2/x86/iFPU.cpp b/pcsx2/x86/iFPU.cpp
-index 02a2c07..36e9b02 100644
+index 02a2c07..7026aab 100644
 --- a/pcsx2/x86/iFPU.cpp
 +++ b/pcsx2/x86/iFPU.cpp
 @@ -4,6 +4,8 @@
@@ -15531,15 +15714,22 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  //------------------------------------------------------------------
-@@ -642,6 +1627,215 @@ int recCommutativeOp(int info, int regd, int op)
+@@ -642,6 +1627,208 @@ int recCommutativeOp(int info, int regd, int op)
  //------------------------------------------------------------------
  // ADD XMM
  //------------------------------------------------------------------
++// PS5: the soft-float kernels (GenerateSoftFloatKernels) are internal-ABI leaf code. They may
++// clobber rax, rcx, rdx and r8-r11 only; the div and sqrt kernels save and restore rbp, rsi and
++// rdi themselves, and none touches rbx or r12-r15. So only those seven GPRs are given up here, and
++// EE registers cached in rsi/rdi stay where they are. A kernel that comes to use another GPR must
++// save it, or be added here.
 +static void fpuPrepareSoftKernelCall()
 +{
++	static constexpr u32 kernel_clobbered =
++		(1u << 0) | (1u << 1) | (1u << 2) | (1u << 8) | (1u << 9) | (1u << 10) | (1u << 11);
 +	for (u32 i = 0; i < iREGCNT_GPR; i++)
 +	{
-+		if (!x86regs[i].inuse || !xRegisterBase::IsCallerSaved(i))
++		if (!x86regs[i].inuse || !(kernel_clobbered & (1u << i)))
 +			continue;
 +
 +		_freeX86reg(i);
@@ -15614,19 +15804,6 @@ index 02a2c07..36e9b02 100644
 +	xForwardJZ8 result_not_invalid;
 +	xOR(ptr32[&fpuRegs.fprc[31]], FPUflagI | FPUflagSI);
 +	result_not_invalid.SetTarget();
-+}
-+
-+static void fpuUpdateNativeAccOverflow(int acc_reg)
-+{
-+	const int temp = _allocX86reg(X86TYPE_TEMP, 0, 0);
-+	xMOVD(xRegister32(temp), xRegisterSSE(acc_reg));
-+	xAND(xRegister32(temp), 0x7fffffff);
-+	xMOV(ptr32[&fpuRegs.ACCflag], 0);
-+	xCMP(xRegister32(temp), 0x7f800000);
-+	xForwardJNE8 acc_not_overflow;
-+	xMOV(ptr32[&fpuRegs.ACCflag], 1);
-+	acc_not_overflow.SetTarget();
-+	_freeX86reg(temp);
 +}
 +
 +static void fpuLoadSoftOperand(
@@ -15723,14 +15900,13 @@ index 02a2c07..36e9b02 100644
 +	fpuLoadSoftOperand(eax, info, PROCESS_EE_T, _Ft_, EEREC_T);
 +	xCALL(s_fpuSoftSqrtExact);
 +	xMOVDZX(xRegisterSSE(EEREC_D), eax);
++	// PS5: SQRT.S sets only I and D (it cannot overflow or underflow); O and U stay as they are,
++	// as in the interpreter (FPU.cpp SQRT_S).
 +	xAND(ptr32[&fpuRegs.fprc[31]], ~(FPUflagD | FPUflagI));
 +	xTEST(edx, 8);
 +	xForwardJZ8 sqrt_result_not_invalid;
 +	xOR(ptr32[&fpuRegs.fprc[31]], FPUflagI | FPUflagSI);
-+	xForwardJump8 sqrt_flags_ready_from_invalid;
 +	sqrt_result_not_invalid.SetTarget();
-+	fpuCommitSoftOverflowUnderflowFlags();
-+	sqrt_flags_ready_from_invalid.SetTarget();
 +}
 +
 +static void recSoftRsqrt(int info)
@@ -15747,7 +15923,7 @@ index 02a2c07..36e9b02 100644
  void recADD_S_xmm(int info)
  {
  	EE::Profiler.EmitOp(eeOpcode::ADD_F);
-@@ -650,16 +1844,20 @@ void recADD_S_xmm(int info)
+@@ -650,7 +1837,8 @@ void recADD_S_xmm(int info)
  	//REC_FPUOP(ADD_S);
  }
  
@@ -15757,12 +15933,8 @@ index 02a2c07..36e9b02 100644
  
  void recADDA_S_xmm(int info)
  {
- 	EE::Profiler.EmitOp(eeOpcode::ADDA_F);
- 	//xAND(ptr32[&fpuRegs.fprc[31]], ~(FPUflagO|FPUflagU)); // Clear O and U flags
--	ClampValues(recCommutativeOp(info, EEREC_ACC, 0));
-+	const int regd = recCommutativeOp(info, EEREC_ACC, 0);
-+	fpuUpdateNativeAccOverflow(regd);
-+	ClampValues(regd);
+@@ -659,7 +1847,8 @@ void recADDA_S_xmm(int info)
+ 	ClampValues(recCommutativeOp(info, EEREC_ACC, 0));
  }
  
 -FPURECOMPILE_CONSTCODE(ADDA_S, XMMINFO_WRITEACC | XMMINFO_READS | XMMINFO_READT);
@@ -15771,25 +15943,27 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  //------------------------------------------------------------------
-@@ -717,6 +1915,40 @@ void recBC1TL()
+@@ -717,6 +1906,43 @@ void recBC1TL()
  //------------------------------------------------------------------
  // C.x.S XMM
  //------------------------------------------------------------------
++// PS5: maps a raw value to an integer that compares as the PS2 compares floats: zero when the
++// exponent is zero (denormals are zero), the non-sign bits flipped when negative. Branchless, as
++// the data decides the path (checked against the branching form for every 32-bit value).
 +static void fpuLoadSoftCompareValue(
-+	const xRegister32& dst, int info, int process_flag, int fpureg, int xmmreg)
++	const xRegister32& dst, const xRegister32& scratch, int info, int process_flag, int fpureg, int xmmreg)
 +{
 +	fpuLoadSoftOperand(dst, info, process_flag, fpureg, xmmreg);
 +
-+	xTEST(dst, 0x7f800000);
-+	xForwardJNZ8 exponent_nonzero;
-+	xXOR(dst, dst);
-+	xForwardJump8 value_ready;
-+	exponent_nonzero.SetTarget();
-+	xTEST(dst, 0x80000000);
-+	xForwardJZ8 value_ready_nonnegative;
-+	xXOR(dst, 0x7fffffff);
-+	value_ready_nonnegative.SetTarget();
-+	value_ready.SetTarget();
++	xMOV(scratch, dst);
++	xAND(scratch, 0x7f800000);
++	xNEG(scratch); // CF = exponent != 0
++	xSBB(scratch, scratch); // all ones when the exponent is not zero
++	xAND(dst, scratch);
++	xMOV(scratch, dst);
++	xSAR(scratch, 31);
++	xSHR(scratch, 1); // 0x7fffffff when negative
++	xXOR(dst, scratch);
 +}
 +
 +template <eeOpcode opcode, JccComparisonType condition>
@@ -15798,8 +15972,9 @@ index 02a2c07..36e9b02 100644
 +	EE::Profiler.EmitOp(opcode);
 +	_freeX86reg(eax.GetId());
 +	_freeX86reg(ecx.GetId());
-+	fpuLoadSoftCompareValue(eax, info, PROCESS_EE_S, _Fs_, EEREC_S);
-+	fpuLoadSoftCompareValue(ecx, info, PROCESS_EE_T, _Ft_, EEREC_T);
++	_freeX86reg(edx.GetId());
++	fpuLoadSoftCompareValue(eax, edx, info, PROCESS_EE_S, _Fs_, EEREC_S);
++	fpuLoadSoftCompareValue(ecx, edx, info, PROCESS_EE_T, _Ft_, EEREC_T);
 +	xCMP(eax, ecx);
 +	xForwardJump8 condition_true(condition);
 +	xAND(ptr32[&fpuRegs.fprc[31]], ~FPUflagC);
@@ -15812,7 +15987,7 @@ index 02a2c07..36e9b02 100644
  void recC_EQ_xmm(int info)
  {
  	EE::Profiler.EmitOp(eeOpcode::CEQ_F);
-@@ -794,7 +2026,8 @@ void recC_EQ_xmm(int info)
+@@ -794,7 +2020,8 @@ void recC_EQ_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -15822,7 +15997,7 @@ index 02a2c07..36e9b02 100644
  //REC_FPUFUNC(C_EQ);
  
  void recC_F()
-@@ -881,7 +2114,8 @@ void recC_LE_xmm(int info)
+@@ -881,7 +2108,8 @@ void recC_LE_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -15832,7 +16007,7 @@ index 02a2c07..36e9b02 100644
  //REC_FPUFUNC(C_LE);
  
  void recC_LT_xmm(int info)
-@@ -961,7 +2195,8 @@ void recC_LT_xmm(int info)
+@@ -961,7 +2189,8 @@ void recC_LT_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -15842,7 +16017,7 @@ index 02a2c07..36e9b02 100644
  //REC_FPUFUNC(C_LT);
  //------------------------------------------------------------------
  
-@@ -1165,7 +2400,7 @@ void recDIV_S_xmm(int info)
+@@ -1165,7 +2394,7 @@ void recDIV_S_xmm(int info)
  	_freeXMMreg(t0reg);
  }
  
@@ -15851,16 +16026,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1359,6 +2594,8 @@ void recMADDtemp(int info, int regd)
- 			break;
- 	}
- 
-+	if (regd == EEREC_ACC)
-+		fpuUpdateNativeAccOverflow(regd);
- 	ClampValues(regd);
- 	_freeXMMreg(t0reg);
- }
-@@ -1370,7 +2607,9 @@ void recMADD_S_xmm(int info)
+@@ -1370,7 +2599,9 @@ void recMADD_S_xmm(int info)
  	recMADDtemp(info, EEREC_D);
  }
  
@@ -15871,7 +16037,7 @@ index 02a2c07..36e9b02 100644
  
  void recMADDA_S_xmm(int info)
  {
-@@ -1379,7 +2618,9 @@ void recMADDA_S_xmm(int info)
+@@ -1379,7 +2610,9 @@ void recMADDA_S_xmm(int info)
  	recMADDtemp(info, EEREC_ACC);
  }
  
@@ -15882,16 +16048,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1579,6 +2820,8 @@ void recMSUBtemp(int info, int regd)
- 			break;
- 	}
- 
-+	if (regd == EEREC_ACC)
-+		fpuUpdateNativeAccOverflow(regd);
- 	ClampValues(regd);
- 	_freeXMMreg(t0reg);
- }
-@@ -1590,7 +2833,9 @@ void recMSUB_S_xmm(int info)
+@@ -1590,7 +2823,9 @@ void recMSUB_S_xmm(int info)
  	recMSUBtemp(info, EEREC_D);
  }
  
@@ -15902,7 +16059,7 @@ index 02a2c07..36e9b02 100644
  
  void recMSUBA_S_xmm(int info)
  {
-@@ -1599,7 +2844,9 @@ void recMSUBA_S_xmm(int info)
+@@ -1599,7 +2834,9 @@ void recMSUBA_S_xmm(int info)
  	recMSUBtemp(info, EEREC_ACC);
  }
  
@@ -15913,7 +16070,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1613,16 +2860,20 @@ void recMUL_S_xmm(int info)
+@@ -1613,7 +2850,8 @@ void recMUL_S_xmm(int info)
  	ClampValues(recCommutativeOp(info, EEREC_D, 1));
  }
  
@@ -15923,12 +16080,8 @@ index 02a2c07..36e9b02 100644
  
  void recMULA_S_xmm(int info)
  {
- 	EE::Profiler.EmitOp(eeOpcode::MULA_F);
- 	//xAND(ptr32[&fpuRegs.fprc[31]], ~(FPUflagO|FPUflagU)); // Clear O and U flags
--	ClampValues(recCommutativeOp(info, EEREC_ACC, 1));
-+	const int regd = recCommutativeOp(info, EEREC_ACC, 1);
-+	fpuUpdateNativeAccOverflow(regd);
-+	ClampValues(regd);
+@@ -1622,7 +2860,8 @@ void recMULA_S_xmm(int info)
+ 	ClampValues(recCommutativeOp(info, EEREC_ACC, 1));
  }
  
 -FPURECOMPILE_CONSTCODE(MULA_S, XMMINFO_WRITEACC | XMMINFO_READS | XMMINFO_READT);
@@ -15937,7 +16090,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1719,7 +2970,8 @@ void recSUB_S_xmm(int info)
+@@ -1719,7 +2958,8 @@ void recSUB_S_xmm(int info)
  	recSUBop(info, EEREC_D);
  }
  
@@ -15947,7 +16100,7 @@ index 02a2c07..36e9b02 100644
  
  
  void recSUBA_S_xmm(int info)
-@@ -1728,7 +2980,8 @@ void recSUBA_S_xmm(int info)
+@@ -1728,7 +2968,8 @@ void recSUBA_S_xmm(int info)
  	recSUBop(info, EEREC_ACC);
  }
  
@@ -15957,7 +16110,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1781,7 +3034,7 @@ void recSQRT_S_xmm(int info)
+@@ -1781,7 +3022,7 @@ void recSQRT_S_xmm(int info)
  		xLDMXCSR(ptr32[&EmuConfig.Cpu.FPUFPCR.bitmask]);
  }
  
@@ -15966,7 +16119,7 @@ index 02a2c07..36e9b02 100644
  //------------------------------------------------------------------
  
  
-@@ -1907,7 +3160,7 @@ void recRSQRT_S_xmm(int info)
+@@ -1907,7 +3148,7 @@ void recRSQRT_S_xmm(int info)
  	_freeXMMreg(t0reg);
  }
  
@@ -16183,7 +16336,7 @@ index 026197c..8707830 100644
  	{
  		s_nEndBlock = i + n * 4;
 diff --git a/pcsx2/x86/microVU.cpp b/pcsx2/x86/microVU.cpp
-index 0f628f7..2f72f35 100644
+index 0f628f7..88fd380 100644
 --- a/pcsx2/x86/microVU.cpp
 +++ b/pcsx2/x86/microVU.cpp
 @@ -3,9 +3,11 @@
@@ -16237,7 +16390,25 @@ index 0f628f7..2f72f35 100644
  	if (THREAD_VU1)
  	{
  		DevCon.Warning("mVU Reset");
-@@ -49,7 +73,29 @@ void mVUreset(microVU& mVU, bool resetReserve)
+@@ -42,6 +66,17 @@ void mVUreset(microVU& mVU, bool resetReserve)
+ 		VU0.VI[REG_VPU_STAT].UL &= ~0x100;
+ 	}
+ 
++	// Soft float turned off: give back its result caches (about 768 KB per VU). Only after the
++	// flush above, which can still run VU1 code compiled for soft float.
++	if (!use_soft_float)
++	{
++		mVU.softBoothCache.reset();
++		mVU.softSrtReciprocalCache.reset();
++		mVU.softDivCache.reset();
++		mVU.softSqrtCache.reset();
++		mVU.softRsqrtCache.reset();
++	}
++
+ 	xSetTextPtr(mVU.textPtr());
+ 	xSetPtr(mVU.cache);
+ 	mVUdispatcherAB(mVU);
+@@ -49,7 +84,29 @@ void mVUreset(microVU& mVU, bool resetReserve)
  	mVUGenerateWaitMTVU(mVU);
  	mVUGenerateCopyPipelineState(mVU);
  	mVUGenerateCompareState(mVU);
@@ -16268,7 +16439,7 @@ index 0f628f7..2f72f35 100644
  	mVU.regs().nextBlockCycles = 0;
  	memset(&mVU.prog.lpState, 0, sizeof(mVU.prog.lpState));
  	mVU.profiler.Reset(mVU.index);
-@@ -331,7 +377,7 @@ void recMicroVU1::Shutdown()
+@@ -331,7 +388,7 @@ void recMicroVU1::Shutdown()
  
  void recMicroVU0::Reset()
  {
@@ -16277,7 +16448,7 @@ index 0f628f7..2f72f35 100644
  }
  
  void recMicroVU0::Step()
-@@ -342,7 +388,7 @@ void recMicroVU1::Reset()
+@@ -342,7 +399,7 @@ void recMicroVU1::Reset()
  {
  	vu1Thread.WaitVU();
  	vu1Thread.Get_MTVUChanges();
@@ -16286,7 +16457,7 @@ index 0f628f7..2f72f35 100644
  }
  
  void recMicroVU0::SetStartPC(u32 startPC)
-@@ -418,68 +464,3 @@ bool SaveStateBase::vuJITFreeze()
+@@ -418,68 +475,3 @@ bool SaveStateBase::vuJITFreeze()
  	Freeze(microVU1.prog.lpState);
  	return IsOkay();
  }
@@ -16564,7 +16735,7 @@ index a3acd6a..00d54b9 100644
  			calcOPS++;
  		}
 diff --git a/pcsx2/x86/microVU_Compile.inl b/pcsx2/x86/microVU_Compile.inl
-index 030fdc1..19b0d83 100644
+index 030fdc1..ddc4fc7 100644
 --- a/pcsx2/x86/microVU_Compile.inl
 +++ b/pcsx2/x86/microVU_Compile.inl
 @@ -142,7 +142,9 @@ void doIbit(mV)
@@ -16596,15 +16767,6 @@ index 030fdc1..19b0d83 100644
  		if (mVUinfo.isEOB)
  		{
  			handleBadOp(mVU, x);
-@@ -892,7 +883,7 @@ void* mVUcompile(microVU& mVU, u32 startPC, uptr pState)
- 			xOR(ptr32[&mVU.regs().flags], VUFLAG_MFLAGSET);
- 		}
- 
--		if (isVU1 && mVUlow.kickcycles && CHECK_XGKICKHACK)
-+		if (isVU1 && mVUlow.kickcycles && CHECK_XGKICKHACK && !mVUlow.deferXgkickSync)
- 		{
- 			mVU_XGKICK_SYNC(mVU, false);
- 		}
 diff --git a/pcsx2/x86/microVU_Execute.inl b/pcsx2/x86/microVU_Execute.inl
 index 711e990..7b36507 100644
 --- a/pcsx2/x86/microVU_Execute.inl
@@ -16710,7 +16872,7 @@ index 4118618..bb97390 100644
  			}
  		}
 diff --git a/pcsx2/x86/microVU_IR.h b/pcsx2/x86/microVU_IR.h
-index dbbfb11..5f8285f 100644
+index dbbfb11..c38d8dc 100644
 --- a/pcsx2/x86/microVU_IR.h
 +++ b/pcsx2/x86/microVU_IR.h
 @@ -5,6 +5,8 @@
@@ -16722,15 +16884,7 @@ index dbbfb11..5f8285f 100644
  struct regCycleInfo
  {
  	u8 x : 4;
-@@ -139,6 +141,7 @@ struct microLowerOp
- 	bool memReadIt;  // Read If (VI reg) from memory (used by branches)
- 	bool readFlags;  // Current Instruction reads Status, Mac, or Clip flags
- 	bool isMemWrite; // Current Instruction writes to VU memory
-+	bool deferXgkickSync; // Store performs overlap-aware XGKick synchronization.
- 	bool isKick;     // Op is a kick so don't count kick cycles
- };
- 
-@@ -146,6 +149,7 @@ struct microFlagInst
+@@ -146,6 +148,7 @@ struct microFlagInst
  {
  	bool doFlag;      // Update Flag on this Instruction
  	bool doNonSticky; // Update O,U,S,Z (non-sticky) bits on this Instruction (status flag only)
@@ -16738,7 +16892,7 @@ index dbbfb11..5f8285f 100644
  	u8   write;       // Points to the instance that should be written to (s-stage write)
  	u8   lastWrite;   // Points to the instance that was last written to (most up-to-date flag)
  	u8   read;        // Points to the instance that should be read by a lower instruction (t-stage read)
-@@ -231,6 +235,7 @@ protected:
+@@ -231,6 +234,7 @@ protected:
  
  	std::array<microMapXMM, xmmTotal> xmmMap;
  	std::array<microMapGPR, gprTotal> gprMap;
@@ -16746,7 +16900,7 @@ index dbbfb11..5f8285f 100644
  
  	int         counter; // Current allocation count
  	int         index;   // VU0 or VU1
-@@ -367,6 +372,8 @@ public:
+@@ -367,6 +371,8 @@ public:
  			clearReg(i);
  		for (int i = 0; i < gprTotal; i++)
  			clearGPR(i);
@@ -16755,7 +16909,7 @@ index dbbfb11..5f8285f 100644
  
  		counter = 0;
  		regAllocCOP2 = cop2mode;
-@@ -433,20 +440,21 @@ public:
+@@ -433,20 +439,21 @@ public:
  		return count;
  	}
  
@@ -16786,7 +16940,7 @@ index dbbfb11..5f8285f 100644
  	}
  
  	int getGPRCount()
-@@ -467,17 +475,6 @@ public:
+@@ -467,17 +474,6 @@ public:
  		return count;
  	}
  
@@ -16804,7 +16958,7 @@ index dbbfb11..5f8285f 100644
  	int getRegVI(int i)
  	{
  		return (i < gprTotal) ? gprMap[i].VIreg : -1;
-@@ -503,6 +500,18 @@ public:
+@@ -503,6 +499,18 @@ public:
  		}
  	}
  
@@ -16823,7 +16977,7 @@ index dbbfb11..5f8285f 100644
  	void flushCallerSavedRegisters(bool clearNeeded = false)
  	{
  		for (int i = 0; i < xmmTotal; i++)
-@@ -765,6 +774,8 @@ public:
+@@ -765,6 +773,8 @@ public:
  	{
  		//DevCon.WriteLn("vfLoadReg = %02d, vfWriteReg = %02d, xyzw = %x, clone = %d",vfLoadReg,vfWriteReg,xyzw,(int)cloneWrite);
  		counter++;
@@ -16833,10 +16987,10 @@ index dbbfb11..5f8285f 100644
  		{
  			for (int i = 0; i < xmmTotal; i++)
 diff --git a/pcsx2/x86/microVU_Lower.inl b/pcsx2/x86/microVU_Lower.inl
-index 672195c..a539547 100644
+index 672195c..97c9f51 100644
 --- a/pcsx2/x86/microVU_Lower.inl
 +++ b/pcsx2/x86/microVU_Lower.inl
-@@ -11,6 +11,903 @@
+@@ -11,6 +11,895 @@
  // DIV/SQRT/RSQRT
  //------------------------------------------------------------------
  
@@ -17268,12 +17422,8 @@ index 672195c..a539547 100644
 +	xForwardJZ32 sqrt_extended_input;
 +	xMOVDZX(xmm0, ptr32[rsp + ft_raw]);
 +	xPAND(xmm0, ptr128[mVUglob.absclip]);
-+	const bool switch_mxcsr = mVUupperSoftNeedsTruncateMxcsr(mVU);
-+	if (switch_mxcsr)
-+		xLDMXCSR(ptr32[&s_vu_soft_truncate_mxcsr]);
++	// Truncation is already on: soft VU code runs in truncate/DAZ/FTZ.
 +	xSQRT.SS(xmm0, xmm0);
-+	if (switch_mxcsr)
-+		xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +	xMOVD(r9d, xmm0);
 +	xTEST(ptr32[rsp + ft_raw], 0x7fffff);
 +	xForwardJZ32 sqrt_correction_ready;
@@ -17464,12 +17614,8 @@ index 672195c..a539547 100644
 +	// Start with a chop-mode SQRTSS candidate, then apply the exact PS2 correction.
 +	xMOVDZX(xmm0, ptr32[rsp + ft_raw]);
 +	xPAND(xmm0, ptr128[mVUglob.absclip]);
-+	const bool switch_mxcsr = mVUupperSoftNeedsTruncateMxcsr(mVU);
-+	if (switch_mxcsr)
-+		xLDMXCSR(ptr32[&s_vu_soft_truncate_mxcsr]);
++	// Truncation is already on: soft VU code runs in truncate/DAZ/FTZ.
 +	xSQRT.SS(xmm0, xmm0);
-+	if (switch_mxcsr)
-+		xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +	xMOVD(r9d, xmm0);
 +	xTEST(ptr32[rsp + ft_raw], 0x7fffff);
 +	xForwardJZ32 rsqrt_sqrt_correction_ready;
@@ -17740,7 +17886,7 @@ index 672195c..a539547 100644
  // Test if Vector is +/- Zero
  static __fi void testZero(const xmm& xmmReg, const xmm& xmmTemp, const x32& gprTemp)
  {
-@@ -32,9 +929,19 @@ static __fi void testNeg(mV, const xmm& xmmReg, const x32& gprTemp)
+@@ -32,9 +921,19 @@ static __fi void testNeg(mV, const xmm& xmmReg, const x32& gprTemp)
  
  mVUop(mVU_DIV)
  {
@@ -17761,7 +17907,7 @@ index 672195c..a539547 100644
  		xmm Ft;
  		if (_Ftf_) Ft = mVU.regAlloc->allocReg(_Ft_, 0, (1 << (3 - _Ftf_)));
  		else       Ft = mVU.regAlloc->allocReg(_Ft_);
-@@ -81,9 +988,19 @@ mVUop(mVU_DIV)
+@@ -81,9 +980,19 @@ mVUop(mVU_DIV)
  
  mVUop(mVU_SQRT)
  {
@@ -17782,7 +17928,7 @@ index 672195c..a539547 100644
  		const xmm& Ft = mVU.regAlloc->allocReg(_Ft_, 0, (1 << (3 - _Ftf_)));
  
  		xMOV(ptr32[&mVU.divFlag], 0); // Clear I/D flags
-@@ -108,9 +1025,19 @@ mVUop(mVU_SQRT)
+@@ -108,9 +1017,19 @@ mVUop(mVU_SQRT)
  
  mVUop(mVU_RSQRT)
  {
@@ -17803,7 +17949,7 @@ index 672195c..a539547 100644
  		const xmm& Fs = mVU.regAlloc->allocReg(_Fs_, 0, (1 << (3 - _Fsf_)));
  		const xmm& Ft = mVU.regAlloc->allocReg(_Ft_, 0, (1 << (3 - _Ftf_)));
  		const xmm& t1 = mVU.regAlloc->allocReg();
-@@ -374,14 +1301,21 @@ mVUop(mVU_ERCPR)
+@@ -374,14 +1293,21 @@ mVUop(mVU_ERCPR)
  	}
  	pass2
  	{
@@ -17833,7 +17979,7 @@ index 672195c..a539547 100644
  		mVU.profiler.EmitOp(opERCPR);
  	}
  	pass3 { mVUlog("ERCPR P"); }
-@@ -453,15 +1387,22 @@ mVUop(mVU_ERSQRT)
+@@ -453,15 +1379,22 @@ mVUop(mVU_ERSQRT)
  	}
  	pass2
  	{
@@ -17865,7 +18011,7 @@ index 672195c..a539547 100644
  		mVU.profiler.EmitOp(opERSQRT);
  	}
  	pass3 { mVUlog("ERSQRT P"); }
-@@ -548,12 +1489,19 @@ mVUop(mVU_ESQRT)
+@@ -548,12 +1481,19 @@ mVUop(mVU_ESQRT)
  	}
  	pass2
  	{
@@ -17891,7 +18037,7 @@ index 672195c..a539547 100644
  		mVU.profiler.EmitOp(opESQRT);
  	}
  	pass3 { mVUlog("ESQRT P"); }
-@@ -1637,8 +2585,33 @@ mVUop(mVU_WAITP)
+@@ -1637,8 +2577,33 @@ mVUop(mVU_WAITP)
  
  mVUop(mVU_WAITQ)
  {
@@ -17928,7 +18074,7 @@ index 672195c..a539547 100644
  }
  
 diff --git a/pcsx2/x86/microVU_Macro.inl b/pcsx2/x86/microVU_Macro.inl
-index bdd6dac..8a367fa 100644
+index bdd6dac..410d1a3 100644
 --- a/pcsx2/x86/microVU_Macro.inl
 +++ b/pcsx2/x86/microVU_Macro.inl
 @@ -48,6 +48,7 @@ void setupMacroOp(int mode, const char* opName)
@@ -17948,7 +18094,7 @@ index bdd6dac..8a367fa 100644
  		}
  		else if (g_pCurInstInfo->info & (EEINST_COP2_STATUS_FLAG | EEINST_COP2_DENORMALIZE_STATUS_FLAG))
  		{
-@@ -139,6 +142,51 @@ bool mVUIsReservedCOP2(int hostreg)
+@@ -139,6 +142,58 @@ bool mVUIsReservedCOP2(int hostreg)
  		endMacroOp(_mode); \
  	}
  
@@ -17962,13 +18108,24 @@ index bdd6dac..8a367fa 100644
 +	_freeX86reg(gprF3);
 +}
 +
-+#define REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, flushcheck) \
++// Soft-float VU code is written for the PS2's truncate/DAZ/FTZ mode, which the microVU
++// dispatcher sets for micro mode. COP2 ops run inside EE blocks, under the EE's FPCR (a
++// game's eeRoundMode changes it), so switch around them unless the two modes agree.
++static bool mVUcop2SoftNeedsMxcsrSwitch()
++{
++	return CHECK_VU_SOFT(0) && EmuConfig.Cpu.FPUFPCR.bitmask != s_vu_soft_truncate_daz_ftz_mxcsr;
++}
++
++#define REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode) \
 +	void recV##f() \
 +	{ \
-+		if (flushcheck) \
++		if (CHECK_VU_SOFT(0)) \
 +			mVUprepareCop2SoftGPRs(); \
 +		int _mode = (mode); \
 +		setupMacroOp(_mode, opName); \
++		const bool switch_mxcsr = mVUcop2SoftNeedsMxcsrSwitch(); \
++		if (switch_mxcsr) \
++			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]); \
 +		if (_mode & 4) \
 +		{ \
 +			mVU_##f(microVU0, 0); \
@@ -17979,28 +18136,24 @@ index bdd6dac..8a367fa 100644
 +		{ \
 +			mVU_##f(microVU0, 1); \
 +		} \
++		if (switch_mxcsr) \
++			xLDMXCSR(ptr32[&EmuConfig.Cpu.FPUFPCR.bitmask]); \
 +		endMacroOp(_mode); \
 +	}
 +
-+#define REC_COP2_mVU0_ADDSUB(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_MUL(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_FMAC(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_FMAC_FD(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_OPM_MUL(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_OPM_FMAC(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
-+#define REC_COP2_mVU0_DIVSQRT(f, opName, mode) \
-+	REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode, CHECK_VU_SOFT(0))
++// The upper, FMAC and DIV/SQRT groups all take the soft path the same way.
++#define REC_COP2_mVU0_ADDSUB(f, opName, mode) REC_COP2_mVU0_GENERATED_SOFT(f, opName, mode)
++#define REC_COP2_mVU0_MUL REC_COP2_mVU0_ADDSUB
++#define REC_COP2_mVU0_FMAC REC_COP2_mVU0_ADDSUB
++#define REC_COP2_mVU0_FMAC_FD REC_COP2_mVU0_ADDSUB
++#define REC_COP2_mVU0_OPM_MUL REC_COP2_mVU0_ADDSUB
++#define REC_COP2_mVU0_OPM_FMAC REC_COP2_mVU0_ADDSUB
++#define REC_COP2_mVU0_DIVSQRT REC_COP2_mVU0_ADDSUB
 +
  #define INTERPRETATE_COP2_FUNC(f) \
  	void recV##f() \
  	{ \
-@@ -173,48 +221,48 @@ REC_COP2_mVU0(FTOI0,  "FTOI0",  0x0);
+@@ -173,48 +228,48 @@ REC_COP2_mVU0(FTOI0,  "FTOI0",  0x0);
  REC_COP2_mVU0(FTOI4,  "FTOI4",  0x0);
  REC_COP2_mVU0(FTOI12, "FTOI12", 0x0);
  REC_COP2_mVU0(FTOI15, "FTOI15", 0x0);
@@ -18091,7 +18244,7 @@ index bdd6dac..8a367fa 100644
  REC_COP2_mVU0(MAX,    "MAX",    0x0);
  REC_COP2_mVU0(MAXi,   "MAXi",   0x0);
  REC_COP2_mVU0(MAXx,   "MAXx",   0x0);
-@@ -227,45 +275,45 @@ REC_COP2_mVU0(MINIx,  "MINIx",  0x0);
+@@ -227,45 +282,45 @@ REC_COP2_mVU0(MINIx,  "MINIx",  0x0);
  REC_COP2_mVU0(MINIy,  "MINIy",  0x0);
  REC_COP2_mVU0(MINIz,  "MINIz",  0x0);
  REC_COP2_mVU0(MINIw,  "MINIw",  0x0);
@@ -32866,10 +33019,10 @@ index 5a54af3..92e29d2 100644
  		const xmm& ACC = mVU.regAlloc->allocReg(32, _Fd_, _X_Y_Z_W);
 diff --git a/pcsx2/x86/microVU_UpperSoft.inl b/pcsx2/x86/microVU_UpperSoft.inl
 new file mode 100644
-index 0000000..55a78ef
+index 0000000..4f94fd6
 --- /dev/null
 +++ b/pcsx2/x86/microVU_UpperSoft.inl
-@@ -0,0 +1,4104 @@
+@@ -0,0 +1,4055 @@
 +// SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 +// SPDX-License-Identifier: GPL-3.0+
 +
@@ -32921,14 +33074,6 @@ index 0000000..55a78ef
 +	VuUpperFmacSoftKind kind, VuUpperFmacSoftDestination destination)
 +{
 +	return {kind, mVUselectUpperSoftOperandSource(mVU, opCase), destination};
-+}
-+
-+static bool mVUupperSoftNeedsTruncateMxcsr(microVU& mVU)
-+{
-+	const FPControlRegister& fpcr = mVU.index == 0 ? EmuConfig.Cpu.VU0FPCR : EmuConfig.Cpu.VU1FPCR;
-+	// Soft-float dispatchers already run the complete VU block in the PS2's
-+	// truncate/DAZ/FTZ mode, independent of compatibility rounding overrides.
-+	return !CHECK_VU_SOFT(mVU.index) && fpcr.GetRoundMode() != FPRoundMode::ChopZero;
 +}
 +
 +static bool mVUupperSoftNeedsStatusValue(microVU& mVU)
@@ -33326,14 +33471,12 @@ index 0000000..55a78ef
 +	const bool can_use_vector_native =
 +		g_cpu.vectorISA >= ProcessorFeatures::VectorISA::AVX2 && _X_Y_Z_W != 0;
 +	const bool use_packed_native = can_use_vector_native && !_XYZW_SS;
-+	const bool switch_mxcsr = mVUupperSoftNeedsTruncateMxcsr(mVU);
-+	const FPControlRegister& vu_fpcr =
-+		mVU.index == 0 ? EmuConfig.Cpu.VU0FPCR : EmuConfig.Cpu.VU1FPCR;
-+	const bool native_ps2_zero =
-+		vu_fpcr.GetFlushToZero() && vu_fpcr.GetDenormalsAreZero();
-+	const bool use_stackless_scalar_flags = can_use_vector_native && !switch_mxcsr &&
++	// Soft-float code always runs in truncate/DAZ/FTZ (the micro dispatcher and the COP2
++	// wrapper set it), whatever the configured VU FPCR says.
++	constexpr bool native_ps2_zero = true;
++	const bool use_stackless_scalar_flags = can_use_vector_native &&
 +	                                        _XYZW_SS && (mFLAG.doFlag || sFLAG.doFlag);
-+	const bool use_stackless_add = can_use_vector_native && !switch_mxcsr &&
++	const bool use_stackless_add = can_use_vector_native &&
 +	                               ((!mFLAG.doFlag && !sFLAG.doFlag) || use_stackless_scalar_flags);
 +	const bool use_vector_temporaries = use_packed_native || use_stackless_add;
 +	const int scratch_base = use_packed_native ? VU_SOFT_ADD_REPAIR_CONTEXT_SIZE :
@@ -33603,11 +33746,7 @@ index 0000000..55a78ef
 +		xPOR(native_guard, work);
 +		xMOVAPS(ptr128[rsp + packed_shift], native_guard);
 +
-+		if (switch_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_mxcsr]);
 +		xADD.PS(native_source, native_operand);
-+		if (switch_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +
 +		xPAND(native_operand, native_source, ptr128[s_vu_soft_abs]);
 +		xPCMP.GTD(shift_mask, native_operand, ptr128[s_vu_soft_max_safe]);
@@ -34461,6 +34600,7 @@ index 0000000..55a78ef
 +	constexpr sptr saved_xmm = 0;
 +	constexpr int cancellation_mask = saved_xmm + 5 * 16;
 +	constexpr int lane_flags = cancellation_mask + 16;
++	constexpr int saved_mxcsr = lane_flags + 4;
 +	// The six saved GPRs leave RSP 8-byte misaligned after the helper call's
 +	// return address.  Reserve an extra eight bytes so the MOVAPS XMM save area
 +	// and the cancellation temporary remain 16-byte aligned.
@@ -34573,9 +34713,12 @@ index 0000000..55a78ef
 +	// The helper is entered only from a cold packed repair edge. Always use the
 +	// exact truncate mode here; zero lanes were canonicalized explicitly and a
 +	// true underflow is detected below before any native result is accepted.
++	// Put back the mode the caller ran in, not a configured FPCR: the dispatcher runs soft VU code
++	// in truncate/DAZ/FTZ, and VU0's kernels are shared with COP2, which has its own mode.
++	xSTMXCSR(ptr32[rsp + saved_mxcsr]);
 +	xLDMXCSR(ptr32[&s_vu_soft_truncate_mxcsr]);
 +	xADD.PS(xmm0, xmm1);
-+	xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
++	xLDMXCSR(ptr32[rsp + saved_mxcsr]);
 +
 +	xPAND(xmm1, xmm0, ptr128[s_vu_soft_abs]);
 +	xPCMP.GTD(xmm3, xmm1, ptr128[s_vu_soft_max_safe]);
@@ -35329,16 +35472,11 @@ index 0000000..55a78ef
 +	constexpr sptr result_offset = 0;
 +	const int variant = op.OperandVariant();
 +	const bool use_packed_native = _X_Y_Z_W != 0;
-+	const bool switch_mxcsr = mVUupperSoftNeedsTruncateMxcsr(mVU);
-+	const FPControlRegister& vu_fpcr =
-+		mVU.index == 0 ? EmuConfig.Cpu.VU0FPCR : EmuConfig.Cpu.VU1FPCR;
-+	const bool flush_to_zero = vu_fpcr.GetFlushToZero();
-+	const bool native_ps2_zero = flush_to_zero && vu_fpcr.GetDenormalsAreZero();
-+	const bool switch_native_mxcsr = switch_mxcsr && native_ps2_zero;
++	// Soft-float code always runs in truncate/DAZ/FTZ (see mVUemitUpperInlineAddSubExactResult).
++	constexpr bool native_ps2_zero = true;
 +	const bool needs_status_flags = mVUupperSoftNeedsStatusValue(mVU);
 +	const bool needs_mac_flags = mFLAG.doFlag || (op.WritesAcc() && needs_status_flags);
-+	const bool native_path_available = allow_fast_normal && use_packed_native &&
-+	                                   (!switch_mxcsr || switch_native_mxcsr);
++	const bool native_path_available = allow_fast_normal && use_packed_native;
 +	const bool emit_stackless_prefix =
 +		native_path_available && !needs_mac_flags && !needs_status_flags;
 +	std::optional<xForwardJump32> fast_normal_finished;
@@ -35357,8 +35495,6 @@ index 0000000..55a78ef
 +	};
 +	if (emit_stackless_prefix)
 +	{
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]);
 +		xMOVAPS(native_product, source);
 +		mVUemitUpperInlinePrepareOperand(native_operand, operand, variant);
 +		const bool retain_broadcast_product_abs = native_ps2_zero && variant >= 3;
@@ -35484,8 +35620,6 @@ index 0000000..55a78ef
 +		xAND(eax, s_vu_soft_lane_mask[_X_Y_Z_W]);
 +		xForwardJNZ32 stackless_mul_result_failed;
 +
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperInlineCommitResult(mVU, destination, native_product);
 +		if (op.WritesAcc())
 +			xAND(ptr32[&mVU.regs().accflag], ~static_cast<u32>(_X_Y_Z_W));
@@ -35493,8 +35627,6 @@ index 0000000..55a78ef
 +
 +		stackless_mul_booth_failed.SetTarget();
 +		stackless_mul_result_failed.SetTarget();
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +	}
 +	if (native_path_available)
 +	{
@@ -35505,8 +35637,6 @@ index 0000000..55a78ef
 +		constexpr int fast_booth_lane_mask = fast_product_zero + 16;
 +		constexpr int fast_stack_size = (fast_booth_lane_mask + 4 + 15) & ~15;
 +		mVUemitUpperSoftStackAlloc(fast_stack_size);
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]);
 +
 +		xMOVAPS(native_product, source);
 +		mVUemitUpperInlinePrepareOperand(native_operand, operand, variant);
@@ -35683,8 +35813,6 @@ index 0000000..55a78ef
 +			fast_result_failed.emplace(Jcc_NotZero);
 +		}
 +
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperInlineCommitResult(mVU, destination, native_product);
 +
 +		if (op.WritesAcc())
@@ -35764,8 +35892,6 @@ index 0000000..55a78ef
 +			fast_corrected_product_failed->SetTarget();
 +		if (fast_table_product_failed.has_value())
 +			fast_table_product_failed->SetTarget();
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperSoftStackFree(fast_stack_size);
 +	}
 +	// Keep uncommon mixed and exceptional domains in a shared out-of-line path.
@@ -35828,14 +35954,11 @@ index 0000000..55a78ef
 +	const bool needs_mac_flags = mFLAG.doFlag || (op.WritesAcc() && needs_status_flags);
 +	const bool needs_result_flags = needs_mac_flags || needs_status_flags;
 +	const bool use_identity_stackless_madd = variant == 6 && _Ft_ == 0;
-+	const bool switch_mxcsr = mVUupperSoftNeedsTruncateMxcsr(mVU);
-+	const FPControlRegister& vu_fpcr =
-+		mVU.index == 0 ? EmuConfig.Cpu.VU0FPCR : EmuConfig.Cpu.VU1FPCR;
-+	const bool flush_to_zero = vu_fpcr.GetFlushToZero();
-+	const bool native_ps2_zero = flush_to_zero && vu_fpcr.GetDenormalsAreZero();
-+	const bool switch_native_mxcsr = switch_mxcsr && native_ps2_zero;
++	// Soft-float code always runs in truncate/DAZ/FTZ (see mVUemitUpperInlineAddSubExactResult).
++	constexpr bool flush_to_zero = true;
++	constexpr bool native_ps2_zero = true;
 +	const bool native_path_available = allow_fast_normal && use_vector_native_prepare &&
-+	                                   (!switch_mxcsr || switch_native_mxcsr) && !_XYZW_SS && _X_Y_Z_W != 0;
++	                                   !_XYZW_SS && _X_Y_Z_W != 0;
 +
 +	const bool emit_stackless_prefix = native_path_available && !needs_result_flags;
 +	const bool emit_identity_compact = native_path_available && _X_Y_Z_W == 0xf &&
@@ -35866,8 +35989,6 @@ index 0000000..55a78ef
 +	// fall through to the complete mixed-lane implementation below.
 +	if (emit_stackless_prefix)
 +	{
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]);
 +		xTEST(ptr32[&mVU.regs().accflag], _X_Y_Z_W);
 +		xForwardJNZ32 stackless_acc_overflow_failed;
 +
@@ -36038,8 +36159,6 @@ index 0000000..55a78ef
 +			xPTEST(native_power, native_power);
 +			stackless_result_failed.emplace(Jcc_NotZero);
 +		}
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperInlineCommitResult(mVU, destination, native_product);
 +		// The entry guard proved the active ACC overflow bits clear, and the
 +		// accepted result cannot set them. Inactive masked bits remain untouched.
@@ -36058,16 +36177,12 @@ index 0000000..55a78ef
 +			stackless_difference_failed->SetTarget();
 +		if (stackless_result_failed.has_value())
 +			stackless_result_failed->SetTarget();
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +	}
 +	// These tiers allocate different temporary registers. Emitting both for one
 +	// instruction would let a stackless success skip compact-tier spill code which
 +	// the compile-time allocator has already incorporated into its state.
 +	if (emit_identity_compact)
 +	{
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]);
 +		const xmm& compact_domain = mVU.regAlloc->allocReg();
 +		const xmm& compact_product_zero = mVU.regAlloc->allocReg();
 +
@@ -36151,14 +36266,10 @@ index 0000000..55a78ef
 +		}
 +		if (op.WritesAcc())
 +			xMOV(ptr32[&mVU.regs().accflag], 0);
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		compact_common_finished.emplace();
 +
 +		compact_acc_overflow_failed.SetTarget();
 +		compact_domain_failed.SetTarget();
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVU.regAlloc->clearNeeded(compact_product_zero);
 +		mVU.regAlloc->clearNeeded(compact_domain);
 +	}
@@ -36175,8 +36286,6 @@ index 0000000..55a78ef
 +		constexpr int register_booth_lane_mask = register_booth_correction + 16;
 +		constexpr int register_stack_size = (register_booth_lane_mask + 4 + 15) & ~15;
 +		mVUemitUpperSoftStackAlloc(register_stack_size);
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[&s_vu_soft_truncate_daz_ftz_mxcsr]);
 +
 +		xTEST(ptr32[&mVU.regs().accflag], 0xf);
 +		xForwardJNZ32 register_acc_overflow_failed;
@@ -36474,8 +36583,6 @@ index 0000000..55a78ef
 +		if (op.WritesAcc())
 +			xAND(ptr32[&mVU.regs().accflag], ~static_cast<u32>(_X_Y_Z_W));
 +		mVUemitSoftFlagWriteback(mVU, result_offset, op);
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperSoftStackFree(register_stack_size);
 +		register_common_finished.emplace();
 +
@@ -36487,8 +36594,6 @@ index 0000000..55a78ef
 +			register_corrected_product_failed->SetTarget();
 +		register_acc_input_failed.SetTarget();
 +		register_result_failed.SetTarget();
-+		if (switch_native_mxcsr)
-+			xLDMXCSR(ptr32[mVU.index == 0 ? &EmuConfig.Cpu.VU0FPCR.bitmask : &EmuConfig.Cpu.VU1FPCR.bitmask]);
 +		mVUemitUpperSoftStackFree(register_stack_size);
 +	}
 +	// Every vector direct miss uses one shared generated exact kernel. Scalar instructions
@@ -36580,7 +36685,7 @@ index 0000000..55a78ef
 +	// VPSRLVD/VPSLLVD make the packed helper AVX2-only. This condition is evaluated
 +	// while recompiling, so unsupported hosts fall through to the exact scalar path
 +	// without adding a branch to generated code.
-+	if (!switch_mxcsr && g_cpu.vectorISA >= ProcessorFeatures::VectorISA::AVX2)
++	if (g_cpu.vectorISA >= ProcessorFeatures::VectorISA::AVX2)
 +	{
 +		xLEA(rax, ptr[rsp + source_values]);
 +		xLEA(rdx, ptr[rsp + operand_values]);
@@ -36858,8 +36963,7 @@ index 0000000..55a78ef
 +static bool mVUfindUpperSoftRegisterDotFusion(microVU& mVU, u32 first_pc,
 +	VuUpperFmacSoftDescriptor first_op, mVUUpperSoftRegisterDotFusion* fusion)
 +{
-+	if (!mVUupperSoftIsBroadcastOp(first_op, VuUpperFmacSoftKind::Mul, VuUpperFmacSoftDestination::Acc) ||
-+		mVUupperSoftNeedsTruncateMxcsr(mVU))
++	if (!mVUupperSoftIsBroadcastOp(first_op, VuUpperFmacSoftKind::Mul, VuUpperFmacSoftDestination::Acc))
 +	{
 +		return false;
 +	}
