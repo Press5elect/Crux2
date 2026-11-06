@@ -2,7 +2,6 @@ Crux2's changes to PCSX2 (the PS5 port), on PCSX2 993f6fc3b18e3feb0151ea1fa16b8a
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
-
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index b0c3945..220d859 100644
 --- a/CMakeLists.txt
@@ -2387,7 +2386,7 @@ index 4c8ce81..8233eb4 100644
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index 21adcf1..b07161e 100644
+index 21adcf1..42d184d 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -9,9 +9,12 @@
@@ -2476,16 +2475,17 @@ index 21adcf1..b07161e 100644
  		u8 Dithering = 2;
  		u8 MaxAnisotropy = 0;
  		u8 TVShader = 0;
-@@ -940,6 +993,8 @@ struct Pcsx2Config
+@@ -940,6 +993,9 @@ struct Pcsx2Config
  
  		std::string Adapter;
  		std::string HWDumpDirectory;
 +		std::string PS5Look; // PS5: the look's preset: under resources/shaders/slang, or a path of the user's ("" none)
++		bool PS5SMAA = false; // PS5: SMAA anti-aliasing (Settings > Picture), a preset of its own before the look
 +		bool PS5SidePicture = false; // PS5: a soft picture beside a picture narrower than the screen
  		std::string SWDumpDirectory;
  
  		GSOptions();
-@@ -1533,11 +1588,15 @@ namespace EmuFolders
+@@ -1533,11 +1589,15 @@ namespace EmuFolders
  #define CHECK_VU_SIGN_OVERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0SignOverflow : EmuConfig.Cpu.Recompiler.vu1SignOverflow)
  #define CHECK_VU_UNDERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0Underflow : EmuConfig.Cpu.Recompiler.vu1Underflow)
  
@@ -3950,7 +3950,7 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..0a3a4b5 100644
+index b3c8d65..a260958 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
@@ -3981,7 +3981,7 @@ index b3c8d65..0a3a4b5 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1445,421 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1445,528 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4332,12 +4332,59 @@ index b3c8d65..0a3a4b5 100644
 +
 +// PS5: the look. The preset reads the picture as the game's own picture ("Original"): the part of
 +// the texture it is in is copied out when it is not the whole texture.
++// PS5: the largest colour value in the middle of a picture (a 256 x 256 part of it), read back:
++// false when it could not be read. Used to see that a look did not draw only black.
++static bool PS5MiddleMax(GSDevice* dev, GSTexture* tex, u32* out)
++{
++	const int w = tex->GetWidth(), h = tex->GetHeight();
++	const int cw = std::min(w, 256), ch = std::min(h, 256);
++	if (cw <= 0 || ch <= 0)
++		return false;
++	const int x0 = w / 2 - cw / 2, y0 = h / 2 - ch / 2;
++	std::unique_ptr<GSDownloadTexture> dl = dev->CreateDownloadTexture(static_cast<u32>(cw), static_cast<u32>(ch), GSTexture::Format::Color);
++	if (!dl)
++		return false;
++	dl->CopyFromTexture(GSVector4i(0, 0, cw, ch), tex, GSVector4i(x0, y0, x0 + cw, y0 + ch), 0);
++	dl->Flush();
++	if (!dl->Map(GSVector4i(0, 0, cw, ch)))
++		return false;
++	u32 m = 0;
++	for (int y = 0; y < ch; y++)
++	{
++		const u8* row = dl->GetMapPointer() + static_cast<size_t>(y) * dl->GetMapPitch();
++		for (int x = 0; x < cw; x++)
++			m = std::max<u32>(m, std::max<u32>(row[x * 4], std::max<u32>(row[x * 4 + 1], row[x * 4 + 2])));
++	}
++	dl->Unmap();
++	*out = m;
++	return true;
++}
++
 +GSTexture* GSDevice::Look(GSTexture* tex, const GSVector4& src_uv, const GSVector4& draw_rect)
 +{
 +	const int dst_width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
 +	const int dst_height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
 +	if (!tex || dst_width <= 0 || dst_height <= 0)
 +		return nullptr;
++
++	// A look or SMAA chosen again (or another look) starts afresh.
++	if (m_look_name != GSConfig.PS5Look)
++	{
++		m_look_name = GSConfig.PS5Look;
++		m_look_ok = 0;
++		m_look_dead = false;
++	}
++	if (m_smaa_on != GSConfig.PS5SMAA)
++	{
++		m_smaa_on = GSConfig.PS5SMAA;
++		m_smaa_ok = 0;
++		m_smaa_dead = false;
++	}
++	const bool want_smaa = GSConfig.PS5SMAA && !m_smaa_dead;
++	const bool want_look = !GSConfig.PS5Look.empty() && !m_look_dead;
++	if (!want_smaa && !want_look)
++		return nullptr;
++
 +	GSTexture* input = tex;
 +	if (src_uv.x != 0.0f || src_uv.y != 0.0f || src_uv.z != 1.0f || src_uv.w != 1.0f)
 +	{
@@ -4353,15 +4400,75 @@ index b3c8d65..0a3a4b5 100644
 +		StretchRect(tex, src_uv, m_look_in, GSVector4(m_look_in->GetRect()), ShaderConvert::COPY, Nearest);
 +		input = m_look_in;
 +	}
-+	if (!m_look || m_look->GetWidth() != dst_width || m_look->GetHeight() != dst_height)
++
++	const auto ensure = [this](GSTexture*& t, int w, int h) {
++		if (t && t->GetWidth() == w && t->GetHeight() == h)
++			return true;
++		delete t;
++		t = CreateSurface(GSTexture::RenderTarget, w, h, 1, GSTexture::Format::Color);
++		return t != nullptr;
++	};
++	// Whether a picture made just now is black while the one it was made from is not (only the first
++	// few are looked at: a read back stops the work for a moment).
++	const auto black = [this](GSTexture* from, GSTexture* made, u32& ok) {
++		if (ok >= 3)
++			return false;
++		u32 in_max = 0, out_max = 0;
++		if (!PS5MiddleMax(this, from, &in_max) || !PS5MiddleMax(this, made, &out_max))
++			return false;
++		if (in_max <= 8) // the game's own is black: nothing to tell
++			return false;
++		if (out_max > 0)
++		{
++			ok++;
++			if (ok == 1)
++				Console.WriteLn("Look: the first picture is not black (largest colour %u of %u in the middle)", out_max, in_max);
++			return false;
++		}
++		return true;
++	};
++
++	if (want_smaa)
 +	{
-+		delete m_look;
-+		m_look = CreateSurface(GSTexture::RenderTarget, dst_width, dst_height, 1, GSTexture::Format::Color);
-+		if (!m_look)
++		// SMAA before the look: at the game picture's own size when a look follows, else at the
++		// picture's place on the screen (its last pass is the size asked for).
++		const int aw = want_look ? input->GetWidth() : dst_width;
++		const int ah = want_look ? input->GetHeight() : dst_height;
++		if (ensure(m_look_aa, aw, ah) && DoLook(input, m_look_aa, m_look_frames, 1))
++		{
++			if (black(input, m_look_aa, m_smaa_ok))
++			{
++				m_smaa_dead = true;
++				Console.Warning("Look: SMAA drew only black on this device: switched off");
++				Host::AddKeyedOSDMessage("PS5SMAA", "SMAA drew only black here, so it is switched off. Turn it off and on in Settings > Picture to try again.", Host::OSD_WARNING_DURATION);
++				if (!want_look)
++					return nullptr;
++			}
++			else
++			{
++				if (!want_look)
++				{
++					m_look_frames++;
++					return m_look_aa;
++				}
++				input = m_look_aa;
++			}
++		}
++		else if (!want_look)
 +			return nullptr;
 +	}
++
++	if (!ensure(m_look, dst_width, dst_height))
++		return nullptr;
 +	if (!DoLook(input, m_look, m_look_frames++))
 +		return nullptr;
++	if (black(input, m_look, m_look_ok))
++	{
++		m_look_dead = true;
++		Console.Warning("Look: %s drew only black on this device: switched off", GSConfig.PS5Look.c_str());
++		Host::AddKeyedOSDMessage("PS5Look", "The look drew only black here, so it is switched off. Choose it again in Settings > Picture to try again.", Host::OSD_WARNING_DURATION);
++		return nullptr;
++	}
 +	return m_look;
 +}
 +
@@ -4393,7 +4500,7 @@ index b3c8d65..0a3a4b5 100644
 +
 +void GSDevice::PS5PictureReset()
 +{
-+	for (GSTexture** t : {&m_ofg_made, &m_nis, &m_nis_in, &m_look, &m_look_in, &m_side[0], &m_side[1]})
++	for (GSTexture** t : {&m_ofg_made, &m_nis, &m_nis_in, &m_look, &m_look_in, &m_look_aa, &m_side[0], &m_side[1]})
 +	{
 +		delete *t;
 +		*t = nullptr;
@@ -4404,7 +4511,7 @@ index b3c8d65..0a3a4b5 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8ea..50a0f6f 100644
+index 421f8ea..9d054ee 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -4416,7 +4523,7 @@ index 421f8ea..50a0f6f 100644
  	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
  
  	WindowInfo m_window_info;
-@@ -1504,6 +1506,33 @@ protected:
+@@ -1504,6 +1506,43 @@ protected:
  	GSTexture* m_current = nullptr;
  	GSTexture* m_cas = nullptr;
  	GSTexture* m_blur = nullptr;
@@ -4445,12 +4552,22 @@ index 421f8ea..50a0f6f 100644
 +	GSTexture* m_nis_in = nullptr;
 +	GSTexture* m_look = nullptr;
 +	GSTexture* m_look_in = nullptr;
++	GSTexture* m_look_aa = nullptr; // SMAA's picture (slot 1 of DoLook), before the look
++	// The first pictures of a look, and of SMAA, are read back (a small part of the middle) to see that
++	// they are not black while the game's own is: a look that is would leave the screen black, so
++	// it is switched off, said on the screen and in the log, and not tried again until it is chosen again.
++	std::string m_look_name; // the look the counts below are of
++	u32 m_look_ok = 0; // pictures checked and not black
++	bool m_look_dead = false;
++	bool m_smaa_on = false;
++	u32 m_smaa_ok = 0;
++	bool m_smaa_dead = false;
 +	GSTexture* m_side[2] = {};
 +	u64 m_look_frames = 0;
  	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
  	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
  	GSTexture* m_ds_as_rt_orig = nullptr; ///< Where the depth as color came from
-@@ -1529,6 +1558,30 @@ protected:
+@@ -1529,6 +1568,30 @@ protected:
  	/// Applies Gaussian blur and writes to the destination texture.
  	void DoGaussianBlur(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, GSTexture* tempTex);
  
@@ -4474,14 +4591,14 @@ index 421f8ea..50a0f6f 100644
 +	virtual bool DoNIS(GSTexture* sTex, GSTexture* dTex, float sharpness) { return false; }
 +	/// PS5: the look (a libretro preset, ps5_slang.h) loaded from `path` ("" drops it); false when
 +	/// it cannot be, and `error` says why.
-+	virtual bool LoadLook(const std::string& path, std::string* error) { return false; }
++	virtual bool LoadLook(const std::string& path, std::string* error, int slot = 0) { return false; }
 +	/// PS5: the look drawn from the whole of sTex into the whole of dTex (the picture's place).
-+	virtual bool DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame) { return false; }
++	virtual bool DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame, int slot = 0) { return false; }
 +
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1738,6 +1791,85 @@ public:
+@@ -1738,6 +1801,85 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -4568,7 +4685,7 @@ index 421f8ea..50a0f6f 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc..201209b 100644
+index 35ab6fc..78ef08d 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -4939,7 +5056,7 @@ index 35ab6fc..201209b 100644
 +				{
 +					if (GSConfig.PS5SidePicture)
 +						side = g_gs_device->SidePicture(shown_tex, shown_uv, draw_rect);
-+					if (!GSConfig.PS5Look.empty())
++					if (!GSConfig.PS5Look.empty() || GSConfig.PS5SMAA)
 +						look = g_gs_device->Look(shown_tex, shown_uv, draw_rect);
 +					last_shown_tex = shown_tex;
 +					last_shown_uv = shown_uv;
@@ -6958,7 +7075,7 @@ index 20c80b8..503d579 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 4230238..4f73818 100644
+index 4230238..37a73dc 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,8 @@ public:
@@ -7037,8 +7154,8 @@ index 4230238..4f73818 100644
 +	bool DoOpticalFlowMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time, u32 quality) final;
 +	bool DoMihawkGenMake(GSTexture* older, GSTexture* newer, GSTexture* out, float time) final;
 +	bool DoNIS(GSTexture* sTex, GSTexture* dTex, float sharpness) final;
-+	bool LoadLook(const std::string& path, std::string* error) final;
-+	bool DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame) final;
++	bool LoadLook(const std::string& path, std::string* error, int slot = 0) final;
++	bool DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame, int slot = 0) final;
 +	void PipelinesForGame(const std::string& serial) final;
 +	void PipelinesTick() final;
 +#endif
@@ -7170,10 +7287,10 @@ index 4230238..4f73818 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..055fc9f
+index 0000000..2c10faa
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1212 @@
+@@ -0,0 +1,1220 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -7237,10 +7354,15 @@ index 0000000..055fc9f
 +	u32 mihawk_w = 0, mihawk_h = 0;
 +
 +	PS5SlangRunner::Device chain_device;
-+	PS5Slang::Preset preset;
-+	std::unique_ptr<PS5SlangRunner::Runner> chain;
-+	std::string chain_path; // what is loaded ("" nothing)
-+	std::string chain_failed; // what failed to load, not tried again until the setting changes
++	// Slot 0 is the look, slot 1 SMAA (run before the look): each its own preset and chain.
++	struct LookSlot
++	{
++		PS5Slang::Preset preset;
++		std::unique_ptr<PS5SlangRunner::Runner> chain;
++		std::string chain_path; // what is loaded ("" nothing)
++		std::string chain_failed; // what failed to load, not tried again until the setting changes
++	};
++	LookSlot look_slot[2];
 +
 +	// paraLLEl-GS's pictures in its host memory, imported (PS5CopyHostPicture), by allocation id.
 +	struct HostImport
@@ -7274,7 +7396,8 @@ index 0000000..055fc9f
 +		vkDestroyBuffer(m_device, imp.buffer, nullptr);
 +		vkFreeMemory(m_device, imp.memory, nullptr);
 +	}
-+	m_ps5_tools->chain.reset();
++	for (PS5Tools::LookSlot& ls : m_ps5_tools->look_slot)
++		ls.chain.reset();
 +	m_ps5_tools->flow.Destroy();
 +	m_ps5_tools->nis.Destroy();
 +	if (m_ps5_tools->mihawk)
@@ -7640,26 +7763,27 @@ index 0000000..055fc9f
 +	return true;
 +}
 +
-+bool GSDeviceVK::LoadLook(const std::string& name, std::string* error)
++bool GSDeviceVK::LoadLook(const std::string& name, std::string* error, int slot)
 +{
 +	PS5Tools& t = Tools();
++	PS5Tools::LookSlot& ls = t.look_slot[slot ? 1 : 0];
 +	const std::string slang_root = Path::Combine(EmuFolders::Resources, "shaders/slang");
 +	const std::string path = name.empty() ? std::string() : (Path::IsAbsolute(name) ? name : Path::Combine(slang_root, name));
-+	if (path == t.chain_path && t.chain)
++	if (path == ls.chain_path && ls.chain)
 +		return true;
-+	if (!path.empty() && path == t.chain_failed)
++	if (!path.empty() && path == ls.chain_failed)
 +	{
 +		if (error)
 +			*error = "it did not load before";
 +		return false;
 +	}
-+	if (t.chain)
++	if (ls.chain)
 +	{
 +		ExecuteCommandBuffer(true, "look changed");
-+		t.chain.reset();
++		ls.chain.reset();
 +	}
-+	t.chain_path.clear();
-+	t.preset = PS5Slang::Preset();
++	ls.chain_path.clear();
++	ls.preset = PS5Slang::Preset();
 +	if (path.empty())
 +		return true;
 +
@@ -7673,10 +7797,10 @@ index 0000000..055fc9f
 +		options.allowedRoots.push_back(up);
 +	options.files.read = ReadPresetFile;
 +	std::string why;
-+	if (!PS5Slang::LoadPreset(path, options, t.preset, why))
++	if (!PS5Slang::LoadPreset(path, options, ls.preset, why))
 +	{
 +		ps5px_log("picture: the look %s cannot be used: %s", Path::GetFileName(path).data(), why.c_str());
-+		t.chain_failed = path;
++		ls.chain_failed = path;
 +		if (error)
 +			*error = why;
 +		return false;
@@ -7684,14 +7808,14 @@ index 0000000..055fc9f
 +
 +	// The lookup pictures (PNG), decoded.
 +	std::vector<std::vector<uint8_t>> lut_pixels;
-+	for (PS5Slang::Lut& lut : t.preset.luts)
++	for (PS5Slang::Lut& lut : ls.preset.luts)
 +	{
 +		RGBA8Image image;
 +		if (!image.LoadFromBuffer(lut.path.c_str(), lut.data.data(), lut.data.size()))
 +		{
 +			why = "its picture " + lut.name + " cannot be read";
 +			ps5px_log("picture: the look %s cannot be used: %s", Path::GetFileName(path).data(), why.c_str());
-+			t.chain_failed = path;
++			ls.chain_failed = path;
 +			if (error)
 +				*error = why;
 +			return false;
@@ -7707,38 +7831,39 @@ index 0000000..055fc9f
 +	t.chain_device.device = m_device;
 +	vkGetPhysicalDeviceMemoryProperties(m_physical_device, &t.chain_device.memory);
 +	t.chain_device.uniformAlign = std::max<VkDeviceSize>(m_device_properties.limits.minUniformBufferOffsetAlignment, 16);
-+	t.chain = std::make_unique<PS5SlangRunner::Runner>(t.chain_device, t.preset, g_vulkan_shader_cache->GetPipelineCache(true));
++	ls.chain = std::make_unique<PS5SlangRunner::Runner>(t.chain_device, ls.preset, g_vulkan_shader_cache->GetPipelineCache(true));
 +
 +	EndRenderPass();
 +	const auto compile = [](const std::string& glsl, bool vertex, size_t) -> VkShaderModule {
 +		return vertex ? g_vulkan_shader_cache->GetVertexShader(glsl) : g_vulkan_shader_cache->GetFragmentShader(glsl);
 +	};
-+	if (!t.chain->Load(GetCurrentCommandBuffer(), compile, lut_pixels))
++	if (!ls.chain->Load(GetCurrentCommandBuffer(), compile, lut_pixels))
 +	{
-+		why = t.chain->error;
++		why = ls.chain->error;
 +		ExecuteCommandBuffer(true, "look failed");
-+		t.chain.reset();
++		ls.chain.reset();
 +		ps5px_log("picture: the look %s cannot be used: %s", Path::GetFileName(path).data(), why.c_str());
-+		t.chain_failed = path;
++		ls.chain_failed = path;
 +		if (error)
 +			*error = why;
 +		return false;
 +	}
 +	// (The lookup pictures' uploads are in this command buffer: submitted before the first frame.)
 +	ExecuteCommandBuffer(true, "look loaded");
-+	t.chain_path = path;
-+	t.chain_failed.clear();
-+	ps5px_log("picture: the look %s: %zu passes, %zu pictures of its own, %zu settings", Path::GetFileName(path).data(), t.preset.passes.size(),
-+		t.preset.luts.size(), t.preset.parameters.size());
++	ls.chain_path = path;
++	ls.chain_failed.clear();
++	ps5px_log("picture: the look %s: %zu passes, %zu pictures of its own, %zu settings", Path::GetFileName(path).data(), ls.preset.passes.size(),
++		ls.preset.luts.size(), ls.preset.parameters.size());
 +	return true;
 +}
 +
-+bool GSDeviceVK::DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame)
++bool GSDeviceVK::DoLook(GSTexture* sTex, GSTexture* dTex, u64 frame, int slot)
 +{
-+	if (!LoadLook(GSConfig.PS5Look, nullptr))
++	if (!LoadLook(slot ? std::string("crux2/smaa.slangp") : GSConfig.PS5Look, nullptr, slot))
 +		return false;
 +	PS5Tools& t = Tools();
-+	if (!t.chain || !sTex || !dTex)
++	PS5Tools::LookSlot& ls = t.look_slot[slot ? 1 : 0];
++	if (!ls.chain || !sTex || !dTex)
 +		return false;
 +
 +	EndRenderPass();
@@ -7749,20 +7874,20 @@ index 0000000..055fc9f
 +	s->SetUseFenceCounter(GetCurrentFenceCounter());
 +
 +	const VkCommandBuffer cmd = GetCurrentCommandBuffer();
-+	if (!t.chain->RunFrame(cmd, s->GetImage(), s->GetView(), VK_FORMAT_R8G8B8A8_UNORM, static_cast<u32>(sTex->GetWidth()),
++	if (!ls.chain->RunFrame(cmd, s->GetImage(), s->GetView(), VK_FORMAT_R8G8B8A8_UNORM, static_cast<u32>(sTex->GetWidth()),
 +			static_cast<u32>(sTex->GetHeight()), static_cast<u32>(dTex->GetWidth()), static_cast<u32>(dTex->GetHeight()), frame))
 +	{
-+		ps5px_log("picture: the look stopped: %s", t.chain->error.c_str());
-+		t.chain_failed = t.chain_path;
++		ps5px_log("picture: the look stopped: %s", ls.chain->error.c_str());
++		ls.chain_failed = ls.chain_path;
 +		ExecuteCommandBuffer(true, "look stopped");
-+		t.chain.reset();
-+		t.chain_path.clear();
++		ls.chain.reset();
++		ls.chain_path.clear();
 +		InvalidateCachedState();
 +		return false;
 +	}
 +
 +	// The last pass's picture (the size of the place) into dTex.
-+	const PS5SlangRunner::Image& last = t.chain->Output();
++	const PS5SlangRunner::Image& last = ls.chain->Output();
 +	d->TransitionToLayout(GSTextureVK::Layout::CopyDst);
 +	d->SetUseFenceCounter(GetCurrentFenceCounter());
 +	PS5SlangRunner::Barrier(cmd, last.image, 0, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -11371,7 +11496,7 @@ index 255b6ea..be7ca63 100644
 +#endif
  } // namespace Patch
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 51c34b9..0fc7f9c 100644
+index 51c34b9..2f88eb7 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
 @@ -537,6 +537,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
@@ -11431,16 +11556,17 @@ index 51c34b9..0fc7f9c 100644
  		OpEqu(Dithering) &&
  		OpEqu(MaxAnisotropy) &&
  		OpEqu(SWExtraThreads) &&
-@@ -904,6 +918,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
+@@ -904,6 +918,9 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
  		OpEqu(Adapter) &&
  
  		OpEqu(HWDumpDirectory) &&
 +		OpEqu(PS5Look) &&
++		OpEqu(PS5SMAA) &&
 +		OpEqu(PS5SidePicture) &&
  		OpEqu(SWDumpDirectory));
  }
  
-@@ -1071,7 +1087,28 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1071,7 +1088,28 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  	SettingsWrapIntEnumEx(GSDumpCompression, "GSDumpCompression");
  	SettingsWrapIntEnumEx(HWDownloadMode, "HWDownloadMode");
  	SettingsWrapIntEnumEx(CASMode, "CASMode");
@@ -11469,16 +11595,17 @@ index 51c34b9..0fc7f9c 100644
  	SettingsWrapBitfieldEx(Dithering, "dithering_ps2");
  	SettingsWrapBitfieldEx(MaxAnisotropy, "MaxAnisotropy");
  	SettingsWrapBitfieldEx(SWExtraThreads, "extrathreads");
-@@ -1124,6 +1161,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1124,6 +1162,9 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  
  	SettingsWrapEntry(Adapter);
  	SettingsWrapEntry(HWDumpDirectory);
 +	SettingsWrapEntryEx(PS5Look, "Look");
++	SettingsWrapEntryEx(PS5SMAA, "SMAA");
 +	SettingsWrapEntryEx(PS5SidePicture, "SidePicture");
  	if (!HWDumpDirectory.empty() && !Path::IsAbsolute(HWDumpDirectory))
  		HWDumpDirectory = Path::Combine(EmuFolders::DataRoot, HWDumpDirectory);
  	SettingsWrapEntry(SWDumpDirectory);
-@@ -1369,7 +1408,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
+@@ -1369,7 +1410,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
  			LoadIPHelper(Mask, maskStr);
  			LoadIPHelper(Gateway, gatewayStr);
  			LoadIPHelper(DNS1, dns1Str);
