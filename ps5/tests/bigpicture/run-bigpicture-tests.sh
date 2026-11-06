@@ -24,7 +24,8 @@ mkdir -p "$work/fonts" "$work/shots"
 
 # The fonts the title draws with.
 cp "$root/vendor/pcsx2/bin/resources/fonts/Roboto-Regular.ttf" "$root/vendor/pcsx2/bin/resources/fonts/fa-solid-900.ttf" \
-    "$ps5/package/resources/fonts/Roboto-Bold.ttf" "$ps5/package/resources/fonts/Saira-ExtraBold.ttf" "$work/fonts/"
+    "$ps5/package/resources/fonts/Roboto-Bold.ttf" "$ps5/package/resources/fonts/Saira-ExtraBold.ttf" \
+    "$ps5/package/resources/fonts/NotoSansCJK-Subset.otf" "$work/fonts/"
 
 sources=("$here/preview.cpp" "$front"/bp_*.cpp "$imgui/src/imgui.cpp" "$imgui/src/imgui_draw.cpp" "$imgui/src/imgui_tables.cpp"
     "$imgui/src/imgui_widgets.cpp" "$imgui/src/imgui_freetype.cpp")

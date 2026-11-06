@@ -220,6 +220,7 @@ namespace PS5Host
 			// The font files, which ImGui reads from for as long as it has the fonts.
 			std::vector<u8> font_latin;
 			std::vector<u8> font_emoji;
+			std::vector<u8> font_cjk;
 		};
 
 		/// A test run (ps5/tools/run.sh): the launch found test-run.txt in the title folder. Read by
@@ -494,6 +495,18 @@ bool PS5Host::LoadFonts()
 	latin.exclude_ranges = {};
 	latin.face_name = nullptr;
 	latin.is_emoji_font = false;
+
+	// The letters of Japanese, Chinese and Korean game names (a subset of Noto Sans CJK, SIL OFL; made
+	// by tools/make-cjk-font.py): without them such a name is drawn as "?". Behind Roboto, so the
+	// Latin letters stay Roboto's. The interface does without them if the file is gone.
+	if (read("NotoSansCJK-Subset.otf", &s_state.font_cjk))
+	{
+		ImGuiManager::FontInfo& cjk = fonts.emplace_back();
+		cjk.data = s_state.font_cjk;
+		cjk.exclude_ranges = {};
+		cjk.face_name = nullptr;
+		cjk.is_emoji_font = false;
+	}
 
 	// The emoji of game titles and messages; the interface does without them if the file is gone.
 	if (read("Twemoji.Mozilla.ttf", &s_state.font_emoji))

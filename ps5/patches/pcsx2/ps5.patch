@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 da6bae1050843d47ef1a8c00a1708f0cfb9a0ff5.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 1ccd6a8dc3574771c138849039d71951a3a1c175.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -44,7 +44,7 @@ index b0c3945..220d859 100644
  endif()
  
 diff --git a/bin/resources/GameIndex.yaml b/bin/resources/GameIndex.yaml
-index 9699811..5a1b345 100644
+index 63f3262..f12454a 100644
 --- a/bin/resources/GameIndex.yaml
 +++ b/bin/resources/GameIndex.yaml
 @@ -2044,6 +2044,7 @@ SCAJ-20125:
@@ -87,7 +87,7 @@ index 9699811..5a1b345 100644
      getSkipCount: "GSC_NamcoGames"
  SCES-53247:
    name: "WRC Rally Evolved"
-@@ -70106,6 +70111,7 @@ SLUS-21059:
+@@ -70464,6 +70469,7 @@ SLUS-21059:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -95,7 +95,7 @@ index 9699811..5a1b345 100644
      getSkipCount: "GSC_NamcoGames"
  SLUS-21060:
    name: "WWE SmackDown! vs. RAW"
-@@ -70680,6 +70686,7 @@ SLUS-21160:
+@@ -71038,6 +71044,7 @@ SLUS-21160:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -5654,7 +5654,7 @@ index 77a28df..0b3229c 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 567d2ca..eb9bfb3 100644
+index 20c80b8..fe1e928 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -6500,7 +6500,7 @@ index 567d2ca..eb9bfb3 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6149,7 +6617,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6151,7 +6619,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -6525,7 +6525,7 @@ index 567d2ca..eb9bfb3 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6382,6 +6867,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6384,6 +6869,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  				(FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth));
  	}
  
@@ -6588,7 +6588,7 @@ index 567d2ca..eb9bfb3 100644
  	if (draw_rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6518,6 +7059,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6520,6 +7061,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
@@ -6598,7 +6598,7 @@ index 567d2ca..eb9bfb3 100644
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6540,6 +7084,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6542,6 +7086,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -6612,7 +6612,7 @@ index 567d2ca..eb9bfb3 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-@@ -6752,9 +7303,208 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6754,9 +7305,208 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -6821,7 +6821,7 @@ index 567d2ca..eb9bfb3 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6765,7 +7515,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6767,7 +7517,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -6830,7 +6830,7 @@ index 567d2ca..eb9bfb3 100644
  
  	if (full_barrier)
  	{
-@@ -6775,11 +7525,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6777,11 +7527,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -6851,7 +6851,7 @@ index 567d2ca..eb9bfb3 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6791,8 +7550,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6793,8 +7552,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{

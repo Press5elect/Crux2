@@ -487,8 +487,10 @@ Added:
   file written by hand is read as before, and its shares keep their names).
 
 Changed:
-- **Built on PCSX2 v2.9.152** (was v2.9.150): out-of-bounds reads fixed when replacement textures
-  load, and LZMA (7-Zip's) 26.05.
+- **Built on PCSX2 v2.9.155** (was v2.9.150): out-of-bounds reads fixed when replacement textures
+  load, a Vulkan fix for the feedback-loop layout (a texture is marked changed when it switches),
+  more Japanese game serials and corrected titles, a newer controller database, and LZMA
+  (7-Zip's) 26.05.
 - **Games on a network share are read faster**: a share's connection asks for large buffers
   (up to 4 MiB) before it connects. The console's small default window held a share to about
   18 MB/s whatever the link.

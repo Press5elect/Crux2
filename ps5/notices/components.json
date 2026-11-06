@@ -947,6 +947,23 @@
 			}
 		},
 		{
+			"id": "noto-sans-cjk-subset",
+			"name": "Noto Sans CJK JP Regular, a subset (the letters of Japanese, Chinese and Korean game names)",
+			"licence": "SIL OFL 1.1",
+			"copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/)",
+			"modifications": "a subset: the letters Shift-JIS, GB 2312, Big5 and KS X 1001 can write, kana and CJK punctuation, made by ps5/tools/make-cjk-font.py from the fonts-noto-cjk package's NotoSansCJK-Regular.ttc (face 0); no outline changed, the Latin letters and the rest left out",
+			"texts": {
+				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
+			},
+			"artifacts": [
+				"resources/fonts/NotoSansCJK-Subset.otf"
+			],
+			"source": {
+				"url": "https://github.com/notofonts/noto-cjk",
+				"revision": "Version 2.004"
+			}
+		},
+		{
 			"id": "saira-extrabold",
 			"name": "Saira ExtraBold (the letters of the title's name)",
 			"licence": "SIL OFL 1.1",
