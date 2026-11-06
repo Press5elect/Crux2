@@ -961,17 +961,17 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.", GS, "fxaa", false));
+	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games. For SMAA, choose it under Look. For supersampling (SSAA), raise the internal resolution, or use paraLLEl-GS with 4 or more samples.", GS, "fxaa", false));
 	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",
-		"Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain.",
+		"Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain. SMAA is an anti-aliasing look (sharper edges than FXAA, a little dearer); a look is one preset, so SMAA replaces a CRT look.",
 		GS, "Look", "",
 		{"None", "CRT (fast)", "CRT (fastest)", "CRT (finest; demanding at 4K)", "CRT through a composite signal", "Composite signal",
-			"S-Video signal", "Film grain", "Warmer colours"},
+			"S-Video signal", "Film grain", "Warmer colours", "SMAA (anti-aliasing)"},
 		{"", "crt/crt-guest-advanced-fast.slangp", "crt/crt-guest-advanced-fastest.slangp", "crt/crt-guest-advanced.slangp",
 			"crux2/crt-guest-advanced-composite.slangp", "crux2/composite.slangp", "crux2/s-video.slangp", "crux2/film-grain.slangp",
-			"crux2/colour.slangp"}));
+			"crux2/colour.slangp", "crux2/smaa.slangp"}));
 	addRows(rows, be->extraRows("picture", layer));
 	rows.push_back(toggle("Shade boost", "Enables brightness/contrast/gamma/saturation adjustment.", GS, "ShadeBoost", false));
 	rows.push_back(when(range("Brightness", "Adjusts brightness. 50 is normal.", GS, "ShadeBoost_Brightness", 50, 1, 100, 1, ""), GS, "ShadeBoost", false));
@@ -1245,8 +1245,9 @@ Page advancedPage(int layer)
 		"Creates a backup copy of a save state if it already exists when the save is created. The backup copy has a "
 			".backup suffix", CORE, "BackupSavestate", true, A));
 	rows.push_back(listOf("Save a state by itself",
-		"Automatically saves the game's state at this interval. Load it from the quick menu with \"Load the "
-			"auto-save\". The game may pause briefly while saving.",
+		"Automatically saves the game's state to the console's drive at this interval. Load it from the quick menu with "
+			"\"Load the auto-save\". The game may pause briefly while saving. (Sleep-safe saving keeps its own five-minute "
+			"state in memory.)",
 		"PS5", "AutoSaveMinutes", 0, {"Off", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes"}, {0, 2, 5, 10, 15}, A));
 	rows.push_back(toggle("Undo for a loaded state",
 		"Keeps the game's current state before you load a save state, so you can undo the load from the quick menu.", "PS5",

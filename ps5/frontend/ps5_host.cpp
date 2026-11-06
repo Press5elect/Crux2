@@ -220,6 +220,7 @@ namespace PS5Host
 			// The font files, which ImGui reads from for as long as it has the fonts.
 			std::vector<u8> font_latin;
 			std::vector<u8> font_emoji;
+			std::vector<u8> font_cjk;
 		};
 
 		/// A test run (ps5/tools/run.sh): the launch found test-run.txt in the title folder. Read by
@@ -494,6 +495,18 @@ bool PS5Host::LoadFonts()
 	latin.exclude_ranges = {};
 	latin.face_name = nullptr;
 	latin.is_emoji_font = false;
+
+	// The letters of Japanese, Chinese and Korean game names (a subset of Noto Sans CJK, SIL OFL; made
+	// by tools/make-cjk-font.py): without them such a name is drawn as "?". Behind Roboto, so the
+	// Latin letters stay Roboto's. The interface does without them if the file is gone.
+	if (read("NotoSansCJK-Subset.otf", &s_state.font_cjk))
+	{
+		ImGuiManager::FontInfo& cjk = fonts.emplace_back();
+		cjk.data = s_state.font_cjk;
+		cjk.exclude_ranges = {};
+		cjk.face_name = nullptr;
+		cjk.is_emoji_font = false;
+	}
 
 	// The emoji of game titles and messages; the interface does without them if the file is gone.
 	if (read("Twemoji.Mozilla.ttf", &s_state.font_emoji))
@@ -1000,6 +1013,7 @@ void PS5Host::CPUThreadEntryPoint()
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - exit_started).count(), sound_and_disc, machine, graphics,
 		settings, files, emulator);
 	ps5px_log("shut down");
+	ps5px_log_flush();
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1381,6 +1395,7 @@ void Host::OnVMDestroyed()
 	}
 	// (For the notice after a crash: what the log says from here on is not while a game was loaded.)
 	ps5px_log("game: closed");
+	ps5px_log_checkpoint();
 	// The memory cards are whole on the disk again: backed up, when that is asked for and they changed.
 	PS5Jobs::GameClosed();
 	// Closed in the title: sleep-safe saving's note goes (nothing to go on with at the next start).
@@ -1413,6 +1428,7 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 	if (!disc_path.empty() || !title.empty())
 	{
 		ps5px_log("game: %s [%s, CRC %08X] %s", title.c_str(), disc_serial.c_str(), disc_crc, disc_path.c_str());
+		ps5px_log_checkpoint();
 		// What its picture costs: the settings that decide most of the GPU's work, as this game has them
 		// (its own options and the game database's fixes applied).
 		static constexpr const char* blending[] = {"minimum", "basic", "medium", "high", "full", "maximum"};

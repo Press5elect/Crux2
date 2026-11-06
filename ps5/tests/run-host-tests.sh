@@ -145,6 +145,10 @@ else
     echo "== virtual file layer: skipped (set LIBSMB2_PREFIX to a libsmb2 built for the PC)"
 fi
 
+echo "== network shares (network.cfg as the settings read and write it)"
+c++ -std=c++20 -O1 -g -Wall -Wno-unused-parameter -fsanitize=address,undefined -DPS5_SHARES_HOST_TEST -I "$ps5/frontend" \
+    "$tests/shares_test.cpp" "$ps5/frontend/ps5_shares.cpp" -o "$work/shares_test" && "$work/shares_test" "$work" || status=1
+
 echo "== no setting read through Host while the settings' lock is held"
 python3 "$tests/check-settings-lock.py" || status=1
 

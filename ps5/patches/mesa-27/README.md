@@ -33,3 +33,13 @@ the PS epilog; the SMEM cache line size used for uploads; and addrlib 10.9.
 
 Mesa's licences apply to all of them (the PS5 winsys is MIT, like the code around it;
 PS5CEMU-HAR's patches are published under GPL-3.0). Crux2's own changes: Crux2 by Press5elect.
+
+Crux2 v1.0.19 adds two of PS5_Mesa's own RADV fixes (Mihawk), newer than its pin:
+`0018-radv-ps5-back-a-large-buffer-with-several-direct-memory-ranges.patch` (PS5_Mesa
+53cc83ff82b, as OGBox 0.1.28 carries it, its one conflict against `0001-diagnostic-breadcrumbs`
+merged): a large GPU buffer is backed by several direct-memory ranges when no single free range is
+big enough, instead of failing; and `0019-radv-ps5-a-buffer-piece-is-mapped-only-where-nothing-else-is.patch`
+(PS5_Mesa 249fe49d2d8): each such piece is placed only where nothing else is mapped. PS5_Mesa's
+f5610fe2709 (a freed buffer kept until the GPU has run what was submitted before) is not taken:
+`0007` already does that for buffers, and the two do not merge; it adds sparse ranges, which
+PCSX2's renderer does not use.

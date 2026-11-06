@@ -31,6 +31,8 @@ struct Files
 /// so nothing of a long line is lost. A file that is not there: no lines. Only the file's last
 /// `bytes` are read, so a log of any size costs the same.
 std::vector<std::string> Tail(const std::string& path, size_t most = 400, size_t width = 150, size_t bytes = 256 * 1024);
+/// The same of a log's text (v1.0.19: a boot log kept in memory only).
+std::vector<std::string> TailText(const std::string& text, size_t most = 400, size_t width = 150);
 
 /// How the run before this one ended, from its log.
 struct Ending

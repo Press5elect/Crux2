@@ -244,8 +244,8 @@
 			"copyright": "BlackBearReloaded",
 			"modifications": "this title's ID",
 			"texts": {
-				"ps5-native-app-boilerplate-LICENSE.txt": "../ps5-native-app-boilerplate/LICENSE",
-				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "../ps5-native-app-boilerplate/THIRD_PARTY_NOTICES.md"
+				"ps5-native-app-boilerplate-LICENSE.txt": "ps5/elevation/LICENSE",
+				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "ps5/elevation/THIRD_PARTY_NOTICES.md"
 			},
 			"artifacts": [
 				"sandbox-elevator.elf",
@@ -658,7 +658,7 @@
 			"copyright": "Samuel Ugochukwu",
 			"modifications": "none",
 			"texts": {
-				"plutosvg-LICENSE.txt": ".deps/src/plutosvg/LICENSE"
+				"plutosvg-LICENSE.txt": ".deps/src/plutosvg-upstream/LICENSE"
 			},
 			"artifacts": [
 				"eboot.bin"
@@ -944,6 +944,40 @@
 			"source": {
 				"url": "https://github.com/googlefonts/roboto-classic",
 				"revision": "Version 3.015"
+			}
+		},
+		{
+			"id": "smaa",
+			"name": "SMAA, Enhanced Subpixel Morphological Anti-Aliasing (resources/shaders/slang/anti-aliasing/shaders/smaa/)",
+			"licence": "MIT (SMAA.hlsl and the lookup pictures); Unlicense (the three pass files)",
+			"copyright": "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez",
+			"modifications": "none: copied unchanged from libretro's slang-shaders; the preset that runs them (crux2/smaa.slangp) is Crux2's own",
+			"texts": {
+				"SMAA-LICENSE.txt": "ps5/licenses/SMAA-LICENSE.txt"
+			},
+			"artifacts": [
+				"resources/shaders/slang/anti-aliasing/"
+			],
+			"source": {
+				"url": "https://github.com/libretro/slang-shaders (anti-aliasing/shaders/smaa); original: https://github.com/iryoku/smaa",
+				"revision": "3685eda59ffd2ebe1b12cc4640581dc23552ce88"
+			}
+		},
+		{
+			"id": "noto-sans-cjk-subset",
+			"name": "Noto Sans CJK JP Regular, a subset (the letters of Japanese, Chinese and Korean game names)",
+			"licence": "SIL OFL 1.1",
+			"copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/)",
+			"modifications": "a subset: the letters Shift-JIS, GB 2312, Big5 and KS X 1001 can write, kana and CJK punctuation, made by ps5/tools/make-cjk-font.py from the fonts-noto-cjk package's NotoSansCJK-Regular.ttc (face 0); no outline changed, the Latin letters and the rest left out",
+			"texts": {
+				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
+			},
+			"artifacts": [
+				"resources/fonts/NotoSansCJK-Subset.otf"
+			],
+			"source": {
+				"url": "https://github.com/notofonts/noto-cjk",
+				"revision": "Version 2.004"
 			}
 		},
 		{
