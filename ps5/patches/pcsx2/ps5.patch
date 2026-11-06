@@ -3950,10 +3950,20 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..a260958 100644
+index b3c8d65..51d678b 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-@@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
+@@ -17,6 +17,9 @@
+ #include "common/Threading.h"
+ 
+ #include "imgui.h"
++#ifdef __PROSPERO__
++#include "ps5_platform.h"
++#endif
+ 
+ #include <algorithm>
+ #include <ostream>
+@@ -1012,6 +1015,11 @@ void GSDevice::ClearCurrent()
  	delete m_target_tmp;
  	delete m_cas;
  	delete m_blur;
@@ -3965,7 +3975,7 @@ index b3c8d65..a260958 100644
  
  	m_merge = nullptr;
  	m_weavebob = nullptr;
-@@ -1022,6 +1027,15 @@ void GSDevice::ClearCurrent()
+@@ -1022,6 +1030,15 @@ void GSDevice::ClearCurrent()
  	m_blur = nullptr;
  }
  
@@ -3981,7 +3991,7 @@ index b3c8d65..a260958 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1445,528 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1448,548 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4415,7 +4425,16 @@ index b3c8d65..a260958 100644
 +			return false;
 +		u32 in_max = 0, out_max = 0;
 +		if (!PS5MiddleMax(this, from, &in_max) || !PS5MiddleMax(this, made, &out_max))
++		{
++#ifdef __PROSPERO__
++			ps5px_log("look check: the pictures could not be read back");
++#endif
 +			return false;
++		}
++#ifdef __PROSPERO__
++		ps5px_log("look check: game picture %dx%d largest colour %u, made picture %dx%d largest colour %u (check %u of 3)", from->GetWidth(),
++			from->GetHeight(), in_max, made->GetWidth(), made->GetHeight(), out_max, ok + 1);
++#endif
 +		if (in_max <= 8) // the game's own is black: nothing to tell
 +			return false;
 +		if (out_max > 0)
@@ -4461,7 +4480,18 @@ index b3c8d65..a260958 100644
 +	if (!ensure(m_look, dst_width, dst_height))
 +		return nullptr;
 +	if (!DoLook(input, m_look, m_look_frames++))
++	{
++#ifdef __PROSPERO__
++		if (m_look_frames <= 4)
++			ps5px_log("look: the look could not be run on frame %llu", static_cast<unsigned long long>(m_look_frames));
++#endif
 +		return nullptr;
++	}
++#ifdef __PROSPERO__
++	if (m_look_frames <= 3)
++		ps5px_log("look: frame %llu made, %dx%d from %dx%d", static_cast<unsigned long long>(m_look_frames), m_look->GetWidth(), m_look->GetHeight(),
++			input->GetWidth(), input->GetHeight());
++#endif
 +	if (black(input, m_look, m_look_ok))
 +	{
 +		m_look_dead = true;
