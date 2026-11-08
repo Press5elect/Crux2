@@ -3367,6 +3367,51 @@ int main(int argc, char** argv)
 		h.backend.setInt(0, "PS5UI", "SplashKind", kind);
 	}
 	bp::initialize(&h.backend);
+	if (mode == "dump-settings")
+	{
+		// Every row of every settings page (the shared pages and a game's own), as JSON on stdout, for
+		// ps5/tools/settings-text.py: what the preview's Backend adds stands in for the console's rows.
+		const auto json = [](const std::string& text) {
+			std::string out = "\"";
+			for (const char c : text)
+			{
+				if (c == '"' || c == '\\')
+					out += '\\';
+				if (c == '\n')
+					out += "\\n";
+				else
+					out += c;
+			}
+			return out + "\"";
+		};
+		static const char* const KINDS[] = {"heading", "bool", "intlist", "floatlist", "stringlist", "intrange", "floatrange",
+			"combo", "action", "info", "bind"};
+		std::printf("[\n");
+		bool first = true;
+		for (const bool forGame : {false, true})
+		{
+			for (const bp::Page& page : bp::settingsPages(forGame))
+			{
+				std::string heading;
+				for (const bp::Option& o : page.rows)
+				{
+					if (o.kind == bp::Option::Heading)
+						heading = o.label;
+					std::printf("%s{\"pages\": %s, \"page\": %s, \"heading\": %s, \"kind\": \"%s\", \"section\": %s, "
+								"\"key\": %s, \"label\": %s, \"desc\": %s, \"flags\": %u, \"names\": [",
+						first ? "" : ",\n", forGame ? "\"game\"" : "\"shared\"", json(page.name).c_str(),
+						json(o.kind == bp::Option::Heading ? "" : heading).c_str(), KINDS[o.kind], json(o.section).c_str(),
+						json(o.key).c_str(), json(o.label).c_str(), json(o.desc).c_str(), o.flags);
+					for (size_t i = 0; i < o.names.size(); i++)
+						std::printf("%s%s", i ? ", " : "", json(o.names[i]).c_str());
+					std::printf("]}");
+					first = false;
+				}
+			}
+		}
+		std::printf("\n]\n");
+		return 0;
+	}
 	if (mode == "shots")
 	{
 		if (argc < 4)

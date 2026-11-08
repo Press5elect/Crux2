@@ -1,0 +1,1996 @@
+# Crux2 - every setting's words, for editing by hand (ps5/tools/settings-text.py bakes it in).
+# Change any name, label or desc; reorder rows and headings; move a row's entry to another heading or
+# page. Never change an id. Rows marked dynamic are built from data and their text is not from here.
+# A desc longer than about 120 characters scrolls sideways while the row is focused.
+pages:
+  - page: interface
+    name: Interface
+    headings:
+      - heading: behaviour
+        label: BEHAVIOUR
+        rows:
+          - id: PS5UI.SettingsLevel
+            label: Settings shown
+            desc: "How many settings are shown. Normal covers what most people need, Advanced adds finer options, and Expert shows everything, including options that can stop games from working. Press Triangle anywhere in Settings to switch."
+            kind: intlist
+            choices: [Normal, Advanced, Expert]
+          - id: UI.PauseOnControllerDisconnection
+            label: Pause when a controller disconnects
+            desc: Pauses the emulator when a controller with bindings is disconnected.
+          - id: EmuCore.WarnAboutUnsafeSettings
+            label: Warn about unsafe settings
+            desc: Displays warnings when settings are enabled which may break games.
+          - id: PS5UI.SwapConfirm
+            label: "Circle chooses, Cross goes back"
+            desc: "Swaps the Cross and Circle buttons in all menus, as on Japanese consoles."
+      - heading: appearance
+        label: APPEARANCE
+        rows:
+          - id: PS5UI.Look
+            label: Skin
+            desc: "Changes the colours and style of the interface. Carbon uses a black background, which suits OLED screens."
+            kind: intlist
+            choices: [Crux, Midnight, Ember, Moss, Neon, Carbon, Acrylic (Frosted glass), Brutal (Neo-brutalism), Clay (Neumorphism), Tiles (Flat), Gloss (Skeuomorphic), Classic (Bevelled desktop), Blueprint (Wireframe), Hazard (Sci-fi console), Candy (Playful pastel), Contrast (High contrast), Pixel (8-bit pixel art · after NES.css), Soft (Modern soft · after Mantine), Daisy (Clean and customisable · after daisyUI), Pico (Minimal and classless · after Pico.css), Enterprise (Structured enterprise · after Ant Design), Chakra (Modern and accessible · after Chakra UI), Fresh (Modern flat · after Nuxt UI), Neutral (Neutral modern · after Shoelace), Material (Material Design · after Propeller), Humane (Clean and readable · after Semantic UI), Standard (General purpose · after Bootstrap 5), Pill (High-contrast dashboard · after Preline UI), Admin (Dark admin · after Flowbite), Friendly (Friendly and soft · after Bulma), Crisp (Minimal and square · after UIkit), Layers (Material Design · after Materialize), Utility (Utilitarian · after Foundation), Sketch (Hand-drawn paper · after PaperCSS), Featherweight (Ultra-light · after Milligram), Code (Developer tools · after Primer)]
+          - id: PS5UI.Accent
+            label: Accent colour
+            desc: The colour used to highlight the selected item and switched-on options.
+            kind: intlist
+            choices: ["The skin's own", Blue, Orange, Green, Teal, Violet, Magenta, Red]
+          - id: PS5UI.Backdrop
+            label: Background
+            desc: "What is shown behind the menus: a still or animated background, the selected game's artwork, or your own pictures from the \"backgrounds\" folder."
+            kind: intlist
+            choices: ["The skin's own", Still, Aurora, Waves, Sparks, Horizon, Dot matrix, Cover colours, "The game's picture", My pictures]
+          - id: PS5UI.WallEvery
+            label: "My pictures: each stays for"
+            desc: How long each of your pictures is shown before the next one.
+            kind: intlist
+            choices: ["30 seconds", "1 minute", "2 minutes", "5 minutes", "15 minutes", "1 hour"]
+          - id: PS5UI.WallDim
+            label: "My pictures: made darker by"
+            desc: Darkens your pictures so the text on top of them stays readable.
+            kind: intlist
+            choices: [Nothing, "25%", "40%", "50%", "60%", "75%"]
+          - id: "action:my-pictures-look-into-the-folder-again"
+            label: "My pictures: look into the folder again"
+            desc: Checks the folder again for new pictures.
+            kind: action
+          - id: PS5UI.Motion
+            label: Motion
+            desc: "How much the interface animates. All: animated background and sliding menus. Less: fades only. None: no animation."
+            kind: intlist
+            choices: [All, Less, None]
+          - id: PS5UI.Splash
+            label: Start-up animation
+            desc: Plays the animated logo when Crux2 starts. Press any button to skip it.
+          - id: PS5UI.SplashKind
+            label: Which start-up
+            desc: Chooses which of the four start-up animations plays. Random picks a different one each time.
+            kind: intlist
+            choices: [Another one each start, Strike, Unfold, Spin, Slash]
+          - id: PS5UI.InterfaceSize
+            label: Interface size
+            desc: Makes the whole interface smaller so more fits on screen.
+            kind: intlist
+            choices: ["100%", "90%", "80%", "70%"]
+          - id: PS5UI.TextSize
+            label: Text size
+            desc: Makes the text larger or smaller without changing the rest of the interface.
+            kind: intlist
+            choices: [Smallest, Smaller, Normal, Larger, Largest]
+          - id: PS5UI.HighContrast
+            label: High contrast
+            desc: Makes text brighter and outlines stronger.
+          - id: PS5UI.ColourBlind
+            label: Colours for colour blindness
+            desc: Uses blue and orange instead of green and red to show success and failure.
+      - heading: care-for-the-screen
+        label: CARE FOR THE SCREEN
+        rows:
+          - id: PS5UI.IdleDim
+            label: Go dark when nothing is pressed
+            desc: "Dims the screen after this long without input, then turns it black. Press any button to wake it."
+            kind: intlist
+            choices: [Never, After 1 minute, After 2 minutes, After 3 minutes, After 5 minutes, After 10 minutes]
+          - id: PS5UI.ScreenSaver
+            label: Then the black screen with the mark
+            desc: "Shows a black screen with a moving logo after the screen dims. Off: the screen only dims."
+          - id: PS5UI.PixelShift
+            label: Move everything a little
+            desc: Moves the whole picture by a few pixels every couple of minutes to reduce the risk of burn-in on OLED screens.
+          - id: PS5UI.HintFade
+            label: Fade the hints
+            desc: Fades the button hints at the bottom of the screen when nothing has been pressed for a while.
+          - id: PS5UI.GameDim
+            label: Darken the game when nothing is pressed
+            desc: Dims the game after this long without input. Pressing any button brings it back.
+            kind: intlist
+            choices: [Never, After 5 minutes, After 10 minutes, After 15 minutes, After 30 minutes]
+      - heading: sound
+        label: SOUND
+        rows:
+          - id: PS5.BackgroundSound
+            label: Music
+            desc: "Plays your own music in the menus. Put WAV, MP3, OGG or FLAC files in the \"music\" folder."
+          - id: "action:next-track"
+            label: Next track
+            kind: action
+          - id: PS5.StartupSound
+            label: Start-up sound
+            desc: Plays a sound with the start-up animation. Put your own startup.wav in the title folder to replace it.
+  - page: game-list
+    name: Game List
+    headings:
+      - heading: game-scanning
+        label: GAME SCANNING
+        rows:
+          - id: "action:scan-for-games"
+            label: Scan for games
+            desc: "Looks for new games in the games folder, on USB drives and on network shares."
+            kind: action
+          - id: "action:scan-again-from-nothing"
+            label: Scan again from nothing
+            desc: "Rescans all game files, not just new ones. Use it if a game shows the wrong title. Can take a while on a network share."
+            kind: action
+      - heading: the-list
+        label: THE LIST
+        rows:
+          - id: PS5UI.View
+            label: Library view
+            desc: How games are shown in the library. You can also switch views with the touch pad.
+            kind: intlist
+            choices: [Shelves, Grid, List, Flow, Bookcase, Table, Showcase, Wheel, Wall, Discs]
+          - id: PS5UI.HeroPlay
+            label: A picture of play behind the shelves
+            desc: Shows a screenshot of the selected game behind the shelves.
+          - id: PS5UI.GroupDiscs
+            label: Group the discs of a game
+            desc: Shows a game that has several discs as one entry. It starts from the disc you played last.
+          - id: UI.PreferEnglishGameList
+            label: English titles
+            desc: "For games with both a title in the game's native language and one in English, prefer the English title."
+          - id: "action:fetch-the-games-pictures"
+            label: "Fetch the games' pictures"
+            desc: "Downloads title screens and screenshots for your games from libretro's collection."
+            kind: action
+      - heading: where-games-are
+        label: WHERE GAMES ARE
+        rows:
+          - id: PS5.USBDrives
+            label: USB drives
+            desc: Shows a USB tab for games in a folder named Crux2 or PS2 on a USB drive.
+          - id: PS5.DiscDrive
+            label: Disc drives
+            desc: "Checks the console's disc drive and USB DVD drives for PS2 discs and shows them on their own tab. USB DVD drives can also read PS2 CDs."
+          - id: PS5.DiscToMemory
+            label: Read the disc into memory while playing
+            desc: "Copies the whole disc into memory while you play, so the drive is no longer needed. Off: only recently read data is kept."
+          - id: PS5.DiscKeepSpinning
+            label: Keep the disc turning
+            desc: "Reads from the disc every 20 seconds so the drive doesn't spin down during play."
+          - id: "action:make-an-image-of-the-disc"
+            label: Make an image of the disc
+            desc: "Copies your disc to an ISO, CHD or CSO image on the console, a USB drive or a network share."
+            kind: action
+          - id: "action:eject-a-disc"
+            label: Eject a disc
+            desc: "Unlocks and opens a disc drive's tray."
+            kind: action
+          - id: "action:share-the-covers"
+            label: Share the covers
+            desc: "Syncs covers both ways with the backup location, so all your devices have them."
+            kind: action
+      - heading: from-the-internet
+        label: FROM THE INTERNET
+        rows:
+          - id: PS5.AutoCovers
+            label: Download covers automatically
+            desc: "Downloads missing covers from libretro's collection after each scan."
+          - id: PS5.AutoPictures
+            label: Fetch game pictures automatically
+            desc: Downloads title screens and screenshots for your games after each scan.
+          - id: PS5.FetchAbout
+            label: Look up what each game is
+            desc: "Shows a short description of the game in the drive, looked up on Wikipedia."
+          - id: "action:look-the-games-up-again"
+            label: Look the games up again
+            desc: Clears the stored game descriptions so they are looked up again.
+            kind: action
+          - id: "action:download-the-missing-covers-now"
+            label: Download the missing covers now
+            desc: Tries again to download covers for every game without one.
+            kind: action
+          - id: "action:download-cheats-for-all-games"
+            label: Download cheats for all games
+            desc: Downloads cheats for all your games from the cheat collections on GitHub. Cheats stay off until you enable them for a game.
+            kind: action
+          - id: "action:download-pcsx2-s-patches"
+            label: "Download PCSX2's patches"
+            desc: "Downloads PCSX2's game patches (widescreen, no-interlacing, 60 fps and more) from GitHub."
+            kind: action
+  - page: folders
+    name: Folders
+    headings:
+      - heading: game-folders
+        label: GAME FOLDERS
+        rows:
+          - id: "action:add-a-game-folder"
+            label: Add a game folder
+            desc: "Pick any folder on a USB drive, a network share or the console. Its games, and those in the folders inside it, join the library where they are: nothing is moved or copied."
+            kind: action
+          - id: "folders/info:found-by-crux2"
+            label: Found by Crux2
+            kind: info
+            dynamic: true
+  - page: bios
+    name: BIOS
+    headings:
+      - heading: language
+        label: LANGUAGE
+        rows:
+          - id: PS5.ConsoleLanguage
+            label: Console language
+            desc: The language games are told the PS2 is set to. Many European games use it to choose their language. Your BIOS settings are not changed.
+            kind: intlist
+            choices: [As the BIOS has it, Japanese, English, French, Spanish, German, Italian, Dutch, Portuguese]
+      - heading: options-and-patches
+        label: OPTIONS AND PATCHES
+        rows:
+          - id: EmuCore.EnableFastBoot
+            label: Fast boot
+            desc: "Patches the BIOS to skip the console's boot animation."
+          - id: EmuCore.EnableFastBootFastForward
+            label: Fast-forward to the game
+            desc: Removes emulation speed throttle until the game starts to reduce startup time.
+      - heading: top
+        label: ""
+        rows:
+          - id: "bios/info:none-of-your-own-found"
+            label: None of your own found
+            kind: info
+            dynamic: true
+          - id: "bios/info:folder"
+            label: Folder
+            kind: info
+            dynamic: true
+          - id: PS5.FreeBios
+            label: Free BIOS when none of my own is found
+            desc: "Uses OpenPS2BIOS, an open-source BIOS included with Crux2, when no BIOS of your own is found. Experimental: many games don't get past their menus."
+          - id: Filenames.BIOS
+            label: BIOS
+            desc: "The PS2 BIOS, which every game needs. Use a dump from your own console."
+  - page: emulation
+    name: Emulation
+    headings:
+      - heading: speed-control
+        label: SPEED CONTROL
+        rows:
+          - id: Framerate.NominalScalar
+            label: Normal speed
+            desc: Sets the speed when running without fast forwarding.
+            kind: floatlist
+            choices: ["2%", "10%", "25%", "50%", "75%", "90%", "100%", "110%", "120%", "150%", "175%", "200%", "300%", "400%", "500%", "1000%"]
+          - id: Framerate.TurboScalar
+            label: Fast-forward speed
+            desc: Sets the speed when using the fast forward hotkey.
+            kind: floatlist
+            choices: ["2%", "10%", "25%", "50%", "75%", "90%", "100%", "110%", "120%", "150%", "175%", "200%", "300%", "400%", "500%", "1000%"]
+          - id: Framerate.SlomoScalar
+            label: Slow-motion speed
+            desc: Sets the speed when using the slow motion hotkey.
+            kind: floatlist
+            choices: ["2%", "10%", "25%", "50%", "75%", "90%", "100%", "110%", "120%", "150%", "175%", "200%", "300%", "400%", "500%", "1000%"]
+      - heading: system-settings
+        label: SYSTEM SETTINGS
+        rows:
+          - id: EmuCore/Speedhacks.EECycleRate
+            label: EE cycle rate
+            desc: Underclocks or overclocks the emulated Emotion Engine CPU.
+            kind: intlist
+            choices: ["50%", "60%", "75%", "100% (the PS2's own)", "130%", "180%", "300%"]
+          - id: EmuCore/Speedhacks.EECycleSkip
+            label: EE cycle skipping
+            desc: "Makes the emulated Emotion Engine skip cycles. Helps a small subset of games like SOTC. Most of the time it's harmful to performance."
+            kind: intlist
+            choices: [Off, Mild, Moderate, Maximum]
+          - id: EmuCore/Speedhacks.vuThread
+            label: Multi-threaded VU1 (MTVU)
+            desc: "Generally a speedup on CPUs with 4 or more cores. Safe for most games, but a few are incompatible and may hang."
+          - id: PS5.ThreadLayout
+            label: Thread pinning
+            desc: "How the emulator's threads are placed on the CPU cores. Anywhere is best for most games. Try another option if a game is slow at every resolution."
+            kind: combo
+            choices: [Anywhere, Pinned (PCSX2), Cores of their own (Crux2)]
+          - id: PS5.DriverOwnCore
+            label: Graphics driver on a core of its own
+            desc: "With \"Cores of their own\", moves the graphics driver's thread off the GS thread's core, so the GS thread has its core to itself. Turn it off if a game runs slower with it. Takes effect the next time Crux2 starts."
+          - id: EmuCore/Speedhacks.fastCDVD
+            label: Fast disc access
+            desc: "Fast disc access, shorter loading times. Check HDLoader compatibility lists for games that are known to have issues with this."
+          - id: EmuCore.CdvdPrecache
+            label: Load the whole disc into memory
+            desc: Loads the disc image into RAM before starting the virtual machine.
+          - id: EmuCore.EnableCheats
+            label: Cheats
+            desc: Enables loading cheats from pnach files.
+          - id: EmuCore.HostFs
+            label: Host file system
+            desc: Allows games and homebrew to access files and folders directly in the title folder.
+      - heading: frame-pacing-latency-control
+        label: FRAME PACING / LATENCY CONTROL
+        rows:
+          - id: EmuCore/GS.UseVSyncForTiming
+            label: Frame pacing
+            desc: "By the screen: frames are paced by the display's refresh, the smoothest option. By the clock: for games whose frame rate the display can't match."
+            kind: combo
+            choices: [By the screen (smoothest), "By the clock, in step with the screen", "By the clock, at the game's own rate"]
+          - id: EmuCore/GS.VsyncQueueSize
+            label: Frames queued for the display
+            desc: Sets the number of frames which can be queued.
+            kind: intlist
+            choices: [None (hard sync), "1 frame", "2 frames", "3 frames"]
+          - id: EmuCore/GS.PS5AutoFrameQueue
+            label: Queue frames while the game is behind
+            desc: "When a game runs below full speed, lets up to 2 frames wait in the queue so the emulator and the graphics thread can work at the same time. Can add a little input lag while the game is slow."
+          - id: EmuCore/GS.AdvancedFrameDisplay
+            label: Show a frame as it begins
+            desc: "Displays the newest frame immediately at the beginning of the frame raster time, instead of at the end. Can reduce perceived input lag, but may cause problems with some games, such as Soulcalibur II and Baldur's Gate Dark Alliance II."
+          - id: EmuCore/GS.SkipDuplicateFrames
+            label: Skip repeated frames
+            desc: "Skips displaying frames that don't change in 25/30fps games. Can improve speed, but increase input lag/make frame pacing worse."
+          - id: EmuCore/GS.BlackFrameInsertion
+            label: Black frame insertion
+            desc: "At 120 Hz, inserts a black frame after each frame to reduce motion blur. Makes the picture darker. Can't be used together with frame generation."
+      - heading: accurate-floating-point
+        label: ACCURATE FLOATING POINT
+        rows:
+          - id: EmuCore/CPU.FPU.SoftFloat
+            label: Accurate floating point (FPU)
+            desc: "Does the FPU's maths exactly as the PS2 does, for games whose physics or AI go wrong otherwise. Slower. From PCSX2 Reliquary. On by default for the games known to need it."
+            only-game: true
+          - id: EmuCore/CPU.VU0.SoftFloat
+            label: Accurate floating point (VU0)
+            desc: "Does VU0's maths exactly as the PS2 does. Usually needed with the FPU one. Slower. From PCSX2 Reliquary. On by default for the games known to need it."
+            only-game: true
+          - id: EmuCore/CPU.VU1.SoftFloat
+            label: Accurate floating point (VU1)
+            desc: "Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary."
+            only-game: true
+      - heading: real-time-clock
+        label: REAL-TIME CLOCK
+        rows:
+          - id: EmuCore.ManuallySetRealTimeClock
+            label: Set the clock by hand
+            desc: "Manually set a real-time clock to use for the virtual PlayStation 2 instead of using your OS' system clock."
+            only-game: true
+          - id: EmuCore.RtcYear
+            label: Year
+            desc: Calendar year for the virtual PS2 RTC.
+            kind: intlist
+            choices: ["2000", "2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026", "2027", "2028", "2029", "2030", "2031", "2032", "2033", "2034", "2035", "2036", "2037", "2038", "2039", "2040", "2041", "2042", "2043", "2044", "2045", "2046", "2047", "2048", "2049", "2050", "2051", "2052", "2053", "2054", "2055", "2056", "2057", "2058", "2059", "2060", "2061", "2062", "2063", "2064", "2065", "2066", "2067", "2068", "2069", "2070", "2071", "2072", "2073", "2074", "2075", "2076", "2077", "2078", "2079", "2080", "2081", "2082", "2083", "2084", "2085", "2086", "2087", "2088", "2089", "2090", "2091", "2092", "2093", "2094", "2095", "2096", "2097", "2098", "2099"]
+            only-game: true
+          - id: EmuCore.RtcMonth
+            label: Month
+            desc: Month of the year (1-12).
+            kind: intrange
+            only-game: true
+          - id: EmuCore.RtcDay
+            label: Day
+            desc: Day of the month (1-31).
+            kind: intrange
+            only-game: true
+          - id: EmuCore.RtcHour
+            label: Hour
+            desc: Hour of the day (0-23).
+            kind: intrange
+            only-game: true
+          - id: EmuCore.RtcMinute
+            label: Minute
+            desc: Minute of the hour (0-59).
+            kind: intrange
+            only-game: true
+          - id: EmuCore.RtcSecond
+            label: Second
+            desc: Second of the minute (0-59).
+            kind: intrange
+            only-game: true
+  - page: game-fixes
+    name: Game Fixes
+    headings:
+      - heading: game-fixes-set-by-itself-for-known-games
+        label: GAME FIXES (SET BY ITSELF FOR KNOWN GAMES)
+        rows:
+          - id: EmuCore/Gamefixes.FpuMulHack
+            label: FPU multiply hack
+            desc: For Tales of Destiny.
+            only-game: true
+          - id: EmuCore/Gamefixes.SoftwareRendererFMVHack
+            label: Software renderer for videos
+            desc: Needed for some games with complex FMV rendering.
+            only-game: true
+          - id: EmuCore/Gamefixes.SkipMPEGHack
+            label: Skip videos
+            desc: Skips videos/FMVs in games to avoid game hanging/freezes.
+            only-game: true
+          - id: EmuCore/Gamefixes.GoemonTlbHack
+            label: Preload TLB hack
+            desc: To avoid TLB miss on Goemon.
+            only-game: true
+          - id: EmuCore/Gamefixes.EETimingHack
+            label: EE timing hack
+            desc: "General-purpose timing hack. Known to affect following games: Digital Devil Saga, SSX."
+            only-game: true
+          - id: EmuCore/Gamefixes.InstantDMAHack
+            label: Instant DMA hack
+            desc: "Good for cache emulation problems. Known to affect following games: Fire Pro Wrestling Z."
+            only-game: true
+          - id: EmuCore/Gamefixes.OPHFlagHack
+            label: OPH flag hack
+            desc: "Known to affect following games: Bleach Blade Battlers, Growlanser II and III, Wizardry."
+            only-game: true
+          - id: EmuCore/Gamefixes.GIFFIFOHack
+            label: Emulate the GIF FIFO
+            desc: "Correct but slower. Known to affect the following games: FIFA Street 2."
+            only-game: true
+          - id: EmuCore/Gamefixes.DMABusyHack
+            label: DMA busy hack
+            desc: "Known to affect following games: Mana Khemia 1, Metal Saga, Pilot Down Behind Enemy Lines."
+            only-game: true
+          - id: EmuCore/Gamefixes.VIF1StallHack
+            label: Delay VIF1 stalls
+            desc: For SOCOM 2 HUD and Spy Hunter loading hang.
+            only-game: true
+          - id: EmuCore/Gamefixes.VIFFIFOHack
+            label: Emulate the VIF FIFO
+            desc: "Simulate VIF1 FIFO read ahead. Known to affect following games: Test Drive Unlimited, Transformers."
+            only-game: true
+          - id: EmuCore/Gamefixes.FullVU0SyncHack
+            label: Full VU0 synchronisation
+            desc: Forces tight VU0 sync on every COP2 instruction.
+            only-game: true
+          - id: EmuCore/Gamefixes.IbitHack
+            label: VU I bit hack
+            desc: "Avoids constant recompilation in some games. Known to affect the following games: Scarface The World is Yours, Crash Tag Team Racing."
+            only-game: true
+          - id: EmuCore/Gamefixes.VuAddSubHack
+            label: VU add hack
+            desc: "For Tri-Ace Games: Star Ocean 3, Radiata Stories, Valkyrie Profile 2."
+            only-game: true
+          - id: EmuCore/Gamefixes.VUOverflowHack
+            label: VU overflow hack
+            desc: To check for possible float overflows (Superman Returns).
+            only-game: true
+          - id: EmuCore/Gamefixes.VUSyncHack
+            label: VU sync
+            desc: Run behind. To avoid sync problems when reading or writing VU registers.
+            only-game: true
+          - id: EmuCore/Gamefixes.XgKickHack
+            label: VU XGKick sync
+            desc: Use accurate timing for VU XGKicks (slower).
+            only-game: true
+          - id: EmuCore/Gamefixes.BlitInternalFPSHack
+            label: Count frames by blits
+            desc: Use alternative method to calculate internal FPS to avoid false readings in some games.
+            only-game: true
+  - page: graphics
+    name: Graphics
+    headings:
+      - heading: quick-setup
+        label: QUICK SETUP
+        rows:
+          - id: "action:fastest"
+            label: Fastest
+            desc: "The PlayStation 2's own resolution, nothing extra: for a game that is slow at any setting"
+            kind: action
+          - id: "action:balanced"
+            label: Balanced
+            desc: "Drawn at about 1080p, a little sharper textures: the choice for most games"
+            kind: action
+          - id: "action:sharpest"
+            label: Sharpest
+            desc: "Drawn at about 1440p and brought to 4K with AMD FSR 1, the sharpest textures: for a game with speed to spare"
+            kind: action
+          - id: EmuCore/GS.PS5AutoQuality
+            label: Automatic quality
+            desc: "Lowers the internal resolution when the game can't hold full speed, and raises it again when there's room. Doesn't help when the CPU is the bottleneck."
+      - heading: display
+        label: DISPLAY
+        rows:
+          - id: EmuCore/GS.Renderer
+            label: Renderer
+            desc: "Selects how the emulated GS is drawn: Hardware uses the GPU, Software uses the CPU like the PS2 did (slow but accurate), paraLLEl-GS emulates the GS on the GPU at high accuracy."
+            kind: combo
+            choices: [Hardware (Vulkan), Software, paraLLEl-GS]
+          - id: EmuCore/GS.PS5ParallelGSSamples
+            label: paraLLEl-GS samples
+            desc: "How many samples paraLLEl-GS takes per pixel. More samples give a smoother, sharper picture but need more GPU power."
+            kind: intlist
+            choices: ["1 (the PS2's picture)", "2", "4", "8", "16"]
+          - id: EmuCore/GS.PS5ParallelGSHighRes
+            label: paraLLEl-GS at twice the size
+            desc: "Renders at twice the PS2's resolution when using 4 or more samples. Sharper, but needs more GPU power."
+          - id: EmuCore/GS.PS5ParallelGSSharp2D
+            label: paraLLEl-GS sharp 2-D
+            desc: "Applies super-sampling to text, menus and other 2D elements. Sharper, but may cause seams in some games."
+          - id: EmuCore/GS.PS5ParallelGSEarlySubmit
+            label: paraLLEl-GS hands work over as it goes (experimental)
+            desc: Sends work to the GPU while the frame is still being recorded. Can help games that read back the screen. Experimental.
+          - id: EmuCore/GS.PS5ParallelGSTextures
+            label: paraLLEl-GS full-detail effects
+            desc: "Keeps full detail in effects that render to a texture, such as blur, glow and depth of field. Needs more GPU power."
+          - id: EmuCore/GS.PS5ParallelGSSharedFrames
+            label: paraLLEl-GS pictures shared with the graphics device (experimental)
+            desc: Passes paraLLEl-GS frames to the display without copying them on the CPU. Experimental.
+          - id: EmuCore/GS.AspectRatio
+            label: Aspect ratio
+            desc: Selects the aspect ratio to display the game content at.
+            kind: stringlist
+            choices: [Stretch to fill the screen, "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"]
+          - id: EmuCore/GS.FMVAspectRatioSwitch
+            label: FMV aspect ratio override
+            desc: Selects the aspect ratio for display when a FMV is detected as playing.
+            kind: stringlist
+            choices: [The same as the game, "Automatic (4:3 or 3:2)", "4:3", "16:9", "10:7"]
+          - id: EmuCore/GS.SidePicture
+            label: "Beside a 4:3 picture"
+            desc: "What fills the sides of the screen when the game is 4:3. Dark grey wears an OLED screen more evenly than black."
+            kind: combo
+            choices: [Black, Dark grey, A blurred copy of the picture]
+          - id: EmuCore/GS.deinterlace_mode
+            label: Deinterlacing
+            desc: "Determines the deinterlacing method to be used on the interlaced screen of the emulated console. Automatic should be able to correctly deinterlace most games, but if you see visibly shaky graphics, try one of the other options."
+            kind: intlist
+            choices: [Automatic, Off, Weave (top field first), Weave (bottom field first), Bob (top field first), Bob (bottom field first), Blend (top field first), Blend (bottom field first), Adaptive (top field first), Adaptive (bottom field first)]
+          - id: EmuCore/GS.linear_present_mode
+            label: Bilinear filtering
+            desc: Smooths out the image when upscaling the console to the screen.
+            kind: intlist
+            choices: [Off (pixels), Bilinear (soft), Bilinear (sharp)]
+          - id: EmuCore.EnableWideScreenPatches
+            label: Widescreen patches
+            desc: Automatically loads and applies widescreen patches on game start. Can cause issues.
+          - id: EmuCore.EnableNoInterlacingPatches
+            label: No-interlacing patches
+            desc: Automatically loads and applies no-interlacing patches on game start. Can cause issues.
+          - id: PS5GamePatch.Widescreen169
+            label: Widescreen patch
+            desc: "Applies this game's widescreen patch, if one exists."
+            kind: intlist
+            choices: [As in Settings, On, Off]
+            dynamic: true
+          - id: PS5GamePatch.No-Interlacing
+            label: No-interlacing patch
+            desc: "Applies this game's no-interlacing patch, if one exists."
+            kind: intlist
+            choices: [As in Settings, On, Off]
+          - id: EmuCore/GS.pcrtc_antiblur
+            label: Anti-blur
+            desc: Enables internal Anti-Blur hacks. Less accurate than PS2 rendering but will make a lot of games look less blurry.
+          - id: EmuCore/GS.IntegerScaling
+            label: Integer scaling
+            desc: Adds padding to the display area to ensure that the ratio between pixels on the host to pixels in the console is an integer number. May result in a sharper image in some 2D games.
+          - id: EmuCore/GS.pcrtc_offsets
+            label: Screen offsets
+            desc: Enables PCRTC Offsets which position the screen as the game requests.
+          - id: EmuCore/GS.pcrtc_overscan
+            label: Show overscan
+            desc: Enables the option to show the overscan area on games which draw more than the safe area of the screen.
+          - id: EmuCore/GS.disable_interlace_offset
+            label: Disable interlace offset
+            desc: Disables interlacing offset which may reduce blurring in some situations.
+          - id: EmuCore/GS.StretchY
+            label: Vertical stretch
+            desc: Increases or decreases the virtual picture size vertically.
+            kind: intrange
+          - id: EmuCore/GS.CropLeft
+            label: Crop left
+            desc: "Crops the image, while respecting aspect ratio."
+            kind: intrange
+          - id: EmuCore/GS.CropTop
+            label: Crop top
+            desc: "Crops the image, while respecting aspect ratio."
+            kind: intrange
+          - id: EmuCore/GS.CropRight
+            label: Crop right
+            desc: "Crops the image, while respecting aspect ratio."
+            kind: intrange
+          - id: EmuCore/GS.CropBottom
+            label: Crop bottom
+            desc: "Crops the image, while respecting aspect ratio."
+            kind: intrange
+      - heading: rendering
+        label: RENDERING
+        rows:
+          - id: EmuCore/GS.upscale_multiplier
+            label: Internal resolution
+            desc: Multiplies the render resolution by the specified factor (upscaling).
+            kind: floatlist
+            choices: [Native (PS2), "2x (~720p)", "3x (~1080p)", "4x (~1440p)", "5x (~1800p)", "6x (~2160p, 4K)", "7x", "8x (~2880p)", "9x", "10x", "11x", "12x"]
+          - id: EmuCore/GS.CASMode
+            label: Upscaling and sharpening
+            desc: Off uses the internal resolution as it is. FSR 1 renders the game at a lower resolution and upscales it with AMD FidelityFX Super Resolution; CAS sharpens the image with FidelityFX Contrast Adaptive Sharpening.
+            kind: intlist
+            choices: [Off, FSR 1 from 4x (sharpest), FSR 1 from 3x, FSR 1 from 2x (fastest), "NIS: enlarge and sharpen", "CAS: sharpen", "CAS: sharpen and resize"]
+          - id: EmuCore/GS.CASSharpness
+            label: Sharpness
+            desc: Determines the intensity the sharpening effect in CAS post-processing.
+            kind: intrange
+          - id: EmuCore/GS.filter
+            label: Texture filtering
+            desc: Selects where bilinear filtering is utilized when rendering textures.
+            kind: intlist
+            choices: [Nearest (blocky), Bilinear (always), Bilinear (as the PS2), "Bilinear (always, not sprites)"]
+          - id: EmuCore/GS.TriFilter
+            label: Trilinear filtering
+            desc: Selects where trilinear filtering is utilized when rendering textures.
+            kind: intlist
+            choices: [Automatic, Off, As the PS2, Always]
+          - id: EmuCore/GS.MaxAnisotropy
+            label: Anisotropic filtering
+            desc: Reduces texture aliasing at extreme viewing angles.
+            kind: intlist
+            choices: [Off, "2x", "4x", "8x", "16x"]
+          - id: EmuCore/GS.dithering_ps2
+            label: Dithering
+            desc: Selects the type of dithering applies when the game requests it.
+            kind: intlist
+            choices: [Off, Scaled, Unscaled (as the PS2), Force 32 bit]
+          - id: EmuCore/GS.accurate_blending_unit
+            label: Blending accuracy
+            desc: Determines the level of accuracy when emulating blend modes not supported by the host graphics API.
+            kind: intlist
+            choices: [Minimum, Basic, Medium, High, Full (slow), Maximum (very slow)]
+          - id: EmuCore/GS.hw_mipmap
+            label: Mipmapping
+            desc: "Enables mipmapping, which some games require to render correctly. Mipmapping uses progressively lower resolution variants of textures at progressively further distances to reduce processing load and avoid visual artifacts."
+          - id: EmuCore/GS.HWAccurateAlphaTest
+            label: Accurate alpha test
+            desc: "Enables accurate alpha testing, which some games require to render correctly. This may require more draw calls and result in a speed penalty."
+          - id: EmuCore/GS.HWAA1
+            label: AA1
+            desc: "Enables AA1 (PS2 antialiasing), which some games require to render correctly. This may result in a heavy performance penalty."
+          - id: EmuCore/GS.HWROV
+            label: Rasterizer ordered view
+            desc: "Enables Rasterizer Ordered View (ROV), which allows feedback loops to be executed with fewer draw calls. Can improve performance in feedback heavy games with higher accuracy settings."
+          - id: EmuCore/GS.extrathreads
+            label: Software renderer threads
+            desc: Number of threads to use in addition to the main GS thread for rasterization.
+            kind: intrange
+          - id: EmuCore/GS.autoflush_sw
+            label: Software auto flush
+            desc: Force a primitive flush when a framebuffer is also an input texture.
+          - id: EmuCore/GS.mipmap
+            label: Software mipmapping
+            desc: "Enables mipmapping, which some games require to render correctly. Mipmapping uses progressively lower resolution variants of textures at progressively further distances to reduce processing load and avoid visual artifacts."
+      - heading: hardware-fixes
+        label: HARDWARE FIXES
+        rows:
+          - id: EmuCore/GS.UserHacks
+            label: Manual hardware renderer fixes
+            desc: "Disables automatic hardware fixes, allowing you to set fixes manually."
+          - id: EmuCore/GS.UserHacks_CPUSpriteRenderBW
+            label: CPU sprite render size
+            desc: The maximum target memory width that will allow the CPU Sprite Renderer to activate on.
+            kind: intlist
+            choices: [Off, "1 (64 wide)", "2 (128)", "3 (192)", "4 (256)", "5 (320)", "6 (384)", "7 (448)", "8 (512)", "9 (576)", "10 (640)"]
+          - id: EmuCore/GS.UserHacks_CPUSpriteRenderLevel
+            label: CPU sprite render level
+            desc: Determines filter level for CPU sprite render.
+            kind: intlist
+            choices: [Sprites only, Sprites and triangles, Blended sprites and triangles]
+          - id: EmuCore/GS.UserHacks_CPUCLUTRender
+            label: Software CLUT render
+            desc: "Tries to detect when a game is drawing its own color palette and then renders it in software, instead of on the GPU."
+            kind: intlist
+            choices: [Off, Normal, Aggressive]
+          - id: EmuCore/GS.UserHacks_GPUTargetCLUTMode
+            label: GPU target CLUT
+            desc: Tries to detect when a game is drawing its own color palette and then renders it on the GPU with special handling.
+            kind: intlist
+            choices: [Off, On (exact match), On (check inside the target)]
+          - id: EmuCore/GS.UserHacks_SkipDraw_Start
+            label: Skip draws from
+            desc: Completely skips drawing surfaces from the starting index up to the ending index.
+            kind: intrange
+          - id: EmuCore/GS.UserHacks_SkipDraw_End
+            label: Skip draws to
+            desc: Completely skips drawing surfaces from the starting index up to the ending index.
+            kind: intrange
+          - id: EmuCore/GS.UserHacks_AutoFlushLevel
+            label: Auto flush
+            desc: "Forces a primitive flush when a framebuffer is also an input texture. Fixes some processing effects such as the shadows in the Jak series and radiosity in GTA:SA."
+            kind: intlist
+            choices: [Off, Sprites only, All primitives]
+          - id: EmuCore/GS.UserHacks_CPU_FB_Conversion
+            label: Framebuffer conversion on the processor
+            desc: Convert 4-bit and 8-bit framebuffer on the CPU instead of the GPU.
+          - id: EmuCore/GS.UserHacks_DisableDepthSupport
+            label: No depth conversion
+            desc: Disable the support of depth buffers in the texture cache.
+          - id: EmuCore/GS.UserHacks_Disable_Safe_Features
+            label: No safe features
+            desc: This option disables multiple safe features.
+          - id: EmuCore/GS.UserHacks_DisableRenderFixes
+            label: No render fixes
+            desc: This option disables game-specific render fixes.
+          - id: EmuCore/GS.preload_frame_with_gs_data
+            label: Preload frame data
+            desc: Uploads GS data when rendering a new frame to reproduce some effects accurately.
+          - id: EmuCore/GS.UserHacks_DisablePartialInvalidation
+            label: No partial invalidation
+            desc: "Removes texture cache entries when there is any intersection, rather than only the intersected areas."
+          - id: EmuCore/GS.UserHacks_TextureInsideRt
+            label: Texture inside a render target
+            desc: Allows the texture cache to reuse as an input texture the inner portion of a previous framebuffer.
+            kind: intlist
+            choices: [Off, Inside the target, Merge targets]
+          - id: EmuCore/GS.UserHacks_ReadTCOnClose
+            label: Read targets when closing
+            desc: Flushes all targets in the texture cache back to local memory when shutting down.
+          - id: EmuCore/GS.UserHacks_EstimateTextureRegion
+            label: Estimate texture region
+            desc: Attempts to reduce the texture size when games do not set it themselves (e.g. Snowblind games).
+          - id: EmuCore/GS.UserHacks_DrawBuffering
+            label: Draw buffering
+            desc: Attempts to reduce draw calls in games which do heavy context switching for blending purposes.
+          - id: EmuCore/GS.UserHacks_RewriteLargeSTCoords
+            label: Rewrite large ST
+            desc: Rewrites large texture coordinates to avoid stretched or wrong textures in some games.
+          - id: EmuCore/GS.UserHacks_TargetPageRearranging
+            label: Target page rearranging
+            desc: Rearranges memory pages of a target if the game changes the layout at that current VRAM address.
+          - id: EmuCore/GS.paltex
+            label: Palette conversion on the graphics chip
+            desc: "When enabled GPU converts colormap-textures, otherwise the CPU will. It is a trade-off between GPU and CPU."
+          - id: EmuCore/GS.UserHacks_Limit24BitDepth
+            label: Limit depth to 24 bits
+            desc: Truncate 32-bit depth values to 24 bits. Helps games struggling with Z-fighting.
+            kind: intlist
+            choices: [Off, Keep the upper bits, Keep the lower bits]
+      - heading: upscaling-fixes
+        label: UPSCALING FIXES
+        rows:
+          - id: EmuCore/GS.UserHacks_HalfPixelOffset
+            label: Half pixel offset
+            desc: "Might fix some misaligned fog, bloom, or blend effect."
+            kind: intlist
+            choices: [Off, Normal (vertex), Special (texture), "Special (texture, aggressive)", Align to native, "Align to native, with texture offset"]
+          - id: EmuCore/GS.UserHacks_native_scaling
+            label: Native scaling
+            desc: Emulates native PS2 coordinate scaling behavior when upscaling to reduce misalignment artifacts and seams in games that draw custom 2D elements.
+            kind: intlist
+            choices: [Off, Normal, Aggressive, Normal (keep the upscale), Aggressive (keep the upscale)]
+          - id: EmuCore/GS.UserHacks_round_sprite_offset
+            label: Round sprite
+            desc: Adjusts sprite coordinates.
+            kind: intlist
+            choices: [Off, Half, Full]
+          - id: EmuCore/GS.UserHacks_BilinearHack
+            label: Bilinear dirty upscale
+            desc: Can smooth out textures due to be bilinear filtered when upscaling. E.g. Brave sun glare.
+            kind: intlist
+            choices: [Automatic, Force bilinear, Force nearest]
+          - id: EmuCore/GS.UserHacks_TCOffsetX
+            label: Texture offset X
+            desc: Adjusts target texture offsets.
+            kind: intrange
+          - id: EmuCore/GS.UserHacks_TCOffsetY
+            label: Texture offset Y
+            desc: Adjusts target texture offsets.
+            kind: intrange
+          - id: EmuCore/GS.UserHacks_align_sprite_X
+            label: Align sprite
+            desc: Fixes issues with upscaling (vertical lines) in some games.
+          - id: EmuCore/GS.UserHacks_merge_pp_sprite
+            label: Merge sprite
+            desc: Replaces post-processing multiple paving sprites by a single fat sprite. It reduces various upscaling lines.
+          - id: EmuCore/GS.UserHacks_ForceEvenSpritePosition
+            label: Even sprite positions
+            desc: Lowers the GS precision to avoid gaps between pixels when upscaling. Fixes the text on Wild Arms games.
+          - id: EmuCore/GS.UserHacks_NativePaletteDraw
+            label: Palette draws at native resolution
+            desc: Forces palette texture draws to render at native resolution.
+      - heading: texture-replacement
+        label: TEXTURE REPLACEMENT
+        rows:
+          - id: EmuCore/GS.LoadTextureReplacements
+            label: Load textures
+            desc: Loads replacement textures where available and user-provided.
+          - id: EmuCore/GS.LoadTextureReplacementsAsync
+            label: Asynchronous texture loading
+            desc: "Loads replacement textures on a worker thread, reducing microstutter when replacements are enabled."
+          - id: EmuCore/GS.PrecacheTextureReplacements
+            label: Precache replacements
+            desc: Preloads all replacement textures to memory. Not necessary with asynchronous loading.
+          - id: "action:download-an-hd-texture-pack"
+            label: Download an HD texture pack
+            desc: "Downloads this game's HD texture pack from the Internet Archive. Packs can be several GB."
+            kind: action
+          - id: "action:stop-the-download"
+            label: Stop the download
+            desc: Stops the download. Files already unpacked are kept.
+            kind: action
+          - id: EmuCore/GS.DumpReplaceableTextures
+            label: Dump textures
+            desc: Dumps replaceable textures to disk. Will reduce performance.
+          - id: EmuCore/GS.DumpReplaceableMipmaps
+            label: Dump mipmaps
+            desc: Includes mipmaps when dumping textures.
+          - id: EmuCore/GS.DumpTexturesWithFMVActive
+            label: Dump FMV textures
+            desc: Allows texture dumping when FMVs are active. You should not enable this.
+      - heading: post-processing
+        label: POST-PROCESSING
+        rows:
+          - id: EmuCore/GS.fxaa
+            label: FXAA
+            desc: "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games. For supersampling (SSAA), raise the internal resolution, or use paraLLEl-GS with 4 or more samples."
+          - id: EmuCore/GS.SMAA
+            label: SMAA
+            desc: "Applies SMAA anti-aliasing: sharper edges than FXAA for a little more GPU time. It runs before a Look, so the two can be used together."
+          - id: EmuCore/GS.TVShader
+            label: TV shader
+            desc: Applies a shader which replicates the visual effects of different styles of television sets.
+            kind: intlist
+            choices: [None, Scanlines, Diagonal, Triangular, Wave, Lottes CRT, "4xRGSS", NxAGSS]
+          - id: EmuCore/GS.Look
+            label: Look (shader preset)
+            desc: "Makes the picture look like an old TV, with CRT shaders, composite or S-Video signal effects and film grain."
+            kind: stringlist
+            choices: [None, CRT (fast), CRT (fastest), CRT (finest; demanding at 4K), CRT through a composite signal, Composite signal, S-Video signal, Film grain, Warmer colours]
+          - id: EmuCore/GS.ShadeBoost
+            label: Shade boost
+            desc: Enables brightness/contrast/gamma/saturation adjustment.
+          - id: EmuCore/GS.ShadeBoost_Brightness
+            label: Brightness
+            desc: Adjusts brightness. 50 is normal.
+            kind: intrange
+          - id: EmuCore/GS.ShadeBoost_Contrast
+            label: Contrast
+            desc: Adjusts contrast. 50 is normal.
+            kind: intrange
+          - id: EmuCore/GS.ShadeBoost_Gamma
+            label: Gamma
+            desc: Adjusts gamma. 50 is normal.
+            kind: intrange
+          - id: EmuCore/GS.ShadeBoost_Saturation
+            label: Saturation
+            desc: Adjusts saturation. 50 is normal.
+            kind: intrange
+          - id: EmuCore/GS.FrameGeneration
+            label: Frame generation
+            desc: "Generates extra frames between the game's own, so a 30 fps game is shown at 60 fps. Adds a little input lag and can cause smearing on fast movement."
+            kind: intlist
+            choices: [Off, "30 to 60", "30 to 60, and 60 to 120 at 120 Hz"]
+          - id: EmuCore/GS.FrameGenerationMethod
+            label: Frame generation method
+            desc: "How the extra frames are made. Crux2's own: its motion search. AMD FSR 3 optical flow: handles small, fast movement better, and keeps a score or a map still. MihawkGen: Mihawk's small trained network, which looks at the two pictures only and leaves what did not move exactly as it was."
+            kind: intlist
+            choices: ["Crux2's own", AMD FSR 3 optical flow, MihawkGen]
+          - id: EmuCore/GS.FrameGenerationQuality
+            label: Optical flow quality
+            desc: Higher quality needs more GPU power.
+            kind: intlist
+            choices: [Performance, Balanced, Quality]
+          - id: EmuCore/GS.FrameGenerationSkipVideos
+            label: No frame generation during videos
+            desc: Turns frame generation off while the game plays a video.
+          - id: EmuCore/GS.PS5FrameGenDebug
+            label: Show the movement
+            desc: "For checking frame generation, not for playing: the made frames show what AMD FSR 3 optical flow decided for each pixel instead of the picture (red both frames, green the newer alone, blue the older alone, grey the two mixed). Takes effect the next time a game starts."
+      - heading: advanced
+        label: ADVANCED
+        rows:
+          - id: EmuCore/GS.PS5HoldFeedbackLayout
+            label: Keep read render targets uncompressed (experimental)
+            desc: Keeps render targets uncompressed when glow and flare effects read them. Can be faster in some games. Experimental; takes effect the next time a game starts.
+          - id: EmuCore/GS.PS5RTNoCompression
+            label: Render targets without compression (experimental)
+            desc: Creates render targets without colour compression. Can be faster or slower depending on the game. Experimental; takes effect the next time a game starts.
+          - id: EmuCore/GS.PS5SkipRedundantBarriers
+            label: Leave out barriers with nothing to wait for
+            desc: Skips GPU waits when nothing has been drawn since the last one. Turn off if effects look wrong. Takes effect the next time a game starts.
+          - id: EmuCore/GS.PS5ReuseRTCopies
+            label: Reuse copies of the picture
+            desc: Reuses copies of the screen for glow and blur effects when nothing has changed. Turn off if an effect looks a frame behind. Takes effect the next time a game starts.
+          - id: EmuCore/GS.PS5ROVKeepPass
+            label: "Keep the ordered view's render passes"
+            desc: Keeps draws that use the rasterizer ordered view in the same render pass. Much less CPU work in scenes with many lights. Takes effect the next time a game starts.
+          - id: EmuCore/GS.HWDownloadMode
+            label: Hardware download mode
+            desc: Changes synchronization behavior for GS downloads.
+            kind: intlist
+            choices: [Accurate, "Accurate, always whole (fewer readbacks)", No readbacks (the threads run in step), Unsynchronised (not the same twice), Off (the game reads nothing back)]
+          - id: EmuCore/GS.texture_preloading
+            label: Texture preloading
+            desc: "Uploads full textures to the GPU on use, rather than only the utilized regions. Can improve performance in some games."
+            kind: intlist
+            choices: [Off, Partial, Full (hash cache)]
+          - id: EmuCore/GS.ExtendedUpscalingMultipliers
+            label: Extended upscaling multipliers
+            desc: "Displays additional, very high upscaling multipliers dependent on GPU and driver capability."
+          - id: EmuCore/GS.upscale_multiplier
+            label: Internal resolution above 12x
+            desc: Multiplies the render resolution by the specified factor (upscaling).
+            kind: floatlist
+            choices: ["13x", "14x", "15x", "16x", "17x", "18x", "19x", "20x", "21x", "22x", "23x", "24x", "25x"]
+          - id: EmuCore/GS.OverrideTextureBarriers
+            label: Override texture barriers
+            desc: Forces texture barrier functionality to the specified value.
+            kind: intlist
+            choices: [Automatic, Off, On]
+          - id: EmuCore/GS.HWROVBarriersVK
+            label: Extra barriers with the ordered view
+            desc: Forces extra barriers when using ROV with Vulkan to fix graphical issues present in some games and hardware configurations.
+          - id: EmuCore/GS.DisableShaderCache
+            label: Disable shader cache
+            desc: Prevents the loading and saving of shaders/pipelines to disk.
+          - id: EmuCore/GS.DisableVertexShaderExpand
+            label: Disable vertex shader expand
+            desc: Falls back to the CPU for expanding sprites/lines.
+          - id: EmuCore/GS.HWSpinCPUForReadbacks
+            label: Spin CPU during readbacks
+            desc: Does useless work on the CPU during readbacks to prevent it from going into powersave modes. May improve performance during readbacks but with a significant increase in power usage.
+          - id: EmuCore/GS.HWSpinGPUForReadbacks
+            label: Spin GPU during readbacks
+            desc: Submits useless work to the GPU during readbacks to prevent it from going into powersave modes. May improve performance during readbacks but with a significant increase in power usage.
+          - id: EmuCore/GS.DisableFramebufferFetch
+            label: Disable framebuffer fetch
+            desc: Prevents the usage of framebuffer fetch when supported by host GPU.
+          - id: EmuCore/GS.UseBlitSwapChain
+            label: Use blit swap chain
+            desc: Uses a blit presentation model instead of flipping when using the Direct3D 11 graphics API. Has no effect on the PS5.
+          - id: EmuCore/GS.FramerateNTSC
+            label: NTSC frame rate
+            desc: The frame rate used for NTSC games.
+            kind: floatrange
+          - id: EmuCore/GS.FrameratePAL
+            label: PAL frame rate
+            desc: The frame rate used for PAL games.
+            kind: floatrange
+      - heading: sound
+        label: SOUND
+        rows:
+          - id: "action:a-look-of-your-own"
+            label: A look of your own
+            desc: "Loads a libretro shader preset (.slangp) from a \"shaders\" folder on a USB drive or in the title folder."
+            kind: action
+  - page: osd
+    name: On-Screen Display
+    headings:
+      - heading: on-screen-display
+        label: ON-SCREEN DISPLAY
+        rows:
+          - id: EmuCore/GS.OsdScale
+            label: OSD scale
+            desc: "Scales the size of the onscreen OSD from 50% to 500%."
+            kind: intrange
+          - id: EmuCore/GS.OsdMargin
+            label: OSD margin
+            desc: Sets the distance in pixels from the edges of the screen for OSD elements.
+            kind: floatrange
+          - id: EmuCore/GS.OsdMessagesPos
+            label: OSD messages position
+            desc: Determines where on-screen display messages are positioned.
+            kind: intlist
+            choices: [Not shown, Top left, Top centre, Top right, Centre left, Centre, Centre right, Bottom left, Bottom centre, Bottom right]
+          - id: EmuCore/GS.OsdPerformancePos
+            label: OSD performance position
+            desc: Position of a variety of on-screen performance data points as selected by the user.
+            kind: intlist
+            choices: [Not shown, Top left, Top centre, Top right, Centre left, Centre, Centre right, Bottom left, Bottom centre, Bottom right]
+          - id: EmuCore/GS.OsdBoldText
+            label: Bold figures
+            desc: Draws OSD text with heavier weight for improved readability.
+          - id: PS5UI.OsdMove
+            label: Move the figures from corner to corner
+            desc: Moves the on-screen figures to another corner every five minutes to prevent burn-in.
+          - id: PS5.OsdStyle
+            label: Style
+            desc: "Crux2: one panel with sections and a frame-time graph. PCSX2: PCSX2's own lines of text."
+            kind: intlist
+            choices: ["Crux2's panel", "PCSX2's lines"]
+      - heading: show
+        label: SHOW
+        rows:
+          - id: EmuCore/GS.OsdShowSpeed
+            label: Speed percentages
+            desc: Shows the current emulation speed of the system as a percentage.
+          - id: EmuCore/GS.OsdShowFPS
+            label: FPS
+            desc: Shows the number of internal video frames displayed per second by the system.
+          - id: EmuCore/GS.OsdShowVPS
+            label: VPS
+            desc: Shows the number of Vsyncs performed per second by the system.
+          - id: EmuCore/GS.OsdShowResolution
+            label: Resolution
+            desc: Shows the internal resolution of the game.
+          - id: EmuCore/GS.OsdShowCPU
+            label: CPU usage
+            desc: "Shows the host's CPU utilization based on threads."
+          - id: EmuCore/GS.OsdShowGPU
+            label: GPU usage
+            desc: "Shows the host's GPU utilization."
+          - id: EmuCore/GS.OsdShowFrameTimes
+            label: Frame times
+            desc: Displays a graph showing the average frametimes.
+          - id: EmuCore/GS.OsdShowHardwareInfo
+            label: Hardware info
+            desc: Shows the current system CPU and GPU information.
+          - id: EmuCore/GS.OsdShowGSStats
+            label: Statistics
+            desc: Shows statistics about the emulated GS such as primitives and draw calls.
+          - id: EmuCore/GS.OsdShowGPUStats
+            label: GPU statistics
+            desc: Shows GPU vertex shader and pixels shader invocations.
+          - id: EmuCore/GS.OsdShowIndicators
+            label: Indicators
+            desc: "Shows icon indicators for emulation states such as Pausing, Turbo, Fast-Forward, and Slow-Motion."
+          - id: EmuCore/GS.OsdShowSettings
+            label: Settings
+            desc: Displays various settings and the current values of those settings in the bottom-right corner of the display.
+          - id: EmuCore/GS.OsdshowPatches
+            label: Patches
+            desc: Shows the amount of currently active patches/cheats in the bottom-right corner of the display.
+          - id: EmuCore/GS.OsdShowInputs
+            label: Inputs
+            desc: Shows the current controller state of the system in the bottom-left corner of the display.
+          - id: EmuCore/GS.OsdShowTextureReplacements
+            label: Texture replacements
+            desc: Shows the status of the number of dumped and loaded texture replacements in the top-right corner of the display.
+          - id: EmuCore/GS.OsdShowVersion
+            label: Crux2 version
+            desc: Shows the current Crux2 version.
+  - page: audio
+    name: Audio
+    headings:
+      - heading: configuration
+        label: CONFIGURATION
+        rows:
+          - id: SPU2/Output.SyncMode
+            label: Synchronization
+            desc: "When the emulation isn't running at 100% speed, adjusts the tempo of the audio which produces much nicer sound during fast-forward/slowdown."
+            kind: stringlist
+            choices: [None (the sound breaks up), Time stretching]
+          - id: SPU2/Output.ExpansionMode
+            label: Expansion
+            desc: Determines how audio is expanded from stereo to surround for supported games.
+            kind: stringlist
+            choices: [Off (stereo), Stereo with bass channel, Four channels, Four channels with bass, "5.1", "7.1"]
+          - id: SPU2/Output.BufferMS
+            label: Buffer size
+            desc: Determines the amount of audio buffered before being pulled by the host API.
+            kind: intrange
+          - id: PS5.AudioGrain
+            label: Output latency
+            desc: How much audio is sent to the console at once. Lower means less delay; raise it if the sound crackles.
+            kind: intlist
+            choices: [Smallest (5 ms), "11 ms", "16 ms", "21 ms", "32 ms", "43 ms"]
+      - heading: controls
+        label: CONTROLS
+        rows:
+          - id: SPU2/Output.StandardVolume
+            label: Standard volume
+            desc: Controls the volume of the audio played on the host at normal speed.
+            kind: intrange
+          - id: SPU2/Output.FastForwardVolume
+            label: Fast forward volume
+            desc: Controls the volume of the audio played on the host when fast forwarding.
+            kind: intrange
+          - id: SPU2/Output.OutputMuted
+            label: Mute all sound
+            desc: Prevents the emulator from producing any audible sound.
+      - heading: time-stretch-settings
+        label: TIME STRETCH SETTINGS
+        rows:
+          - id: SPU2/Output.StretchSequenceLengthMS
+            label: Sequence length
+            kind: intrange
+          - id: SPU2/Output.StretchSeekWindowMS
+            label: Seekwindow size
+            kind: intrange
+          - id: SPU2/Output.StretchOverlapMS
+            label: Overlap
+            kind: intrange
+          - id: SPU2/Output.StretchUseQuickSeek
+            label: Use quickseek
+          - id: SPU2/Output.StretchUseAAFilter
+            label: Use anti-aliasing filter
+      - heading: expansion-settings
+        label: EXPANSION SETTINGS
+        rows:
+          - id: SPU2/Output.ExpandBlockSize
+            label: Block size
+            kind: intlist
+            choices: ["128", "256", "512", "1024", "2048", "4096", "8192"]
+          - id: SPU2/Output.ExpandCircularWrap
+            label: Circular wrap
+            kind: floatrange
+          - id: SPU2/Output.ExpandShift
+            label: Shift
+            kind: floatrange
+          - id: SPU2/Output.ExpandDepth
+            label: Depth
+            kind: floatrange
+          - id: SPU2/Output.ExpandFocus
+            label: Focus
+            kind: floatrange
+          - id: SPU2/Output.ExpandCenterImage
+            label: Center image
+            kind: floatrange
+          - id: SPU2/Output.ExpandFrontSeparation
+            label: Front separation
+            kind: floatrange
+          - id: SPU2/Output.ExpandRearSeparation
+            label: Rear separation
+            kind: floatrange
+          - id: SPU2/Output.ExpandLowCutoff
+            label: Low cutoff
+            kind: intrange
+          - id: SPU2/Output.ExpandHighCutoff
+            label: High cutoff
+            kind: intrange
+  - page: memory-cards
+    name: Memory Cards
+    headings:
+      - heading: memory-cards-and-saved-states
+        label: MEMORY CARDS AND SAVED STATES
+        rows:
+          - id: PS5.BackupPlace
+            label: Backups go to
+            desc: "Kept there in a folder named Crux2-backup, one folder for each backup"
+            kind: stringlist
+            choices: [USB drive 1, "Share: games"]
+          - id: PS5.BackupStates
+            label: Saved states too
+            desc: "Off: a backup holds the memory cards only"
+          - id: PS5.AutoBackup
+            label: Back up the memory cards when a game is closed
+            desc: Whenever a card was written to since the last time. The newest 10 of these are kept
+          - id: "memory-cards/info:nowhere-to-back-up-to"
+            label: Nowhere to back up to
+            kind: info
+            dynamic: true
+          - id: "memory-cards/info:usb-drives"
+            label: USB drives
+            kind: info
+            dynamic: true
+          - id: PS5.BackupReplace
+            label: Each backup replaces the one before it
+            desc: "Deletes older backups when a new one is made, so the backup folder doesn't fill up."
+          - id: "action:back-up-now"
+            label: Back up now
+            desc: Backs up all memory cards and save states now.
+            kind: action
+      - heading: a-memory-card-for-each-game
+        label: A MEMORY CARD FOR EACH GAME
+        rows:
+          - id: "memory-cards/info:this-game-s-card"
+            label: "This game's card"
+            kind: info
+            dynamic: true
+      - heading: card-manager
+        label: CARD MANAGER
+        rows:
+          - id: "action:open-the-card-manager"
+            label: Open the card manager
+            desc: "Manage memory cards and saves: copy, delete, import and export saves, and create, format or rename cards."
+            kind: action
+          - id: MemoryCards.SlotN_Enable
+            label: A card in the slot
+            desc: "Inserts a memory card into this slot. Off: the slot is empty."
+            dynamic: true
+          - id: MemoryCards.SlotN_Filename
+            label: Card
+            desc: The memory card file in this slot.
+            dynamic: true
+      - heading: options
+        label: OPTIONS
+        rows:
+          - id: PS5.CardPerGame
+            label: A memory card for each game
+            desc: "Gives every game its own memory card in slot 1, created when the game first starts."
+          - id: EmuCore.McdFolderAutoManage
+            label: "A folder card shows only the running game's saves"
+            desc: Simulates a larger memory card by filtering saves only to the current game.
+      - heading: memory-cards-in-sync
+        label: MEMORY CARDS IN SYNC
+        rows:
+          - id: PS5.CardSync
+            label: Keep the memory cards in sync
+            desc: "Keeps memory cards in sync with the backup location each time Crux2 starts and after each game. If a card changed on both sides, the newer one is kept and the other is set aside. PCSX2 on PC and ARMSX2 on Android can use the same folder."
+          - id: "action:sync-the-memory-cards-now"
+            label: Sync the memory cards now
+            desc: Syncs the memory cards now.
+            kind: action
+      - heading: backups-on
+        label: "BACKUPS ON "
+        rows:
+          - id: "memory-cards/info:the-place-could-not-be-read"
+            label: The place could not be read
+            kind: info
+            dynamic: true
+          - id: "memory-cards/info:none-yet"
+            label: None yet
+            kind: info
+            dynamic: true
+          - id: "action:look-again"
+            label: Look again
+            desc: Refreshes the list of backups.
+            kind: action
+      - heading: the-console-s-controllers
+        label: "THE CONSOLE'S CONTROLLERS"
+        rows:
+          - id: PS5.SleepSafe
+            label: Sleep-safe saving
+            desc: "Saves the game's state when you open the PS5 menu (at most once a minute), so you can continue after the console goes to rest mode. Every five minutes a state is also kept in memory, and written to the console only if Crux2 crashes: the console's drive is spared the writes."
+  - page: network
+    name: "Network & HDD"
+    headings:
+      - heading: network-adapter
+        label: NETWORK ADAPTER
+        rows:
+          - id: DEV9/Eth.EthEnable
+            label: Network adapter
+            desc: Enables the network adapter for online functionality and LAN play.
+          - id: "action:first-name-server"
+            label: First name server
+            desc: The DNS server games use to find their online servers. PS2 Online and PS Rewired keep many games online; check their websites to see which supports your game.
+            kind: action
+          - id: "bool:the-console-s-connection"
+            label: "The console's connection"
+          - id: "bool:the-game-s-connection"
+            label: "The game's connection"
+      - heading: hard-drive
+        label: HARD DRIVE
+        rows:
+          - id: DEV9/Hdd.HddEnable
+            label: Hard drive
+            desc: Enables the internal Hard Disk Drive for expanded storage.
+          - id: "bool:the-drive-s-file"
+            label: "The drive's file"
+      - heading: network-shares
+        label: NETWORK SHARES
+        rows:
+          - id: "action:kind"
+            label: Kind
+            desc: SMB for a Windows PC and most NAS; NFS for a NAS or a Linux PC that shares its folders that way.
+            kind: action
+          - id: "action:server"
+            label: Server
+            desc: "The PC or NAS: found on this network, or typed (its IP address is the safe choice)."
+            kind: action
+          - id: "action:name"
+            label: Name
+            desc: "How the share is shown in the library. Left empty: its last folder."
+            kind: action
+          - id: "action:user"
+            label: User
+            desc: "An account of the share's own. Left empty: the shares' account below (guest for an open share)."
+            kind: action
+          - id: "action:password"
+            label: Password
+            desc: "The password of the share's own account."
+            kind: action
+          - id: "action:cancel"
+            label: Cancel
+            desc: Leaves the share as it was.
+            kind: action
+          - id: "action:add-a-network-share"
+            label: Add a network share
+            desc: "A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS). Typed here with the on-screen keyboard: network.cfg is written for you."
+            kind: action
+          - id: "action:the-shares-account"
+            label: "The shares' account"
+            desc: "The user and password for the SMB shares without an account of their own: guest and no password for an open share."
+            kind: action
+      - heading: a-phone-or-a-computer
+        label: A PHONE OR A COMPUTER
+        rows:
+          - id: PS5.PhoneControl
+            label: Control from a phone
+            desc: "Opens a web page (port 3311) where you can start games, manage save states and type text from your phone or computer."
+          - id: "action:show-the-code"
+            label: Show the code
+            desc: "Shows the page's address as a QR code to scan with your phone."
+            kind: action
+          - id: "action:a-new-key"
+            label: A new key
+            desc: Creates a new key. The old address stops working.
+            kind: action
+  - page: achievements
+    name: Achievements
+    headings:
+      - heading: retroachievements
+        label: RETROACHIEVEMENTS
+        rows:
+          - id: "achievements/info:account"
+            label: Account
+            kind: info
+            dynamic: true
+          - id: "action:sign-out"
+            label: Sign out
+            desc: Signs out of RetroAchievements on this console.
+            kind: action
+          - id: "action:sign-in"
+            label: Sign in
+            desc: Sign in with your retroachievements.org username and password. Your password is not stored.
+            kind: action
+          - id: Achievements.Enabled
+            label: Achievements
+            desc: "When enabled and logged in, PCSX2 will scan for achievements on startup."
+      - heading: while-playing
+        label: WHILE PLAYING
+        rows:
+          - id: Achievements.Notifications
+            label: Say when an achievement is earned
+            desc: Displays popup messages on events such as achievement unlocks and game completion.
+          - id: Achievements.LeaderboardNotifications
+            label: Say when a leaderboard attempt starts and ends
+            desc: "Displays popup messages when starting, submitting, or failing a leaderboard challenge."
+          - id: Achievements.Overlays
+            label: Show achievements in progress
+            desc: Shows icons in the screen when a challenge/primed achievement is active.
+          - id: Achievements.LBOverlays
+            label: "Show a leaderboard's time or score as it runs"
+            desc: Shows icons in the screen when leaderboard tracking is active.
+          - id: Achievements.NotificationsDuration
+            label: How long a notice stays
+            desc: Where achievement and leaderboard notifications appear on screen.
+            kind: intlist
+          - id: Achievements.LeaderboardsDuration
+            label: "How long a leaderboard's notice stays"
+            desc: Where achievement and leaderboard notifications appear on screen.
+            kind: intlist
+          - id: Achievements.NotificationPosition
+            label: Where the notices are shown
+            desc: Where achievement and leaderboard notifications appear on screen.
+          - id: "bool:where-the-small-pictures-are-shown"
+            label: Where the small pictures are shown
+            desc: Where achievement progress and leaderboard trackers appear on screen.
+      - heading: more
+        label: MORE
+        rows:
+          - id: Achievements.EncoreMode
+            label: Encore mode
+            desc: "When enabled, each session will behave as if no achievements have been unlocked."
+          - id: Achievements.SpectatorMode
+            label: Spectator mode
+            desc: "When enabled, PCSX2 will assume all achievements are locked and not send any unlock notifications to the server."
+          - id: Achievements.UnofficialTestMode
+            label: Unofficial achievements
+            desc: "When enabled, PCSX2 will list achievements from unofficial sets. Please note that these achievements are not tracked by RetroAchievements, so they unlock every time."
+      - heading: sound-effects
+        label: SOUND EFFECTS
+        rows:
+          - id: Achievements.SoundEffects
+            label: Sound effects
+            desc: Plays sound effects for events such as achievement unlocks and leaderboard submissions.
+          - id: Achievements.UnlockSound
+            label: Achievement unlock sound
+          - id: Achievements.LBSubmitSound
+            label: Leaderboard submit sound
+          - id: Achievements.InfoSound
+            label: Notification sound
+  - page: controllers
+    name: Controllers
+    headings:
+      - heading: controller-profiles
+        label: CONTROLLER PROFILES
+        rows:
+          - id: "action:save-the-controls-as-a-profile"
+            label: Save the controls as a profile...
+            desc: Saves the current button mappings as a profile.
+            kind: action
+          - id: "action:load-a-profile-into-the-controls"
+            label: Load a profile into the controls...
+            desc: "Loads a profile's button mappings, replacing the current ones."
+            kind: action
+          - id: "action:make-a-profile-with-cross-and-circle-swapped"
+            label: Make a profile with Cross and Circle swapped
+            desc: "Saves a profile with Cross and Circle swapped, for Japanese games."
+            kind: action
+          - id: "action:delete-a-profile"
+            label: Delete a profile...
+            kind: action
+          - id: EmuCore.InputProfileName
+            label: "This game's controls"
+            desc: Uses a saved controller profile for this game.
+      - heading: all-ports
+        label: ALL PORTS
+        rows:
+          - id: "action:put-the-buttons-back-as-they-were"
+            label: Put the buttons back as they were
+            desc: Resets all controller ports and hotkeys to their default buttons.
+            kind: action
+      - heading: players
+        label: PLAYERS
+        rows:
+          - id: "action:one-or-two-players"
+            label: One or two players
+            desc: "Player 1 on port 1, player 2 on port 2, no multitap."
+            kind: action
+          - id: "action:up-to-four-players-multitap-in-port-1"
+            label: "Up to four players, multitap in port 1"
+            desc: "Players 1 to 4 on a multitap in port 1, for most games with three or four players."
+            kind: action
+          - id: "action:up-to-four-players-multitap-in-port-2"
+            label: "Up to four players, multitap in port 2"
+            desc: "Player 1 on port 1, players 2 to 4 on a multitap in port 2, for games that need it there."
+            kind: action
+          - id: PS5.LightBars
+            label: "Light bar in the player's colour"
+            desc: "Sets each controller's light bar to its player colour: blue, red, green, pink."
+          - id: "bool:controllers-connected"
+            label: Controllers connected
+      - heading: by-hand
+        label: BY HAND
+        rows:
+          - id: Pad.MultitapPort1
+            label: Multitap in port 1
+            desc: Enables an additional three controller slots. Not supported in all games.
+          - id: Pad.MultitapPort2
+            label: Multitap in port 2
+            desc: Enables an additional three controller slots. Not supported in all games.
+          - id: "action:map-it-to-a-controller-of-the-console"
+            label: Map it to a controller of the console
+            kind: action
+          - id: "action:map-it-to-a-usb-controller"
+            label: Map it to a USB controller
+            desc: "Maps this port to a controller plugged into the console's USB port."
+            kind: action
+          - id: section.Type
+            label: Controller
+            desc: The controller plugged into this port.
+      - heading: usb-microphones
+        label: USB MICROPHONES
+        rows:
+          - id: PS5.SingStar
+            label: USB microphones
+            desc: "Uses the controller's microphone or a headset as the PS2's USB microphones, for SingStar and other singing games; or as the USB headset of SOCOM and other games with voice, whose earpiece plays on player 1's headset (or with the game's sound). USB port 2."
+      - heading: sound
+        label: SOUND
+        rows:
+          - id: PS5.VariableRefresh
+            label: Variable refresh (VRR)
+            desc: "With 120 Hz on a TV that has VRR, each frame is shown as soon as it is ready instead of at the next fixed refresh: smoother when a game drops below full speed. Takes effect the next time Crux2 starts. Experimental."
+      - heading: the-console-s-controllers
+        label: "THE CONSOLE'S CONTROLLERS"
+        rows:
+          - id: PS5.PressureFromR2
+            label: Pressure from R2
+            desc: "For games that use pressure-sensitive buttons: how far you pull R2 sets how hard the face buttons and D-pad are pressed."
+          - id: PS5.MotionAim
+            label: Aim with motion
+            desc: Aims the GunCon 2 light gun by moving the controller. Press R3 to recentre.
+          - id: PS5.USBKeyboard
+            label: USB keyboard
+            desc: "Lets a USB keyboard type in the menus, and act as a PS2 keyboard in games that support one."
+          - id: PS5.USBPads
+            label: USB controllers (experimental)
+            desc: "Lets you use controllers plugged into the console's USB ports, such as a DualShock 3, Xbox 360 pads, guitars and drums. Experimental."
+  - page: advanced
+    name: Advanced
+    headings:
+      - heading: emotionengine-mips-iv
+        label: EMOTIONENGINE (MIPS-IV)
+        rows:
+          - id: EmuCore/CPU.FPU.Roundmode
+            label: Rounding mode
+            desc: Determines how the results of floating-point operations are rounded. Some games need specific settings.
+            kind: intlist
+            choices: [Nearest, Negative, Positive, Chop / zero]
+          - id: EmuCore/CPU.FPUDiv.Roundmode
+            label: Division rounding mode
+            desc: Determines how the results of floating-point division is rounded. Some games need specific settings.
+            kind: intlist
+            choices: [Nearest, Negative, Positive, Chop / zero]
+          - id: EmuCore/CPU/Recompiler.fpuOverflow
+            label: Clamping mode
+            desc: How numbers out of range are handled. Normal suits most games
+            kind: combo
+            choices: [None, Normal, "Extra, keep the sign", Full]
+          - id: EmuCore/CPU/Recompiler.EnableEE
+            label: Enable recompiler
+            desc: Performs just-in-time binary translation of 64-bit MIPS-IV machine code to native code.
+          - id: EmuCore/CPU/Recompiler.EnableEECache
+            label: Enable cache (slow)
+            desc: "Enables emulation of the EE's hardware cache. Interpreter only, provided for diagnostics."
+          - id: EmuCore/Speedhacks.IntcStat
+            label: INTC spin detection
+            desc: "Huge speedup for some games, with almost no compatibility side effects."
+          - id: EmuCore/Speedhacks.WaitLoop
+            label: Wait loop detection
+            desc: "Moderate speedup for some games, with no known side effects."
+          - id: EmuCore/CPU/Recompiler.EnableFastmem
+            label: Enable fast memory access
+            desc: Uses backpatching to avoid register flushing on every memory access.
+          - id: EmuCore/CPU/Recompiler.PauseOnTLBMiss
+            label: Pause on TLB miss
+            desc: "Pauses the virtual machine when a TLB miss occurs, instead of ignoring it and continuing."
+          - id: EmuCore/CPU.ExtraMemory
+            label: Enable 128MB RAM (dev console)
+            desc: "Exposes additional memory to the virtual machine, expanding the EE and IOP memory to 128MB and 8MB respectively."
+      - heading: vector-units-vu
+        label: VECTOR UNITS (VU)
+        rows:
+          - id: EmuCore/CPU.VU0.Roundmode
+            label: VU0 rounding mode
+            desc: Determines how the results of floating-point operations are rounded. Some games need specific settings.
+            kind: intlist
+            choices: [Nearest, Negative, Positive, Chop / zero]
+          - id: EmuCore/CPU/Recompiler.vu0Overflow
+            label: VU0 clamping mode
+            kind: combo
+            choices: [None, Normal, Extra, "Extra, keep the sign"]
+          - id: EmuCore/CPU.VU1.Roundmode
+            label: VU1 rounding mode
+            desc: Determines how the results of floating-point operations are rounded. Some games need specific settings.
+            kind: intlist
+            choices: [Nearest, Negative, Positive, Chop / zero]
+          - id: EmuCore/CPU/Recompiler.vu1Overflow
+            label: VU1 clamping mode
+            kind: combo
+            choices: [None, Normal, Extra, "Extra, keep the sign"]
+          - id: EmuCore/CPU/Recompiler.EnableVU0
+            label: Enable VU0 recompiler (micro mode)
+            desc: Performs just-in-time binary translation of Vector Unit 0 (VU0) microprograms to native code.
+          - id: EmuCore/CPU/Recompiler.EnableVU1
+            label: Enable VU1 recompiler
+            desc: Performs just-in-time binary translation of Vector Unit 1 (VU1) microprograms to native code.
+          - id: EmuCore/Speedhacks.vuFlagHack
+            label: mVU flag hack
+            desc: "Good speedup and high compatibility, may cause graphical errors."
+          - id: EmuCore/Speedhacks.vu1Instant
+            label: Instant VU1
+            desc: "Runs VU1 instantly. Provides a modest speed improvement in most games. Safe for most games, but a few games may exhibit graphical errors."
+      - heading: accurate-floating-point
+        label: ACCURATE FLOATING POINT
+        rows:
+          - id: EmuCore/CPU.FPU.SoftFloat
+            label: Accurate floating point (FPU)
+            desc: "Does the FPU's maths exactly as the PS2 does, for games whose physics or AI go wrong otherwise. Slower. From PCSX2 Reliquary."
+          - id: EmuCore/CPU.VU0.SoftFloat
+            label: Accurate floating point (VU0)
+            desc: "Does VU0's maths exactly as the PS2 does. Usually needed with the FPU one. Slower. From PCSX2 Reliquary."
+          - id: EmuCore/CPU.VU1.SoftFloat
+            label: Accurate floating point (VU1)
+            desc: "Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary."
+      - heading: i-o-processor-iop-mips-i
+        label: "I/O PROCESSOR (IOP, MIPS-I)"
+        rows:
+          - id: EmuCore/CPU/Recompiler.EnableIOP
+            label: Enable IOP recompiler
+            desc: Performs just-in-time binary translation of 32-bit MIPS-I machine code to native code.
+      - heading: game-settings
+        label: GAME SETTINGS
+        rows:
+          - id: EmuCore.EnableGameFixes
+            label: Enable game fixes
+            desc: Automatically loads and applies fixes to known problematic games on game start.
+          - id: EmuCore.EnablePatches
+            label: Enable compatibility patches
+            desc: Automatically loads and applies compatibility patches to known problematic games.
+          - id: PS5.GameDbRecommended
+            label: Recommended picture settings
+            desc: "Applies the higher blending accuracy, accurate alpha test or AA1 that the game database recommends. Settings made in a game's own options take priority."
+      - heading: savestate-settings
+        label: SAVESTATE SETTINGS
+        rows:
+          - id: EmuCore.BackupSavestate
+            label: Create save state backups
+            desc: Creates a backup copy of a save state if it already exists when the save is created. The backup copy has a .backup suffix
+          - id: PS5.AutoSaveMinutes
+            label: Save a state by itself
+            desc: "Automatically saves the game's state to the console's drive at this interval. Load it from the quick menu with \"Load the auto-save\". The game may pause briefly while saving. (Sleep-safe saving keeps its own five-minute state in memory.)"
+            kind: intlist
+            choices: [Off, Every 2 minutes, Every 5 minutes, Every 10 minutes, Every 15 minutes]
+          - id: PS5.UndoLoad
+            label: Undo for a loaded state
+            desc: "Keeps the game's current state before you load a save state, so you can undo the load from the quick menu."
+          - id: EmuCore.SavestateCompressionType
+            label: Compression method
+            desc: Sets the compression algorithm for savestate.
+            kind: intlist
+            choices: [Uncompressed, Deflate64, Zstandard]
+          - id: EmuCore.SavestateCompressionRatio
+            label: Compression level
+            desc: Sets the compression level for savestate.
+            kind: intlist
+            choices: [Low (fast), Medium, High, Very high (slow)]
+  - page: debug
+    name: Debug
+    headings:
+      - heading: what-crux2-wrote-down
+        label: WHAT CRUX2 WROTE DOWN
+        rows:
+          - id: "action:this-run"
+            label: This run
+            desc: What Crux2 has noted since it was started. Opens at its end
+            kind: action
+          - id: "action:the-run-before"
+            label: The run before
+            desc: The same of the run before this one
+            kind: action
+          - id: "action:the-emulator-s-own-log"
+            label: "The emulator's own log"
+            desc: "Shows the newest lines of PCSX2's own log (logs/emulog.txt)."
+            kind: action
+      - heading: taking-them-along
+        label: TAKING THEM ALONG
+        rows:
+          - id: "action:copy-the-logs-to-usb-drive-1"
+            label: Copy the logs to USB drive 1
+            desc: Puts the three logs in a folder named Crux2-logs there
+            kind: action
+          - id: "debug/info:copy-the-logs"
+            label: Copy the logs
+            kind: info
+            dynamic: true
+          - id: "debug/info:this-run-s-log"
+            label: "This run's log"
+            kind: info
+            dynamic: true
+      - heading: logging-in-detail
+        label: LOGGING IN DETAIL
+        rows:
+          - id: Logging.EnableFileLogging
+            label: Log to a file
+            desc: Writes log messages to emulog.txt.
+          - id: Logging.EnableVerbose
+            label: Verbose
+            desc: Writes dev log messages to log sinks.
+          - id: Logging.EnableTimestamps
+            label: Timestamps
+            desc: Writes timestamps alongside log messages.
+          - id: Logging.EnableEEConsole
+            label: EE console
+            desc: "Writes debug messages from the game's EE code to the console."
+          - id: Logging.EnableIOPConsole
+            label: IOP console
+            desc: "Writes debug messages from the game's IOP code to the console."
+          - id: EmuCore.CdvdVerboseReads
+            label: CDVD verbose reads
+            desc: Logs disc reads from games.
+      - heading: trace-logging
+        label: TRACE LOGGING
+        rows:
+          - id: EmuCore/TraceLog.Enabled
+            label: Enable trace logging
+            desc: "Writes the selected kinds of events to the log. Slow, and the log grows quickly."
+          - id: EmuCore/TraceLog.EE.bios
+            label: "EE: BIOS"
+          - id: EmuCore/TraceLog.EE.memory
+            label: "EE: memory"
+          - id: EmuCore/TraceLog.EE.giftag
+            label: "EE: GIFtags"
+          - id: EmuCore/TraceLog.EE.vifcode
+            label: "EE: VIFcodes"
+          - id: EmuCore/TraceLog.EE.mskpath3
+            label: "EE: MSKPATH3"
+          - id: EmuCore/TraceLog.EE.r5900
+            label: "EE: R5900"
+          - id: EmuCore/TraceLog.EE.cop0
+            label: "EE: COP0"
+          - id: EmuCore/TraceLog.EE.cop1
+            label: "EE: COP1 (FPU)"
+          - id: EmuCore/TraceLog.EE.cop2
+            label: "EE: COP2 (VU0 macro)"
+          - id: EmuCore/TraceLog.EE.cache
+            label: "EE: cache"
+          - id: EmuCore/TraceLog.EE.knownhw
+            label: "EE: HW registers (MMIO)"
+          - id: EmuCore/TraceLog.EE.unknownhw
+            label: "EE: unknown MMIO"
+          - id: EmuCore/TraceLog.EE.dmahw
+            label: "EE: DMA registers"
+          - id: EmuCore/TraceLog.EE.ipu
+            label: "EE: IPU"
+          - id: EmuCore/TraceLog.EE.dmac
+            label: "EE: DMA control"
+          - id: EmuCore/TraceLog.EE.counters
+            label: "EE: counters"
+          - id: EmuCore/TraceLog.EE.spr
+            label: "EE: SPR / MFIFO"
+          - id: EmuCore/TraceLog.EE.vif
+            label: "EE: VIF"
+          - id: EmuCore/TraceLog.EE.gif
+            label: "EE: GIF"
+          - id: EmuCore/TraceLog.MISC.sif
+            label: SIF
+          - id: EmuCore/TraceLog.IOP.bios
+            label: "IOP: BIOS"
+          - id: EmuCore/TraceLog.IOP.memcards
+            label: "IOP: memory cards"
+          - id: EmuCore/TraceLog.IOP.pad
+            label: "IOP: pad"
+          - id: EmuCore/TraceLog.IOP.r3000a
+            label: "IOP: R3000A"
+          - id: EmuCore/TraceLog.IOP.cop2
+            label: "IOP: COP2 (GPU)"
+          - id: EmuCore/TraceLog.IOP.memory
+            label: "IOP: memory"
+          - id: EmuCore/TraceLog.IOP.knownhw
+            label: "IOP: HW registers (MMIO)"
+          - id: EmuCore/TraceLog.IOP.unknownhw
+            label: "IOP: unknown MMIO"
+          - id: EmuCore/TraceLog.IOP.dmahw
+            label: "IOP: DMA registers"
+          - id: EmuCore/TraceLog.IOP.dmac
+            label: "IOP: DMA control"
+          - id: EmuCore/TraceLog.IOP.counters
+            label: "IOP: counters"
+          - id: EmuCore/TraceLog.IOP.cdvd
+            label: "IOP: CDVD"
+          - id: EmuCore/TraceLog.IOP.mdec
+            label: "IOP: MDEC"
+      - heading: graphics-debugging
+        label: GRAPHICS DEBUGGING
+        rows:
+          - id: EmuCore/GS.UseDebugBlend
+            label: Use debug blend
+            desc: Forces SW blending and disables several optimizations.
+          - id: PS5.GsDumpSeconds
+            label: GS dump length
+            desc: "How long \"Record a GS dump\" in the quick menu records. A heavy scene gives several hundred MB a second, even compressed."
+            kind: intlist
+            choices: ["1 second", "2 seconds", "5 seconds"]
+          - id: EmuCore/GS.GSDumpCompression
+            label: GS dump compression
+            desc: Change the compression algorithm used when creating a GS dump.
+            kind: intlist
+            choices: [Uncompressed, LZMA (xz), Zstandard (zst)]
+          - id: EmuCore/GS.DumpGSData
+            label: Dump GS draws
+            desc: Dumps information about every draw to the snapshots folder. Very slow and very large.
+          - id: EmuCore/GS.SaveRT
+            label: Save render target
+          - id: EmuCore/GS.SaveFrame
+            label: Save frame
+          - id: EmuCore/GS.SaveTexture
+            label: Save texture
+          - id: EmuCore/GS.SaveDepth
+            label: Save depth
+          - id: EmuCore/GS.SaveAlpha
+            label: Save alpha
+          - id: EmuCore/GS.SaveInfo
+            label: Save info
+          - id: EmuCore/GS.SaveTransferImages
+            label: Save transfer image data
+          - id: EmuCore/GS.SaveDrawStats
+            label: Save draw stats
+          - id: EmuCore/GS.SaveFrameStats
+            label: Save frame stats
+          - id: EmuCore/GS.SaveHWConfig
+            label: Save HW config
+          - id: EmuCore/GS.SaveDrawStart
+            label: Save draw start
+            kind: intrange
+          - id: EmuCore/GS.SaveDrawCount
+            label: Save draw count
+            kind: intrange
+          - id: EmuCore/GS.SaveFrameStart
+            label: Save frame start
+            kind: intrange
+          - id: EmuCore/GS.SaveFrameCount
+            label: Save frame count
+            desc: -1 saves every frame.
+            kind: intrange
+      - heading: what-is-logged-and-where
+        label: "WHAT IS LOGGED, AND WHERE"
+        rows:
+          - id: PS5.Logs
+            label: Logs
+            desc: "Off: no logs at all, from the next start: no crux2-boot.log, no emulog.txt, no copy in the console's kernel log, the graphics driver's messages dropped. A problem can then not be looked into; turn them on again to report one."
+          - id: "action:logs-go-to"
+            label: Logs go to
+            desc: "The console's own drive (the title folder), or a USB drive's Crux2-logs folder, which spares the console's drive the writes. A drive that is out at the start: the boot log is kept in memory for that session. From the next start."
+            kind: action
+          - id: PS5.LogBoot
+            label: "Crux2's boot log"
+            desc: "crux2-boot.log: the start, each game, its speed and pacing, and what went wrong (and a crash report). The file to send with a report. From the next start."
+          - id: PS5.LogDriver
+            label: "The graphics driver's messages"
+            desc: "What the graphics driver prints, in the boot log: needed for a report of a graphics fault. From the next start."
+          - id: Logging.EnableFileLogging
+            label: "The emulator's own log"
+            desc: "emulog.txt: PCSX2's own messages about the game (its disc, memory cards, the game's own debug output)."
+          - id: PS5.LogKlog
+            label: "A copy in the console's kernel log"
+            desc: "Each line of the boot log also to klog, for a computer that reads the console's log as it runs. Nothing is written to a drive for it. From the next start."
+  - page: ps5
+    name: PlayStation 5
+    headings:
+      - heading: ps5-tuning
+        label: PS5 TUNING
+        rows:
+          - id: PS5.ThreadPriorities
+            label: Sound and controls before the emulator
+            desc: "Gives sound, controllers and menus priority over the emulator, and runs downloads and copies after it. Prevents crackling and late button presses."
+          - id: PS5.FastPipelines
+            label: Build shaders quickly first
+            desc: "Draws new effects with a quickly built shader first, then switches to the optimised one. Reduces stutter the first time an effect appears."
+      - heading: native-code-modules-experimental
+        label: NATIVE CODE MODULES (EXPERIMENTAL)
+        rows:
+          - id: PS5.NativeModules
+            label: Use native code modules
+            desc: "Runs a game's code from a native module built with the recomp kit from your own copy of the game. Experimental."
+          - id: PS5.NativeExport
+            label: Put executables on the share
+            desc: "Copies a game's executable to the network share when no module exists, so the recomp kit can build one."
+          - id: PS5.NativeHardware
+            label: Native code may use hardware
+            desc: "Lets native modules access the console's hardware directly. Turn off if a game hangs with its module."
+          - id: PS5.NativeCheck
+            label: Check native code
+            desc: "Runs every function twice and compares the result with PCSX2's interpreter. Very slow; for finding bugs only."
+      - heading: about
+        label: ABOUT
+        rows:
+          - id: "ps5/info:crux2"
+            label: Crux2
+            kind: info
+            dynamic: true
+          - id: "ps5/info:emulator"
+            label: Emulator
+            kind: info
+            dynamic: true
+          - id: "action:quit-pcsx2"
+            label: Quit PCSX2
+            desc: Closes the title
+            kind: action
+      - heading: updates
+        label: UPDATES
+        rows:
+          - id: "action:look-for-a-newer-crux2"
+            label: Look for a newer Crux2
+            desc: Checks GitHub for a newer version. Nothing is downloaded without asking.
+            kind: action
+          - id: PS5.UpdateAtStart
+            label: Look for a newer Crux2 at start-up
+            desc: Checks GitHub for a newer version each time Crux2 starts. Nothing is downloaded without asking.
+          - id: "action:what-s-new"
+            label: "What's new"
+            desc: "What was added, changed and fixed in each version, newest first."
+            kind: action
+          - id: "action:install-this-version-again"
+            label: Install this version again
+            desc: "Reinstalls the newest version to repair missing or broken files. Your settings, saves and games are kept."
+            kind: action
+      - heading: the-console
+        label: THE CONSOLE
+        rows:
+          - id: PS5.ThreadedRecording
+            label: Graphics driver on its own thread
+            desc: Runs the graphics driver on its own CPU thread. Usually faster in demanding games.
+          - id: PS5.GpuWaitSpinUs
+            label: "Wait for the GPU: checking for"
+            desc: How long the driver keeps checking whether the GPU is done before it starts sleeping between checks.
+            kind: intrange
+          - id: PS5.GpuWaitSleepUs
+            label: "Wait for the GPU: sleeps of"
+            desc: How long the driver sleeps between checks while waiting for the GPU.
+            kind: intrange
+          - id: "action:profile-the-next-start"
+            label: Profile the next start
+            desc: Records detailed performance data on the next start and writes it to crux2-boot.log. Useful for finding out why a game is slow.
+            kind: action
+  - page: statistics
+    name: Statistics
+    headings:
+      - heading: the-library
+        label: THE LIBRARY
+        rows:
+          - id: "statistics/info:games"
+            label: Games
+            kind: info
+            dynamic: true
+          - id: "statistics/info:where-they-are"
+            label: Where they are
+            kind: info
+            dynamic: true
+          - id: "statistics/info:their-size"
+            label: Their size
+            kind: info
+            dynamic: true
+          - id: "statistics/info:by-region"
+            label: By region
+            kind: info
+            dynamic: true
+          - id: "statistics/info:known-to-run"
+            label: Known to run
+            kind: info
+            dynamic: true
+          - id: "statistics/info:marked"
+            label: Marked
+            kind: info
+            dynamic: true
+          - id: "statistics/info:with-something-of-their-own"
+            label: With something of their own
+            kind: info
+            dynamic: true
+      - heading: played
+        label: PLAYED
+        rows:
+          - id: "statistics/info:games-played"
+            label: Games played
+            kind: info
+            dynamic: true
+          - id: "statistics/info:time-played-in-all"
+            label: Time played in all
+            kind: info
+            dynamic: true
+          - id: "statistics/info:played-last"
+            label: Played last
+            kind: info
+            dynamic: true
+      - heading: played-the-longest
+        label: PLAYED THE LONGEST
+        rows:
+          - id: "statistics/info:first"
+            label: First
+            kind: info
+            dynamic: true
+          - id: "statistics/info:second"
+            label: Second
+            kind: info
+            dynamic: true
+          - id: "statistics/info:third"
+            label: Third
+            kind: info
+            dynamic: true
+          - id: "statistics/info:fourth"
+            label: Fourth
+            kind: info
+            dynamic: true
+          - id: "statistics/info:fifth"
+            label: Fifth
+            kind: info
+            dynamic: true
+  - page: about
+    name: About
+    headings:
+      - heading: top
+        label: ""
+        rows:
+          - id: "about/info:crux2"
+            label: Crux2
+            kind: info
+            dynamic: true
+          - id: "about/info:made-by"
+            label: Made by
+            kind: info
+            dynamic: true
+          - id: "about/info:emulator"
+            label: Emulator
+            kind: info
+            dynamic: true
+          - id: "about/info:graphics"
+            label: Graphics
+            kind: info
+            dynamic: true
+          - id: "about/info:interface"
+            label: Interface
+            kind: info
+            dynamic: true
+          - id: "about/info:build"
+            label: Build
+            kind: info
+            dynamic: true
+          - id: "about/info:licence"
+            label: Licence
+            kind: info
+            dynamic: true
+          - id: "about/info:log"
+            label: Log
+            kind: info
+            dynamic: true
+          - id: "about/info:crux2-s-files"
+            label: "Crux2's files"
+            kind: info
+            dynamic: true
+          - id: "action:quit-crux2"
+            label: Quit Crux2
+            desc: Closes Crux2. A running game is closed first.
+            kind: action
