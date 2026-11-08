@@ -1,8 +1,8 @@
 diff --git a/src/amd/common/ac_gpu_info.c b/src/amd/common/ac_gpu_info.c
-index 586a3990dab..48cc98ce3d7 100644
+index 1cfd93c8efb..6b4101f72ae 100644
 --- a/src/amd/common/ac_gpu_info.c
 +++ b/src/amd/common/ac_gpu_info.c
-@@ -2237,6 +2237,7 @@ void ac_print_gpu_info(FILE *f, const struct radeon_info *info, int fd)
+@@ -2250,6 +2250,7 @@ void ac_print_gpu_info(FILE *f, const struct radeon_info *info, int fd)
     fprintf(f, "    has_cb_lt16bit_int_clamp_bug = %i\n", info->compiler_info.has_cb_lt16bit_int_clamp_bug);
     fprintf(f, "    has_vrs_frag_pos_z_bug = %i\n", info->compiler_info.has_vrs_frag_pos_z_bug);
     fprintf(f, "    has_ngg_fully_culled_bug = %i\n", info->compiler_info.has_ngg_fully_culled_bug);
@@ -11,10 +11,10 @@ index 586a3990dab..48cc98ce3d7 100644
     fprintf(f, "    has_primid_instancing_bug = %i\n", info->compiler_info.has_primid_instancing_bug);
     fprintf(f, "    has_cs_regalloc_hang_bug = %i\n", info->compiler_info.has_cs_regalloc_hang_bug);
 diff --git a/src/amd/common/ac_gpu_info.h b/src/amd/common/ac_gpu_info.h
-index 46848ef859e..917272166cb 100644
+index 39d9d69b712..28a53d44376 100644
 --- a/src/amd/common/ac_gpu_info.h
 +++ b/src/amd/common/ac_gpu_info.h
-@@ -244,6 +244,11 @@ struct ac_compiler_info {
+@@ -246,6 +246,11 @@ struct ac_compiler_info {
      * (no SPI_PS_INPUT_CNTL.ROTATE_PC_PTR, no provoking vertex argument: GFX10.1's parameter cache), and the
      * compiler puts them in order itself with tags from the pre-rasterization stage. */
     uint32_t emulate_ps_strict_vertex_order : 1;
@@ -59,10 +59,10 @@ index 656ec9fb538..cd821fd35fd 100644
        if (info->min_good_cu_per_sa <= 4) {
           /* Too few available compute units per SA. Disallowing VS to run on one CU could hurt us
 diff --git a/src/amd/compiler/aco_assembler.cpp b/src/amd/compiler/aco_assembler.cpp
-index bdfa155e2c2..947fccdc028 100644
+index f16f1367038..1ece1aa18bb 100644
 --- a/src/amd/compiler/aco_assembler.cpp
 +++ b/src/amd/compiler/aco_assembler.cpp
-@@ -1656,7 +1656,7 @@ chain_branches(asm_context& ctx, std::vector<uint32_t>& out, branch_info& branch
+@@ -1657,7 +1657,7 @@ chain_branches(asm_context& ctx, std::vector<uint32_t>& out, branch_info& branch
        }
  
        /* Since we insert a branch into existing code, mitigate LdsBranchVmemWARHazard on GFX10. */
@@ -71,7 +71,7 @@ index bdfa155e2c2..947fccdc028 100644
           emit_sopk_instruction(
              ctx, code, bld.sopk(aco_opcode::s_waitcnt_vscnt, Operand(sgpr_null, s1), 0).instr);
        }
-@@ -1689,7 +1689,7 @@ fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
+@@ -1690,7 +1690,7 @@ fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
     do {
        repeat = false;
  
@@ -80,7 +80,7 @@ index bdfa155e2c2..947fccdc028 100644
           fix_branches_gfx10(ctx, out);
  
        for (branch_info& branch : ctx.branches) {
-@@ -1747,7 +1747,8 @@ align_block(asm_context& ctx, std::vector<uint32_t>& code, Block& block)
+@@ -1748,7 +1748,8 @@ align_block(asm_context& ctx, std::vector<uint32_t>& code, Block& block)
         * Don't use the s_inst_prefetch instruction on GFX10 as it might cause hangs.
         */
        const bool change_prefetch = ctx.program->gfx_level >= GFX10_3 &&
@@ -127,10 +127,10 @@ index d44cc4cc876..85fed7b5410 100644
  
     /* VcmpxPermlaneHazard */
 diff --git a/src/amd/compiler/aco_ir.cpp b/src/amd/compiler/aco_ir.cpp
-index 08f28f53dbf..4cb4d10984a 100644
+index 4dddbde5109..ae6dfa86532 100644
 --- a/src/amd/compiler/aco_ir.cpp
 +++ b/src/amd/compiler/aco_ir.cpp
-@@ -124,6 +124,9 @@ init_program(Program* program, Stage stage, const struct aco_shader_info* info,
+@@ -125,6 +125,9 @@ init_program(Program* program, Stage stage, const struct aco_shader_info* info,
     program->dev.has_mad32 = options->compiler_info->has_mad32;
  
     program->dev.has_desc_resource_level = options->compiler_info->has_desc_resource_level;
@@ -140,7 +140,7 @@ index 08f28f53dbf..4cb4d10984a 100644
  
     if (program->gfx_level >= GFX12) {
        program->dev.scratch_global_offset_min = -8388608;
-@@ -162,11 +165,12 @@ init_program(Program* program, Stage stage, const struct aco_shader_info* info,
+@@ -163,11 +166,12 @@ init_program(Program* program, Stage stage, const struct aco_shader_info* info,
         * rest of the address.
         */
        program->dev.max_nsa_vgprs = 4;
@@ -156,13 +156,13 @@ index 08f28f53dbf..4cb4d10984a 100644
     } else {
        program->dev.max_nsa_vgprs = 0;
 diff --git a/src/amd/compiler/aco_ir.h b/src/amd/compiler/aco_ir.h
-index 6e34f3a684a..cbb09d1fc09 100644
+index 733c1beeec0..6b3f67dace7 100644
 --- a/src/amd/compiler/aco_ir.h
 +++ b/src/amd/compiler/aco_ir.h
 @@ -2309,6 +2309,10 @@ struct DeviceInfo {
-    bool mubuf_scratch = false;
     bool has_gfx6_mrt_export_bug = false;
     bool has_desc_resource_level = false;
+    bool has_unpacked_d16 = false;
 +   /* GFX10.1's hazards and bugs: gfx_level == GFX10, or a GPU that presents another level with
 +    * GFX10.1's shader core (ac_compiler_info::has_gfx101_hazards). Mitigations only; instruction
 +    * selection follows gfx_level. */
@@ -171,7 +171,7 @@ index 6e34f3a684a..cbb09d1fc09 100644
     int32_t scratch_global_offset_min;
     int32_t scratch_global_offset_max;
 diff --git a/src/amd/compiler/aco_optimizer.cpp b/src/amd/compiler/aco_optimizer.cpp
-index 0823fa48e52..ea83c234ca5 100644
+index 9f1c6cb0d87..a8699f98fa3 100644
 --- a/src/amd/compiler/aco_optimizer.cpp
 +++ b/src/amd/compiler/aco_optimizer.cpp
 @@ -2115,7 +2115,7 @@ can_eliminate_and_exec(opt_ctx& ctx, Temp tmp, unsigned pass_flags, bool allow_c
@@ -184,10 +184,10 @@ index 0823fa48e52..ea83c234ca5 100644
     int32_t max = ctx.program->dev.scratch_global_offset_max;
  
 diff --git a/src/amd/compiler/instruction_selection/aco_select_nir.cpp b/src/amd/compiler/instruction_selection/aco_select_nir.cpp
-index 3486648a111..0fa50337114 100644
+index e597daf2d23..ca338291a71 100644
 --- a/src/amd/compiler/instruction_selection/aco_select_nir.cpp
 +++ b/src/amd/compiler/instruction_selection/aco_select_nir.cpp
-@@ -1503,7 +1503,7 @@ select_shader(isel_context& ctx, nir_shader* nir, const bool need_startpgm, cons
+@@ -1542,7 +1542,7 @@ select_shader(isel_context& ctx, nir_shader* nir, const bool need_startpgm, cons
        split_arguments(&ctx, startpgm);
     }
  

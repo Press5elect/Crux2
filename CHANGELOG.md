@@ -32,9 +32,16 @@
   pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
   invalidate its copies.
 - Changed: the content version in param.json is 01.020.000.
-- Changed: the build first checks every pinned source against its upstream (ps5/tools/check-sources.sh:
-  PCSX2, the payload SDK, PS5 Mesa, paraLLEl-GS, Granite, volk, PS2Recomp) and stops when one is behind
-  (PS5PX_ALLOW_STALE=1 builds anyway).
+- Changed: the build first checks every source against what it follows (ps5/tools/check-sources.sh):
+  PCSX2's master, Mesa main for the 27.0-devel merge, the PS5 Mesa revision PS5_Vulkan pins,
+  PS5_Vulkan, the payload SDK, paraLLEl-GS, the Granite and volk revisions paraLLEl-GS pins, and
+  PS2Recomp; it stops when one is behind (PS5PX_ALLOW_STALE=1 builds anyway).
+- Changed: the graphics driver (RADV) is on Mesa main of 2026-11-08 (`6b41b56dea2`; was 2026-10-31):
+  531 commits, 94 of them in RADV, ACO, NIR and the Vulkan runtime, among them ACO keeping SSBO
+  scalar loads behind barriers, binning (PBB) fixes for GFX10, a fix for barycentric inputs at an
+  offset in divergent code, and cheaper multiplies. Seven files conflicted with the PS5 port and
+  were merged by hand (ps5/patches/mesa-27/README.md lists them); it compiles and links on a PC
+  and has not run on the console yet.
 - Added: the Logitech USB headset of games with voice chat (Settings > Controllers > USB
   microphones, "Headset", USB port 2): player 1's microphone is its microphone, and what the
   game plays to its earpiece is played on player 1's headset (the console's personal port for that
