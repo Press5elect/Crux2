@@ -39,6 +39,11 @@
 
 set -euo pipefail
 
+# Every source up to date first (ps5/tools/check-sources.sh); PS5PX_ALLOW_STALE=1 builds anyway.
+if [[ ${PS5PX_ALLOW_STALE:-} != 1 ]]; then
+    bash "$(dirname -- "${BASH_SOURCE[0]}")/check-sources.sh"
+fi
+
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
 vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)

@@ -32,6 +32,9 @@
   pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
   invalidate its copies.
 - Changed: the content version in param.json is 01.020.000.
+- Changed: the build first checks every pinned source against its upstream (ps5/tools/check-sources.sh:
+  PCSX2, the payload SDK, PS5 Mesa, paraLLEl-GS, Granite, volk, PS2Recomp) and stops when one is behind
+  (PS5PX_ALLOW_STALE=1 builds anyway).
 - Added: the Logitech USB headset of games with voice chat (Settings > Controllers > USB
   microphones, "Headset", USB port 2): player 1's microphone is its microphone, and what the
   game plays to its earpiece is played on player 1's headset (the console's personal port for that
