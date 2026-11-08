@@ -882,8 +882,8 @@ public:
 		type.section = "Pad1";
 		type.key = "Type";
 		type.defString = "DualShock2";
-		type.names = {"Not connected", "DualShock 2", "Guitar", "Jogcon", "Negcon", "Pop'n Music"};
-		type.strings = {"None", "DualShock2", "Guitar", "Jogcon", "Negcon", "Popn"};
+		type.names = {"Not connected", "PS1 Analog Controller", "DualShock 2", "Guitar", "Jogcon", "Negcon", "Pop'n Music"};
+		type.strings = {"None", "DualShock1", "DualShock2", "Guitar", "Jogcon", "Negcon", "Popn"};
 		page.rows.push_back(type);
 		for (const char* button : {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2", "Start", "Select", "Up", "Down", "Left", "Right",
 				 "L3", "R3", "Left stick up", "Left stick down", "Large motor", "Small motor"})

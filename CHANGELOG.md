@@ -36,6 +36,10 @@
   PCSX2's master, Mesa main for the 27.0-devel merge, the PS5 Mesa revision PS5_Vulkan pins,
   PS5_Vulkan, the payload SDK, paraLLEl-GS, the Granite and volk revisions paraLLEl-GS pins, and
   PS2Recomp; it stops when one is behind (PS5PX_ALLOW_STALE=1 builds anyway).
+- Changed: built on PCSX2 v2.9.162 (was v2.9.158): the PS1 Analog Controller (DualShock 1) as a
+  controller type, downloaded covers named SERIAL_CRC (Crux2's own cover download sees them too, and
+  covers named by serial alone are still found), sort names in the game database. Save states from
+  earlier versions do not load (PCSX2's save-state version 0x9A5A); memory cards are not affected.
 - Changed: the payload SDK fork is at `e105cf6` (was `b5efad5`): memory for the heap, thread stacks
   and code is taken as plain direct memory first, the heap grows in 2 MiB steps instead of 16 (up to
   8192 segments), and more file descriptor groups. Needs a frame-rate check on the console.

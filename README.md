@@ -474,6 +474,10 @@ TCP or UDP.
 ## What v1.0.20 changed
 
 Changed:
+- **Built on PCSX2 v2.9.162** (was v2.9.158): the PS1 Analog Controller (DualShock 1) as a controller
+  type, downloaded covers named by serial and CRC (covers named by serial alone are still found),
+  and sort names for more games. **Save states made before v1.0.20 do not load** (PCSX2 changed
+  their version); memory cards are not affected.
 - **SMAA is a switch beside FXAA** (Settings > Picture > Post-processing), no longer an entry of the
   Look list. It runs before a Look, so the two can be used together.
 - Less work in the EE's recompiled ADDA, MADDA, MSUBA and MULA; accurate floating point keeps more
@@ -1500,7 +1504,7 @@ ps5/tools/deploy.sh                # upload what changed over the console's FTP 
 ps5/tools/run.sh [game]            # a test run on the console
 ```
 
-Built from PCSX2 `993f6fc3b18e` (v2.9.158), the payload SDK fork `e105cf6`, PS5_Vulkan `ace98a9`
+Built from PCSX2 `695e26713be0` (v2.9.162), the payload SDK fork `e105cf6`, PS5_Vulkan `ace98a9`
 and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `1ba9874` (the revision PS5_Vulkan pins) with
 the 16 patches of `ps5/patches/mesa-27/` (their README says what each does and where it comes from),
 built by `ps5/tools/build-radv-crux2.sh` (it applies them as commits on a local `crux2-radv` branch

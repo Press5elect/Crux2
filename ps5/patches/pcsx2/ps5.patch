@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 993f6fc3b18e3feb0151ea1fa16b8a0783fe6fca.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 695e26713be06daf8b9d05978602946b82008716.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -44,10 +44,10 @@ index b0c3945..220d859 100644
  endif()
  
 diff --git a/bin/resources/GameIndex.yaml b/bin/resources/GameIndex.yaml
-index 63f3262..f12454a 100644
+index 39033da..da7ab3c 100644
 --- a/bin/resources/GameIndex.yaml
 +++ b/bin/resources/GameIndex.yaml
-@@ -2044,6 +2044,7 @@ SCAJ-20125:
+@@ -2046,6 +2046,7 @@ SCAJ-20125:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -55,7 +55,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SCAJ-20126:
    name: "Tekken 5"
-@@ -2056,6 +2057,7 @@ SCAJ-20126:
+@@ -2058,6 +2059,7 @@ SCAJ-20126:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -63,7 +63,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SCAJ-20127:
    name: "EyeToy - Play 2 [with Camera]"
-@@ -2584,6 +2586,7 @@ SCAJ-20199:
+@@ -2588,6 +2590,7 @@ SCAJ-20199:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -71,7 +71,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SCAJ-25002:
    name: "Shinobi"
-@@ -4295,6 +4298,7 @@ SCED-53538:
+@@ -4300,6 +4303,7 @@ SCED-53538:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -79,7 +79,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SCED-53611:
    name: "Official PlayStation 2 Magazine - German Kids Special"
-@@ -5989,6 +5993,7 @@ SCES-53202:
+@@ -5994,6 +5998,7 @@ SCES-53202:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -87,7 +87,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SCES-53247:
    name: "WRC Rally Evolved"
-@@ -70464,6 +70469,7 @@ SLUS-21059:
+@@ -70473,6 +70478,7 @@ SLUS-21059:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -95,7 +95,7 @@ index 63f3262..f12454a 100644
      getSkipCount: "GSC_NamcoGames"
  SLUS-21060:
    name: "WWE SmackDown! vs. RAW"
-@@ -71038,6 +71044,7 @@ SLUS-21160:
+@@ -71048,6 +71054,7 @@ SLUS-21160:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -2246,7 +2246,7 @@ index 695f4c3..fe72c15 100644
  	if (m_device == -1)
  		return false;
 diff --git a/pcsx2/CMakeLists.txt b/pcsx2/CMakeLists.txt
-index 4c8ce81..8233eb4 100644
+index 9d00abc..75bae81 100644
 --- a/pcsx2/CMakeLists.txt
 +++ b/pcsx2/CMakeLists.txt
 @@ -103,6 +103,7 @@ set(pcsx2Sources
@@ -2265,7 +2265,7 @@ index 4c8ce81..8233eb4 100644
  	Patch.h
  	PerformanceMetrics.h
  	PrecompiledHeader.h
-@@ -1040,9 +1042,14 @@ set(pcsx2x86Headers
+@@ -1042,9 +1044,14 @@ set(pcsx2x86Headers
  	x86/microVU_Misc.h
  	x86/microVU_Misc.inl
  	x86/microVU_Profiler.h
@@ -2280,7 +2280,7 @@ index 4c8ce81..8233eb4 100644
  	x86/Vif_UnpackSSE.h
  	x86/R5900_Profiler.h
  	)
-@@ -1092,6 +1099,17 @@ else()
+@@ -1094,6 +1101,17 @@ else()
  	target_sources(PCSX2 PRIVATE ${pcsx2LTOSources})
  endif()
  
@@ -2298,7 +2298,7 @@ index 4c8ce81..8233eb4 100644
  # common Sources
  target_sources(PCSX2 PRIVATE
  	${pcsx2CDVDSources}
-@@ -1482,3 +1500,86 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
+@@ -1484,3 +1502,86 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
  source_group(Resources/PAD FILES ${pcsx2PADResources})
  source_group(Resources/Recording FILES ${pcsx2RecordingVirtualPadResources})
  source_group(Resources REGULAR_EXPRESSION ${CMAKE_CURRENT_BINARY_DIR}/*)
@@ -12009,10 +12009,10 @@ index 2148c0b..6ed746e 100644
  
  std::vector<AvailableMcdInfo> FileMcd_GetAvailableCards(bool include_in_use_cards);
 diff --git a/pcsx2/SIO/Pad/Pad.cpp b/pcsx2/SIO/Pad/Pad.cpp
-index a618605..79e4e9a 100644
+index 3f83c43..817243c 100644
 --- a/pcsx2/SIO/Pad/Pad.cpp
 +++ b/pcsx2/SIO/Pad/Pad.cpp
-@@ -13,6 +13,9 @@
+@@ -14,6 +14,9 @@
  #include "SIO/Sio.h"
  
  #include "Input/SDLInputSource.h"
@@ -12022,7 +12022,7 @@ index a618605..79e4e9a 100644
  
  #include "IconsFontAwesome.h"
  
-@@ -175,7 +178,9 @@ void Pad::SetDefaultControllerConfig(SettingsInterface& si)
+@@ -176,7 +179,9 @@ void Pad::SetDefaultControllerConfig(SettingsInterface& si)
  	si.SetBoolValue("Pad", "MultitapPort2", false);
  	si.SetFloatValue("Pad", "PointerXScale", 8.0f);
  	si.SetFloatValue("Pad", "PointerYScale", 8.0f);
@@ -12032,7 +12032,7 @@ index a618605..79e4e9a 100644
  
  	// PCSX2 Controller Settings - Default pad types and parameters.
  	for (u32 i = 0; i < Pad::NUM_CONTROLLER_PORTS; i++)
-@@ -212,11 +217,36 @@ void Pad::SetDefaultControllerConfig(SettingsInterface& si)
+@@ -213,11 +218,36 @@ void Pad::SetDefaultControllerConfig(SettingsInterface& si)
  
  	// PCSX2 Controller Settings - Controller 1 / Controller 2 / ...
  	// Use the automapper to set this up.
@@ -12170,7 +12170,7 @@ index 239737c..f4eeaa3 100644
  {
  	zip_error_t ze = {};
 diff --git a/pcsx2/SaveState.h b/pcsx2/SaveState.h
-index b24870c..e6f69e9 100644
+index 44f8527..1d38a7a 100644
 --- a/pcsx2/SaveState.h
 +++ b/pcsx2/SaveState.h
 @@ -57,6 +57,10 @@ extern std::unique_ptr<SaveStateScreenshotData> SaveState_SaveScreenshot();

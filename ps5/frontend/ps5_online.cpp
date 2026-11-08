@@ -530,6 +530,13 @@ int FetchForDisc(const std::string& serial, const std::string& title, const std:
 			bool any = false;
 			for (const char* const extension : {".jpg", ".jpeg", ".webp"})
 				any = any || FileSystem::FileExists(Path::Combine(EmuFolders::Covers, serial + extension).c_str());
+			// (PCSX2 v2.9.160 and later save a downloaded cover as SERIAL_CRC.ext, and look for that name first.)
+			if (!any)
+			{
+				FileSystem::FindResultsArray found;
+				any = FileSystem::FindFiles(EmuFolders::Covers.c_str(), (serial + "_*").c_str(), FILESYSTEM_FIND_FILES, &found) &&
+					  !found.empty();
+			}
 			if (any)
 				continue;
 		}
