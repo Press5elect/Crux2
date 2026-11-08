@@ -344,15 +344,15 @@ pages:
       - heading: accurate-floating-point
         label: ACCURATE FLOATING POINT
         rows:
-          - id: EmuCore/CPU.FPU.SoftFloat
+          - id: "EmuCore/CPU.FPU.SoftFloat@emulation/accurate-floating-point"
             label: Accurate floating point (FPU)
             desc: "Does the FPU's maths exactly as the PS2 does, for games whose physics or AI go wrong otherwise. Slower. From PCSX2 Reliquary. On by default for the games known to need it."
             only-game: true
-          - id: EmuCore/CPU.VU0.SoftFloat
+          - id: "EmuCore/CPU.VU0.SoftFloat@emulation/accurate-floating-point"
             label: Accurate floating point (VU0)
             desc: "Does VU0's maths exactly as the PS2 does. Usually needed with the FPU one. Slower. From PCSX2 Reliquary. On by default for the games known to need it."
             only-game: true
-          - id: EmuCore/CPU.VU1.SoftFloat
+          - id: "EmuCore/CPU.VU1.SoftFloat@emulation/accurate-floating-point"
             label: Accurate floating point (VU1)
             desc: "Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary."
             only-game: true
@@ -601,7 +601,7 @@ pages:
       - heading: rendering
         label: RENDERING
         rows:
-          - id: EmuCore/GS.upscale_multiplier
+          - id: "EmuCore/GS.upscale_multiplier@graphics/rendering"
             label: Internal resolution
             desc: Multiplies the render resolution by the specified factor (upscaling).
             kind: floatlist
@@ -909,7 +909,7 @@ pages:
           - id: EmuCore/GS.ExtendedUpscalingMultipliers
             label: Extended upscaling multipliers
             desc: "Displays additional, very high upscaling multipliers dependent on GPU and driver capability."
-          - id: EmuCore/GS.upscale_multiplier
+          - id: "EmuCore/GS.upscale_multiplier@graphics/advanced"
             label: Internal resolution above 12x
             desc: Multiplies the render resolution by the specified factor (upscaling).
             kind: floatlist
@@ -1547,13 +1547,13 @@ pages:
       - heading: accurate-floating-point
         label: ACCURATE FLOATING POINT
         rows:
-          - id: EmuCore/CPU.FPU.SoftFloat
+          - id: "EmuCore/CPU.FPU.SoftFloat@advanced/accurate-floating-point"
             label: Accurate floating point (FPU)
             desc: "Does the FPU's maths exactly as the PS2 does, for games whose physics or AI go wrong otherwise. Slower. From PCSX2 Reliquary."
-          - id: EmuCore/CPU.VU0.SoftFloat
+          - id: "EmuCore/CPU.VU0.SoftFloat@advanced/accurate-floating-point"
             label: Accurate floating point (VU0)
             desc: "Does VU0's maths exactly as the PS2 does. Usually needed with the FPU one. Slower. From PCSX2 Reliquary."
-          - id: EmuCore/CPU.VU1.SoftFloat
+          - id: "EmuCore/CPU.VU1.SoftFloat@advanced/accurate-floating-point"
             label: Accurate floating point (VU1)
             desc: "Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary."
       - heading: i-o-processor-iop-mips-i
@@ -1634,7 +1634,7 @@ pages:
       - heading: logging-in-detail
         label: LOGGING IN DETAIL
         rows:
-          - id: Logging.EnableFileLogging
+          - id: "Logging.EnableFileLogging@debug/logging-in-detail"
             label: Log to a file
             desc: Writes log messages to emulog.txt.
           - id: Logging.EnableVerbose
@@ -1792,7 +1792,7 @@ pages:
           - id: PS5.LogDriver
             label: "The graphics driver's messages"
             desc: "What the graphics driver prints, in the boot log: needed for a report of a graphics fault. From the next start."
-          - id: Logging.EnableFileLogging
+          - id: "Logging.EnableFileLogging@debug/what-is-logged-and-where"
             label: "The emulator's own log"
             desc: "emulog.txt: PCSX2's own messages about the game (its disc, memory cards, the game's own debug output)."
           - id: PS5.LogKlog

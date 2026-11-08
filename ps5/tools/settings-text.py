@@ -35,11 +35,13 @@
 #
 # What may be changed by hand: every `name`, `label` and `desc`; the order of rows under a heading;
 # the order of headings on a page; and a row may be moved to another heading or page by moving its
-# entry (the row's behaviour, values and conditions stay in code). What may not: an `id` (the code
+# entry (the row's behaviour, values and conditions stay in code). An id is `section.key`, or
+# `section.key@page/heading` where one setting is shown in two places. What may not: an `id` (the code
 # finds the row by it), or `dynamic: true` rows, which the interface builds from data (a game's
 # patches, the controller's settings) and whose text the file cannot change.
 
 import argparse
+import collections
 import json
 import re
 import sys
@@ -300,6 +302,17 @@ def extract(dump_path, out_path):
              "Memory Cards", "Network & HDD", "Achievements", "Controllers", "Advanced", "Debug", "PlayStation 5", "Statistics",
              "About"]
     order.sort(key=lambda n: shown.index(n) if n in shown else len(shown))
+
+    # A setting shown in two places (the accurate floating point switches are on a game's Emulation page and on
+    # Advanced; the second internal resolution list; the file logging switch) is two rows with one section.key:
+    # each gets the page and heading the code shows it under, after an "@", so that every id is one row's.
+    counts = collections.Counter(r["id"] for n in order for _, rows in pages[n]["headings"] for r in rows)
+    for n in order:
+        pg = pages[n]
+        for heading, rows in pg["headings"]:
+            for r in rows:
+                if counts[r["id"]] > 1:
+                    r["id"] = f"{r['id']}@{pg['id']}/{slug(heading) if heading else 'top'}"
 
     out = []
     out.append("# Crux2 - every setting's words, for editing by hand (ps5/tools/settings-text.py bakes it in).")
