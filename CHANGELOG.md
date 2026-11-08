@@ -36,6 +36,13 @@
   PCSX2's master, Mesa main for the 27.0-devel merge, the PS5 Mesa revision PS5_Vulkan pins,
   PS5_Vulkan, the payload SDK, paraLLEl-GS, the Granite and volk revisions paraLLEl-GS pins, and
   PS2Recomp; it stops when one is behind (PS5PX_ALLOW_STALE=1 builds anyway).
+- Changed: the payload SDK fork is at `e105cf6` (was `b5efad5`): memory for the heap, thread stacks
+  and code is taken as plain direct memory first, the heap grows in 2 MiB steps instead of 16 (up to
+  8192 segments), and more file descriptor groups. Needs a frame-rate check on the console.
+- Changed: PS5_Vulkan is pinned (`ace98a9`, was `f410e67`, named only in the README):
+  ps5/tools/bootstrap.sh says when the checkout beside Crux2 is elsewhere. Its new commits are
+  gpu-broker and Windows work; the link recipe, libc.prx, the packaging and its Mesa pin are as they
+  were.
 - Changed: the graphics driver (RADV) is on Mesa main of 2026-11-08 (`6b41b56dea2`; was 2026-10-31):
   531 commits, 94 of them in RADV, ACO, NIR and the Vulkan runtime, among them ACO keeping SSBO
   scalar loads behind barriers, binning (PBB) fixes for GFX10, a fix for barycentric inputs at an

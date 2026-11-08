@@ -16,7 +16,8 @@
 #                    0012 is merged from (its README's first "main at `...`")
 #   PS5 Mesa         the revision PS5_Vulkan pins (tools/build-radv.sh): Crux2's patches go on
 #                    that; the fork's newest commit is shown, as information
-#   PS5_Vulkan       its newest commit, against the README's "PS5_Vulkan `...`"
+#   PS5_Vulkan       its newest commit, against ps5/tools/bootstrap.sh's vulkan_revision (and the
+#                    checkout beside this repository against that pin)
 #   PS5_PayloadSDK   its newest commit
 #   paraLLEl-GS      its newest commit
 #   Granite, volk    the revisions paraLLEl-GS itself pins (its submodules), not their newest
@@ -93,8 +94,12 @@ fork_head=$(head_of https://github.com/mihawk-99/PS5_Mesa.git)
 [[ -n $fork_head && -n $vk_mesa_pin && $fork_head != "$vk_mesa_pin" ]] &&
     info "PS5 Mesa" "the fork's newest is ${fork_head:0:12} (not pinned by PS5_Vulkan yet)"
 
-readme_vulkan=$(sed -n 's/.*PS5_Vulkan `\([0-9a-f]\{7,\}\)`.*/\1/p' "$root/README.md" | head -1)
-report PS5_Vulkan "$readme_vulkan" "$(head_of https://github.com/mihawk-99/PS5_Vulkan.git)"
+vulkan_pin=$(pin_of "$ps5/tools/bootstrap.sh" vulkan_revision)
+report PS5_Vulkan "$vulkan_pin" "$(head_of https://github.com/mihawk-99/PS5_Vulkan.git)"
+if [[ -d $vulkan/.git && -n $vulkan_pin && $(git -C "$vulkan" rev-parse HEAD) != "$vulkan_pin" ]]; then
+    printf '  BEHIND  %-18s the checkout at %s is not at the pin (ps5/tools/bootstrap.sh says how)\n' PS5_Vulkan "$vulkan"
+    behind=$((behind + 1))
+fi
 report PS5_PayloadSDK "$(pin_of "$ps5/tools/setup-sdk.sh" sdk_revision)" "$(head_of https://github.com/mihawk-99/PS5_PayloadSDK.git)"
 
 pgs_script=$root/crux2recomp/ps5/tools/fetch-parallel-gs.sh
