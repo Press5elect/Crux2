@@ -1499,11 +1499,12 @@ ps5/tools/deploy.sh                # upload what changed over the console's FTP 
 ps5/tools/run.sh [game]            # a test run on the console
 ```
 
-Built from PCSX2 `5b6e6e23eba4` (v2.9.131), the payload SDK fork `b5efad5`, PS5_Vulkan `f410e67`
-and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `9c03200` (the revision PS5_Vulkan pins) with
-the six patches of `ps5/patches/mesa/` (their README says what each does and where it comes from),
-built by `ps5/tools/build-radv-crux2.sh`; without that archive, `build.sh` links PS5_Vulkan's own
-release archive, which has none of them.
+Built from PCSX2 `993f6fc3b18e` (v2.9.158), the payload SDK fork `b5efad5`, PS5_Vulkan `f410e67`
+and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `1ba9874` (the revision PS5_Vulkan pins) with
+the 16 patches of `ps5/patches/mesa-27/` (their README says what each does and where it comes from),
+built by `ps5/tools/build-radv-crux2.sh` (it applies them as commits on a local `crux2-radv` branch
+of PS5_Mesa, so the boot log's Mesa revision is that branch's, not one on GitHub); without that
+archive, `build.sh` links PS5_Vulkan's own release archive, which has none of them.
 
 The emulator's core, recompilers and GS are optimised across files at link time (PCSX2's
 `LTO_PCSX2_CORE` option, ThinLTO at `-O3`; PCSX2's own release builds are link-time optimised
