@@ -4,10 +4,12 @@
 
 - Changed: SMAA is a switch beside FXAA (Settings > Picture > Post-processing) instead of an entry of
   the Look list, and runs before a Look, so the two can be used together.
-- Fixed: every look, and SMAA, left the screen black with no overlay: the look's picture was handed to
-  the screen's render pass in the wrong layout, which ended the pass, so nothing after it was drawn.
-- Fixed: a look that drew only black left the screen black: the first pictures of a look and of SMAA
-  are checked, and one that is black while the game's own is not is switched off with a message.
+- Fixed: every look, and SMAA, left the screen black with no overlay: the look's passes bound their own
+  quad at vertex binding 0, PCSX2 binds its vertex buffer only once per command buffer, so the picture
+  on the screen and the overlay were drawn from the quad's 4 vertices: nothing. It is bound again after
+  the look. The look's check (that its picture is not black) now reads back once every 30 frames at most.
+- Added: a look, or SMAA, that cannot draw on the console is switched off with a message: its first
+  pictures are checked, and one that is black while the game's own is not is switched off.
 - Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
   add, instead of the PS2's; in games with a VU rounding fix, later results came out slightly
   wrong.

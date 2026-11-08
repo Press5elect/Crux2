@@ -3950,7 +3950,7 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..51d678b 100644
+index b3c8d65..da88793 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -17,6 +17,9 @@
@@ -3991,7 +3991,7 @@ index b3c8d65..51d678b 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1448,548 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1448,556 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4382,12 +4382,14 @@ index b3c8d65..51d678b 100644
 +	{
 +		m_look_name = GSConfig.PS5Look;
 +		m_look_ok = 0;
++		m_look_tries = 0;
 +		m_look_dead = false;
 +	}
 +	if (m_smaa_on != GSConfig.PS5SMAA)
 +	{
 +		m_smaa_on = GSConfig.PS5SMAA;
 +		m_smaa_ok = 0;
++		m_smaa_tries = 0;
 +		m_smaa_dead = false;
 +	}
 +	const bool want_smaa = GSConfig.PS5SMAA && !m_smaa_dead;
@@ -4420,30 +4422,36 @@ index b3c8d65..51d678b 100644
 +	};
 +	// Whether a picture made just now is black while the one it was made from is not (only the first
 +	// few are looked at: a read back stops the work for a moment).
-+	const auto black = [this](GSTexture* from, GSTexture* made, u32& ok) {
-+		if (ok >= 3)
++	const auto black = [this](GSTexture* from, GSTexture* made, u32& ok, u32& tries, const char* what) {
++		if (ok >= 3 || tries >= 20 || (m_look_frames % 30) != 0)
 +			return false;
++		tries++;
 +		u32 in_max = 0, out_max = 0;
 +		if (!PS5MiddleMax(this, from, &in_max) || !PS5MiddleMax(this, made, &out_max))
 +		{
 +#ifdef __PROSPERO__
-+			ps5px_log("look check: the pictures could not be read back");
++			ps5px_log("look check (%s): the pictures could not be read back", what);
 +#endif
 +			return false;
 +		}
-+#ifdef __PROSPERO__
-+		ps5px_log("look check: game picture %dx%d largest colour %u, made picture %dx%d largest colour %u (check %u of 3)", from->GetWidth(),
-+			from->GetHeight(), in_max, made->GetWidth(), made->GetHeight(), out_max, ok + 1);
-+#endif
 +		if (in_max <= 8) // the game's own is black: nothing to tell
 +			return false;
 +		if (out_max > 0)
 +		{
 +			ok++;
 +			if (ok == 1)
++			{
 +				Console.WriteLn("Look: the first picture is not black (largest colour %u of %u in the middle)", out_max, in_max);
++#ifdef __PROSPERO__
++				ps5px_log("look check (%s): the first picture is not black (largest colour %u, the game's %u; %dx%d from %dx%d)", what,
++					out_max, in_max, made->GetWidth(), made->GetHeight(), from->GetWidth(), from->GetHeight());
++#endif
++			}
 +			return false;
 +		}
++#ifdef __PROSPERO__
++		ps5px_log("look check (%s): the picture is black while the game's is not (largest colour %u): switched off", what, in_max);
++#endif
 +		return true;
 +	};
 +
@@ -4455,7 +4463,7 @@ index b3c8d65..51d678b 100644
 +		const int ah = want_look ? input->GetHeight() : dst_height;
 +		if (ensure(m_look_aa, aw, ah) && DoLook(input, m_look_aa, m_look_frames, 1))
 +		{
-+			if (black(input, m_look_aa, m_smaa_ok))
++			if (black(input, m_look_aa, m_smaa_ok, m_smaa_tries, "SMAA"))
 +			{
 +				m_smaa_dead = true;
 +				Console.Warning("Look: SMAA drew only black on this device: switched off");
@@ -4492,7 +4500,7 @@ index b3c8d65..51d678b 100644
 +		ps5px_log("look: frame %llu made, %dx%d from %dx%d", static_cast<unsigned long long>(m_look_frames), m_look->GetWidth(), m_look->GetHeight(),
 +			input->GetWidth(), input->GetHeight());
 +#endif
-+	if (black(input, m_look, m_look_ok))
++	if (black(input, m_look, m_look_ok, m_look_tries, "look"))
 +	{
 +		m_look_dead = true;
 +		Console.Warning("Look: %s drew only black on this device: switched off", GSConfig.PS5Look.c_str());
@@ -4541,7 +4549,7 @@ index b3c8d65..51d678b 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8ea..9d054ee 100644
+index 421f8ea..4050e6d 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1489,6 +1489,8 @@ protected:
@@ -4553,7 +4561,7 @@ index 421f8ea..9d054ee 100644
  	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
  
  	WindowInfo m_window_info;
-@@ -1504,6 +1506,43 @@ protected:
+@@ -1504,6 +1506,47 @@ protected:
  	GSTexture* m_current = nullptr;
  	GSTexture* m_cas = nullptr;
  	GSTexture* m_blur = nullptr;
@@ -4584,20 +4592,24 @@ index 421f8ea..9d054ee 100644
 +	GSTexture* m_look_in = nullptr;
 +	GSTexture* m_look_aa = nullptr; // SMAA's picture (slot 1 of DoLook), before the look
 +	// The first pictures of a look, and of SMAA, are read back (a small part of the middle) to see that
-+	// they are not black while the game's own is: a look that is would leave the screen black, so
++	// they are not black while the game's own is not: a look that is would leave the screen black, so
 +	// it is switched off, said on the screen and in the log, and not tried again until it is chosen again.
++	// A read back stops the GPU's work for a moment, so it is made once every 30 frames at most and
++	// given up after 20 (while the game's own picture stays black nothing can be told).
 +	std::string m_look_name; // the look the counts below are of
 +	u32 m_look_ok = 0; // pictures checked and not black
++	u32 m_look_tries = 0; // checks made (while the game's own picture is black, nothing can be told)
 +	bool m_look_dead = false;
 +	bool m_smaa_on = false;
 +	u32 m_smaa_ok = 0;
++	u32 m_smaa_tries = 0;
 +	bool m_smaa_dead = false;
 +	GSTexture* m_side[2] = {};
 +	u64 m_look_frames = 0;
  	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
  	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
  	GSTexture* m_ds_as_rt_orig = nullptr; ///< Where the depth as color came from
-@@ -1529,6 +1568,30 @@ protected:
+@@ -1529,6 +1572,30 @@ protected:
  	/// Applies Gaussian blur and writes to the destination texture.
  	void DoGaussianBlur(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, GSTexture* tempTex);
  
@@ -4628,7 +4640,7 @@ index 421f8ea..9d054ee 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1738,6 +1801,85 @@ public:
+@@ -1738,6 +1805,85 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -7317,10 +7329,10 @@ index 4230238..37a73dc 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..cc411e5
+index 0000000..6fea730
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1225 @@
+@@ -0,0 +1,1230 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -7916,6 +7928,13 @@ index 0000000..cc411e5
 +		return false;
 +	}
 +
++	// The passes bound their own quad at vertex binding 0. PCSX2 binds its vertex stream buffer once
++	// per command buffer (SetInitialState) and keeps no dirty flag for it, so InvalidateCachedState
++	// does not bring it back: every draw after the look in this command buffer (the picture on the
++	// screen and the overlay) read the quad's 4 vertices at its own offsets and drew nothing, a black
++	// screen. It is bound again here. (Needs proper testing on the console.)
++	SetInitialState(cmd);
++
 +	// The last pass's picture (the size of the place) into dTex.
 +	const PS5SlangRunner::Image& last = ls.chain->Output();
 +	d->TransitionToLayout(GSTextureVK::Layout::CopyDst);
@@ -7930,10 +7949,8 @@ index 0000000..cc411e5
 +	vkCmdBlitImage(cmd, last.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
 +		VK_FILTER_LINEAR);
 +	d->PS5NoteWrite();
-+	// The picture is shown by PresentRect inside the screen's render pass, where a texture that is not
-+	// in the shader read layout makes DoStretchRect end that pass (it cannot transition inside one):
-+	// the picture and the overlay were then drawn outside any pass and lost, a black screen. So it is
-+	// put in that layout here, before the present begins. (Needs proper testing on the console.)
++	// The picture is shown by PresentRect inside the screen's render pass, where it cannot be moved
++	// to another layout: it is put in the shader read layout here, before that pass begins.
 +	d->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 +	PS5SlangRunner::Barrier(cmd, last.image, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 +		VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);

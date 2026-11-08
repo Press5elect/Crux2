@@ -486,12 +486,14 @@ Changed:
 - The content version is 01.020.000.
 
 Fixed:
-- **Every look, and SMAA, left the screen black with no overlay** (the boot log showed the look loaded and
-  the game running): the look's picture was handed to the screen's render pass in the wrong layout,
-  which ended the pass, so the picture and the overlay were never drawn.
-- **A look that drew only black left the screen black.** The first pictures of a look and of SMAA are
-  now checked (a small part of the middle is read back); one that is black while the game's own is
-  not is switched off, said on the screen and in the log, and the picture is shown as it was.
+- **Every look, and SMAA, left the screen black with no overlay** (the boot log showed the look loaded,
+  its pictures not black, and the game running): the look's passes bound their own quad as the vertex
+  buffer, and PCSX2 binds its own only once per command buffer, so the picture on the screen and the
+  overlay were drawn from the wrong vertices. PCSX2's buffer is bound again after the look.
+- **A look that cannot draw on the console is switched off** rather than leaving the screen black. The
+  first pictures of a look and of SMAA are checked (a small part of the middle is read back, once every
+  30 frames at most); one that is black while the game's own is not is switched off, said on the screen
+  and in the boot log, and the picture is shown as it was.
 - **Accurate floating point on the VUs** kept the game's own VU rounding mode after one rare add,
   instead of the PS2's, so later results in games with a VU rounding fix came out slightly wrong;
   on VU0 the instructions the EE runs itself (COP2) ran in the EE's rounding mode.
