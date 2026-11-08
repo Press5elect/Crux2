@@ -40,6 +40,9 @@
   controller type, downloaded covers named SERIAL_CRC (Crux2's own cover download sees them too, and
   covers named by serial alone are still found), sort names in the game database. Save states from
   earlier versions do not load (PCSX2's save-state version 0x9A5A); memory cards are not affected.
+- Changed: native modules and the paraLLEl-GS renderer's runtime are on PS2Recomp `e563698` (was
+  `eb8688b`): GIF tags with FLG=3 are handled as image data everywhere. def-jam-vendetta-recomp's
+  patch is rebased onto it (its own GIF path already did that).
 - Changed: the payload SDK fork is at `e105cf6` (was `b5efad5`): memory for the heap, thread stacks
   and code is taken as plain direct memory first, the heap grows in 2 MiB steps instead of 16 (up to
   8192 segments), and more file descriptor groups. Needs a frame-rate check on the console.

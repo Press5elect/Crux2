@@ -52,7 +52,7 @@ import ps2disc  # noqa: E402
 import ps2unpack  # noqa: E402
 
 PS2RECOMP_URL = "https://github.com/ran-j/PS2Recomp.git"
-PS2RECOMP_REVISION = "eb8688b2fd191129f103a39543002c005b33409c"
+PS2RECOMP_REVISION = "e5636981a1c9de368f6b71e819c3dc188dfedbf4"
 
 WINDOWS = os.name == "nt"
 EXE = ".exe" if WINDOWS else ""

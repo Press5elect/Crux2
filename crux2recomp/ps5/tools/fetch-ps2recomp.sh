@@ -11,7 +11,7 @@
 #   ps5/tools/fetch-ps2recomp.sh --export   write the working tree's changes back to the patch
 set -euo pipefail
 url=https://github.com/ran-j/PS2Recomp.git
-revision=eb8688b2fd191129f103a39543002c005b33409c
+revision=e5636981a1c9de368f6b71e819c3dc188dfedbf4
 ps5=$(cd "$(dirname "$0")/.." && pwd)
 root=$(dirname "$ps5")
 tree="$root/vendor/PS2Recomp"
