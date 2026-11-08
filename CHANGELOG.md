@@ -32,6 +32,10 @@
   pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
   invalidate its copies.
 - Changed: the content version in param.json is 01.020.000.
+- Added: the Logitech USB headset of games with voice chat (Settings > Controllers > USB
+  microphones, "Headset", USB port 2): player 1's microphone is its microphone, and what the
+  game plays to its earpiece is played on player 1's headset (the console's personal port for that
+  player), or with the game's sound when that does not open. Needs testing on the console.
 
 ## v1.0.19 (2026-11-06)
 

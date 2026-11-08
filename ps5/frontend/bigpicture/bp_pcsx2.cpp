@@ -1674,7 +1674,7 @@ public:
 			PS5UI::Toast(kept < 90.0 ? fmt::format("Done. Only {:.0f}% of the time came through: the gaps are the crackle. "
 												   "crux2-boot.log's \"mic test\" lines say why.",
 											kept) :
-										 std::string("Done. If it sounded clear, SingStar will hear the same."));
+										 std::string("Done. If it sounded clear, the game will hear the same."));
 			s_testing = false;
 		}).detach();
 	}
@@ -1847,26 +1847,28 @@ public:
 					"Put them back", "Leave them");
 			},
 			bp::Option::AllGames));
-		// SingStar (v1.5.0): the PlayStation 2's USB microphones are the console's (ps5_mic.h).
+		// SingStar (v1.5.0): the PlayStation 2's USB microphones are the console's (ps5_mic.h); and
+		// the Logitech USB headset of SOCOM and other online games (v1.0.20).
 		{
-			page.rows.push_back(Heading("SINGSTAR"));
+			page.rows.push_back(Heading("USB MICROPHONES"));
 			bp::Option mics;
 			mics.kind = bp::Option::IntList;
-			mics.label = "SingStar microphones";
+			mics.label = "USB microphones";
 			mics.desc = "Uses the controller's microphone or a headset as the PS2's USB microphones, for SingStar and other singing "
-				"games.";
+				"games; or as the USB headset of SOCOM and other games with voice, whose earpiece plays on player 1's headset "
+				"(or with the game's sound). USB port 2.";
 			mics.section = "PS5";
 			mics.key = "SingStar";
 			mics.defInt = 0;
-			mics.names = {"None", "One: player 1's", "Two: players 1 and 2"};
-			mics.ints = {0, 1, 2};
+			mics.names = {"None", "SingStar, one: player 1's", "SingStar, two: players 1 and 2", "Headset (SOCOM): player 1's"};
+			mics.ints = {0, 1, 2, 3};
 			mics.flags = bp::Option::NextStart;
 			page.rows.push_back(std::move(mics));
 			for (int player = 0; player < 2; player++)
 			{
 				page.rows.push_back(Action(fmt::format("Test player {}'s microphone", player + 1),
 					"Speak or sing for five seconds; it is played back to you as a game would hear it, and the boot log's \"mic test\" "
-					"lines say how the microphone did. Close the game first",
+					"lines say how the microphone did (the headset's microphone is player 1's). Close the game first",
 					[player] { TestMicrophone(player); }, bp::Option::AllGames));
 			}
 		}
@@ -5420,6 +5422,9 @@ private:
 				si->SetUIntValue("USB2", "singstar_subtype", 0);
 				si->SetStringValue("USB2", "singstar_player1_device_name", setup.player1);
 				si->SetStringValue("USB2", "singstar_player2_device_name", setup.player2);
+				// The USB headset (choice 3): player 1's microphone, the earpiece to player 1's headset.
+				si->SetStringValue("USB2", "headset_input_device_name", setup.earpiece[0] ? setup.player1 : "");
+				si->SetStringValue("USB2", "headset_output_device_name", setup.earpiece);
 			}
 		}
 		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the

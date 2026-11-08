@@ -12185,17 +12185,18 @@ index b24870c..e6f69e9 100644
  extern bool SaveState_UnzipFromDisk(const std::string& filename, Error* error);
  
 diff --git a/pcsx2/USB/usb-mic/usb-mic.cpp b/pcsx2/USB/usb-mic/usb-mic.cpp
-index 337046a..aa0b04b 100644
+index 337046a..483b3b5 100644
 --- a/pcsx2/USB/usb-mic/usb-mic.cpp
 +++ b/pcsx2/USB/usb-mic/usb-mic.cpp
-@@ -1292,6 +1292,31 @@ std::unique_ptr<AudioDevice> AudioDevice::CreateNoopDevice(AudioDir dir, u32 cha
+@@ -1292,6 +1292,32 @@ std::unique_ptr<AudioDevice> AudioDevice::CreateNoopDevice(AudioDir dir, u32 cha
  	return std::make_unique<usb_mic::audiodev_noop::NoopAudioDevice>(dir, channels);
  }
  
 +#ifdef __PROSPERO__
 +
 +// PS5 (Crux2, ps5/frontend/ps5_mic.h): the console's microphones, by player ("ps5-mic-1"...),
-+// through libSceAudioIn; anything else hears silence. A headset's earpiece plays nothing.
++// through libSceAudioIn, and the USB headset's earpiece by player ("ps5-earpiece-1"...), through
++// libSceAudioOut; anything else is silence.
 +#include "ps5_mic.h"
 +
 +std::unique_ptr<AudioDevice> AudioDevice::CreateDevice(AudioDir dir, u32 channels, std::string devname, s32 latency)
@@ -12212,7 +12213,7 @@ index 337046a..aa0b04b 100644
 +
 +std::vector<std::pair<std::string, std::string>> AudioDevice::GetOutputDeviceList()
 +{
-+	return {};
++	return PS5Mic::OutputDevices();
 +}
 +
 +#else
@@ -12220,7 +12221,7 @@ index 337046a..aa0b04b 100644
  std::unique_ptr<AudioDevice> AudioDevice::CreateDevice(AudioDir dir, u32 channels, std::string devname, s32 latency)
  {
  	return std::make_unique<usb_mic::audiodev_cubeb::CubebAudioDevice>(dir, channels, std::move(devname), latency);
-@@ -1306,3 +1331,5 @@ std::vector<std::pair<std::string, std::string>> AudioDevice::GetOutputDeviceLis
+@@ -1306,3 +1332,5 @@ std::vector<std::pair<std::string, std::string>> AudioDevice::GetOutputDeviceLis
  {
  	return usb_mic::audiodev_cubeb::CubebAudioDevice::GetDeviceList(false);
  }

@@ -918,7 +918,8 @@ Added:
   states saved by themselves with "Undo the last load", backups to a share or a USB drive, and
   memory cards kept in sync both ways.
 - **Controllers**: up to four players with the multitap, controller profiles, pressure from R2,
-  GunCon 2 aimed by moving the controller, the USB microphones of karaoke games, a USB keyboard, light bars in the
+  GunCon 2 aimed by moving the controller, the USB microphones of karaoke games, the USB headset of
+  games with voice chat, a USB keyboard, light bars in the
   players' colours, and control from a phone.
 - **Care for an OLED screen**: dark after a while with nothing pressed, then a black screen with the
   mark, the hints fading, everything moved a few pixels now and then, dark grey bars beside a 4:3
@@ -1363,8 +1364,8 @@ title closed from the console's own menu is not a crash and is not reported as o
 - A game's picture is not moved by a few pixels as the menus are (Screen care): that would
   blur it or cut its edge.
 - RetroAchievements' sounds are not played (the notices are shown).
-- No video capture, no USB wheels or cameras passed to games (USB pads, microphones, the GunCon 2
-  and a keyboard are), no network adapter emulation through a packet capture library.
+- No video capture, no USB wheels or cameras passed to games (USB pads, microphones, the USB
+  headset, the GunCon 2 and a keyboard are), no network adapter emulation through a packet capture library.
 - English only: the translations are part of the desktop interface and are not in this build.
 - The performance overlay's EE, GS and VU percentages are what each thread reports of itself
   (whether a title may read another thread's processor time is not yet measured on the

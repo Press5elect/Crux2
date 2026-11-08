@@ -1,4 +1,4 @@
-// Crux2 - the console's microphones for the PlayStation 2's USB microphones (SingStar).
+// Crux2 - the console's microphones for the PlayStation 2's USB microphones (SingStar) and headset.
 // SPDX-FileCopyrightText: 2026 Press5elect
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
@@ -10,8 +10,12 @@
 //
 //   "ps5-mic-1" ... "ps5-mic-4"   player 1 to 4's microphone (the order of the controllers)
 //
-// Settings > Controllers > SingStar sets the USB port up: one microphone (player 1's) or two
-// (players 1 and 2: SingStar's two microphones, red and blue). What the console's microphone
+//   "ps5-earpiece-1" ... "-4"     player 1 to 4's headset, for the USB headset's earpiece
+//
+// Settings > Controllers > USB microphones sets USB port 2 up: one microphone (player 1's) or two
+// (players 1 and 2: SingStar's two microphones, red and blue), or the Logitech USB headset SOCOM
+// and other online games use (player 1's microphone; its earpiece to player 1's headset when the
+// console opens that, else with the game's sound). What the console's microphone
 // gives (16 kHz for voice, else 48 kHz) is brought to the rate the game asks for. Needs proper
 // testing on a console: which type and rate libSceAudioIn takes from a title is tried in turn and
 // said in the boot log ("mic:").
@@ -34,13 +38,17 @@ std::unique_ptr<AudioDevice> Create(int dir, uint32_t channels, const std::strin
 /// The names and what to call them, for PCSX2's list of input devices.
 std::vector<std::pair<std::string, std::string>> Devices();
 
-/// What the interface's SingStar choice (0 off, 1 one microphone, 2 two) means for the settings of
-/// USB port 2: its device type and the two microphones' names.
+/// The headset's earpiece outputs, for PCSX2's list of output devices ("ps5-earpiece-1" ...).
+std::vector<std::pair<std::string, std::string>> OutputDevices();
+
+/// What the interface's choice (PS5/SingStar: 0 off, 1 one microphone, 2 two, 3 the USB headset)
+/// means for the settings of USB port 2: its device type, the microphones' names and the earpiece's.
 struct UsbSetup
 {
-	const char* type;    // "None" or "singstar"
-	const char* player1; // "" or "ps5-mic-1"
-	const char* player2; // "" or "ps5-mic-2"
+	const char* type;     // "None", "singstar" or "headset"
+	const char* player1;  // "" or "ps5-mic-1" (the headset's microphone too)
+	const char* player2;  // "" or "ps5-mic-2"
+	const char* earpiece; // "" or "ps5-earpiece-1" (the headset's)
 };
 UsbSetup SetupFor(int choice);
 
