@@ -475,6 +475,11 @@ void addSoftFloatRows(std::vector<Option>& rows, unsigned flags)
 	rows.push_back(toggle("Accurate floating point (VU1)",
 		"Does VU1's maths exactly as the PS2 does, for some graphics errors. Much slower: use it only when a game needs it. From PCSX2 Reliquary.",
 		CPU, "VU1.SoftFloat", false, flags));
+	// Expert and untested on the console; the cycle counts are read when the machine starts.
+	rows.push_back(toggle("Measured EE cycle counts",
+		"The EE's divide, MMI, FPU and COP0 instructions take the cycle counts measured on a console. Changes the speed "
+			"games run at. Untested on the console. Takes effect at the next start.",
+		CPU, "MeasuredEECycles", false, (flags | Option::Expert | Option::NextStart)));
 }
 
 Page emulationPage(int layer, bool forGame)
@@ -699,6 +704,7 @@ Page gameFixesPage()
 	rows.push_back(toggle("VU overflow hack", "To check for possible float overflows (Superman Returns).", FIX, "VUOverflowHack", false, f));
 	rows.push_back(toggle("VU sync", "Run behind. To avoid sync problems when reading or writing VU registers.", FIX, "VUSyncHack", false, f));
 	rows.push_back(toggle("VU XGKick sync", "Use accurate timing for VU XGKicks (slower).", FIX, "XgKickHack", false, f));
+	rows.push_back(toggle("Mix the S/PDIF output into the sound", "For games whose music is only on the digital output.", FIX, "MixSpdifAnalog", false, f));
 	rows.push_back(toggle("Count frames by blits", "Use alternative method to calculate internal FPS to avoid false readings in some games.", FIX, "BlitInternalFPSHack", false, f));
 	return page;
 }
@@ -1028,6 +1034,18 @@ Page graphicsPage(int layer, bool forGame)
 		"Keeps draws that use the rasterizer ordered view in the same render pass. Much less CPU work in scenes with "
 			"many lights. Takes effect the next time a game starts.",
 		GS, "PS5ROVKeepPass", true, Option::NextStart))));
+	rows.push_back(expert(hw(toggle("Keep a render target's pixels when it is dropped",
+		"Writes a dropped render target back to memory so a later read finds it. Experimental, untested on the console.",
+		GS, "PS5AgedTargetWriteback", false))));
+	rows.push_back(expert(hw(toggle("Palettes from render targets on the GPU",
+		"Builds palettes from render targets on the GPU, not by reading them back. Experimental, untested on the console.",
+		GS, "PS5GPUPaletteFromTarget", false))));
+	rows.push_back(expert(hw(toggle("Auto flush for every game",
+		"Turns on auto flush whatever the game. More accurate, slower. Experimental, untested on the console.",
+		GS, "PS5AutoFlushAll", false))));
+	rows.push_back(expert(hw(toggle("Shadow volumes counted in the stencil buffer",
+		"Draws shadow volumes through the stencil buffer. Experimental, untested on the console.",
+		GS, "PS5StencilShadowCounter", false))));
 	rows.push_back(list("Hardware download mode", "Changes synchronization behavior for GS downloads.", GS, "HWDownloadMode", 0,
 		{"Accurate", "Accurate, always whole (fewer readbacks)", "No readbacks (the threads run in step)", "Unsynchronised (not the same twice)",
 			"Off (the game reads nothing back)"},
@@ -1125,7 +1143,17 @@ Page audioPage(int layer)
 	rows.push_back(adv(strings("Synchronization",
 		"When the emulation isn't running at 100% speed, adjusts the tempo of the audio which produces much nicer sound "
 			"during fast-forward/slowdown.", OUT,
-		"SyncMode", "TimeStretch", {"None (the sound breaks up)", "Time stretching"}, {"Disabled", "TimeStretch"})));
+		"SyncMode", "TimeStretch", {"None (the sound breaks up)", "Time stretching", "Low latency (rate control)"},
+		{"Disabled", "TimeStretch", "LowLatency"})));
+	{
+		Option o = range("Low latency buffer", "How much sound the low latency mode keeps ready. Raise it if the sound crackles.", OUT,
+			"LowLatencyBufferMS", 20, 10, 100, 5, " ms", A);
+		o.enabled = [](int l) {
+			const std::optional<std::string> own = (l == Own) ? be->getString(Own, "SPU2/Output", "SyncMode") : std::nullopt;
+			return own.value_or(be->getString(Shared, "SPU2/Output", "SyncMode").value_or("TimeStretch")) == "LowLatency";
+		};
+		rows.push_back(adv(std::move(o)));
+	}
 	rows.push_back(strings("Expansion",
 		"Determines how audio is expanded from stereo to surround for supported games.",
 		OUT, "ExpansionMode", "Disabled", {"Off (stereo)", "Stereo with bass channel", "Four channels", "Four channels with bass", "5.1", "7.1"},

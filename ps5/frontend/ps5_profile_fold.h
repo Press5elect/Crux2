@@ -54,6 +54,15 @@ struct PS5ProfileSample
 	uint32_t reserved;
 };
 
+/// A named range of generated code ([lo, hi)): a recompiler's code reserve. Samples outside the
+/// program that fall in one are counted under its name.
+struct PS5ProfileRange
+{
+	uint64_t lo;
+	uint64_t hi;
+	const char* name;
+};
+
 class PS5ProfileSymbols
 {
 public:
@@ -160,7 +169,8 @@ private:
 /// functions the thread ran in most, the instructions it was interrupted at most are listed too.
 inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const PS5ProfileSymbols& symbols, uint64_t base,
 	double seconds, const char* prefix, std::vector<std::string>& lines, size_t sent = 0, uint64_t cpu_before = 0,
-	unsigned self_top = 25, unsigned stack_top = 12, unsigned caller_top = 8, unsigned spot_functions = 8)
+	unsigned self_top = 25, unsigned stack_top = 12, unsigned caller_top = 8, unsigned spot_functions = 8,
+	const PS5ProfileRange* ranges = nullptr, size_t range_count = 0)
 {
 	char text[320];
 	if (count == 0)
@@ -176,6 +186,7 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 	// program with this function the nearest of the program's on the stack.
 	std::vector<uint32_t> self(functions, 0), on_stack(functions, 0), outside_from(functions, 0);
 	uint32_t outside = 0, outside_unknown = 0, unnamed = 0;
+	std::vector<uint32_t> in_range(range_count, 0); // of the samples outside the program, those in each code range
 	uint32_t by_tag[4] = {0, 0, 0, 0}; // e, d, p, l
 
 	const auto function_of = [&](uint64_t address) -> int {
@@ -218,6 +229,14 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 		else
 		{
 			outside++;
+			for (size_t r = 0; r < range_count; r++)
+			{
+				if (sample.rip >= ranges[r].lo && sample.rip < ranges[r].hi)
+				{
+					in_range[r]++;
+					break;
+				}
+			}
 		}
 
 		// The words found by looking through the stack (the first `scanned` entries), by what was
@@ -287,6 +306,28 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 		"outside the program %.1f%%",
 		prefix, percent(by_tag[0]), percent(by_tag[1]), percent(by_tag[2]), percent(by_tag[3] + unnamed), percent(outside));
 	lines.emplace_back(text);
+
+	// Outside the program, split by the recompiler whose code the thread was running (the code
+	// ranges the emulator registered), the rest as "elsewhere".
+	if (outside != 0 && range_count != 0)
+	{
+		uint32_t matched = 0;
+		std::string split;
+		for (size_t r = 0; r < range_count; r++)
+		{
+			if (in_range[r] == 0)
+				continue;
+			matched += in_range[r];
+			std::snprintf(text, sizeof(text), "%s%s %.1f%%", split.empty() ? "" : ", ", ranges[r].name, percent(in_range[r]));
+			split += text;
+		}
+		if (matched != 0)
+		{
+			std::snprintf(text, sizeof(text), "%s generated code: %s; elsewhere outside the program %.1f%%", prefix, split.c_str(),
+				percent(outside - matched));
+			lines.emplace_back(text);
+		}
+	}
 
 	// The lists: the largest counts first, equal counts by address so that a list is the same
 	// every time.

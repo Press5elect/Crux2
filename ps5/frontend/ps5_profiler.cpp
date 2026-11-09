@@ -23,6 +23,8 @@
 
 #include "ps5_platform.h"
 #include "ps5_profile_fold.h"
+#include "ps5_profiler.h"
+#include "ps5_sync_stats.h"
 #include "ps5_thread_layout.h"
 
 #include <atomic>
@@ -107,6 +109,19 @@ namespace
 	PS5ProfileSymbols s_symbols;
 	uint64_t s_base = 0;
 	uint64_t s_end = 0; // the end of the program's code, as an address
+
+	// The generated code's ranges (registered by the emulator). An entry is written whole, then
+	// the count is published; the sampler thread copies the table when it folds a window.
+	constexpr unsigned MAX_RANGES = 16;
+	struct CodeRange
+	{
+		std::atomic<uint64_t> lo{0};
+		std::atomic<uint64_t> hi{0};
+		std::atomic<const char*> name{nullptr};
+	};
+	CodeRange s_ranges[MAX_RANGES];
+	std::atomic<unsigned> s_range_count{0};
+	std::mutex s_range_mutex; // registrations against each other only
 
 	bool InProgram(uint64_t address)
 	{
@@ -306,7 +321,17 @@ namespace
 		char prefix[32];
 		std::snprintf(prefix, sizeof(prefix), "profile: %s:", name);
 		lines.clear();
-		PS5ProfileFold(copy.data(), copy.size(), s_symbols, s_base, seconds, prefix, lines, sent, cpu_before);
+		PS5ProfileRange ranges[MAX_RANGES];
+		size_t range_count = 0;
+		for (unsigned r = 0, n = s_range_count.load(std::memory_order_acquire); r < n; r++)
+		{
+			ranges[range_count] = {s_ranges[r].lo.load(std::memory_order_relaxed), s_ranges[r].hi.load(std::memory_order_relaxed),
+				s_ranges[r].name.load(std::memory_order_relaxed)};
+			if (ranges[range_count].name && ranges[range_count].hi > ranges[range_count].lo)
+				range_count++;
+		}
+		PS5ProfileFold(copy.data(), copy.size(), s_symbols, s_base, seconds, prefix, lines, sent, cpu_before, 25, 12, 8, 8, ranges,
+			range_count);
 		for (const std::string& line : lines)
 			ps5px_log("%s", line.c_str());
 
@@ -353,6 +378,12 @@ namespace
 			window_start = now;
 			for (ProfiledThread& thread : s_threads)
 				Report(thread, seconds, copy, lines);
+			// How long the EE waited for the GS and the VU thread (ps5_sync_stats.h), over the run so far.
+			if (PS5_SYNC_STATS && (PS5SyncStats::Seconds(PS5SyncStats::GS) != 0.0 || PS5SyncStats::Seconds(PS5SyncStats::VU) != 0.0))
+			{
+				ps5px_log("profile: EE blocked on GS %.2f s, on VU %.2f s (since the start; this window was %.1f s)",
+					PS5SyncStats::Seconds(PS5SyncStats::GS), PS5SyncStats::Seconds(PS5SyncStats::VU), seconds);
+			}
 			// What else a window says (the host's: how evenly frames reached the screen).
 			if (void (*extra)() = s_window_extra.load(std::memory_order_acquire))
 				extra();
@@ -374,6 +405,30 @@ namespace
 		return ok;
 	}
 } // namespace
+
+extern "C" void ps5px_profile_register_code_range(const char* name, uint64_t lo, uint64_t hi)
+{
+	if (!name || hi <= lo)
+		return;
+	const std::lock_guard<std::mutex> lock(s_range_mutex);
+	const unsigned n = s_range_count.load(std::memory_order_relaxed);
+	for (unsigned r = 0; r < n; r++)
+	{
+		if (std::strcmp(s_ranges[r].name.load(std::memory_order_relaxed), name) == 0)
+		{
+			// (A range moved while a window is folded may be read half changed: that window's split is off.)
+			s_ranges[r].lo.store(lo, std::memory_order_relaxed);
+			s_ranges[r].hi.store(hi, std::memory_order_relaxed);
+			return;
+		}
+	}
+	if (n >= MAX_RANGES)
+		return;
+	s_ranges[n].lo.store(lo, std::memory_order_relaxed);
+	s_ranges[n].hi.store(hi, std::memory_order_relaxed);
+	s_ranges[n].name.store(name, std::memory_order_relaxed);
+	s_range_count.store(n + 1, std::memory_order_release);
+}
 
 // From main, before the emulator's threads exist.
 extern "C" void ps5px_profile_start(int all_threads)
@@ -412,6 +467,7 @@ extern "C" void ps5px_profile_start(int all_threads)
 	}
 
 	s_all_threads = (all_threads != 0);
+	PS5SyncStats::Enable();
 	s_running.store(true, std::memory_order_release);
 
 	pthread_t sampler;

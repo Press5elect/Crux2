@@ -9,7 +9,7 @@ PS5_Mesa (its merge commit `7d698f21d65`, on branch `crux2-radv-27b`; the merge 
 | Patch | From | What it does |
 | --- | --- | --- |
 | `0001` to `0011` | Crux2, PS5CEMU-HAR | The same files as in `ps5/patches/mesa` (see its README): they apply to the pin before the merge |
-| `0012-mesa-27.0-devel` | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) main at `6b41b56dea2` (2026-11-08, 27.0.0-devel; MIT), merged by Crux2 (first at `0618bfe0ffb`, 2026-10-31; the 531 commits since were merged onto that on 2026-11-08, see below) | Mesa's development branch merged into the PS5 RADV, in place of the 26.2.4/26.2.5 merge (which it contains). Files the PS5 port never changed are main's as they are; the PS5 changes are merged onto main with both kept. The PS5 winsys follows main's interfaces: buffers are zeroed when created (main dropped `RADEON_FLAG_ZERO_VRAM` and relies on the kernel clearing memory), CP DMA headers are tracked per chunk, and emulated task shaders stay enabled. The merge commit's message lists every conflict and its resolution |
+| `0012-mesa-27.0-devel` | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) main at `586fd4de6e1` (2026-11-09, 27.0.0-devel; MIT), merged by Crux2 (first at `0618bfe0ffb`, 2026-10-31; the 531 commits to `6b41b56dea2` on 2026-11-08, the 58 to `586fd4de6e1` on 2026-11-09, see below) | Mesa's development branch merged into the PS5 RADV, in place of the 26.2.4/26.2.5 merge (which it contains). Files the PS5 port never changed are main's as they are; the PS5 changes are merged onto main with both kept. The PS5 winsys follows main's interfaces: buffers are zeroed when created (main dropped `RADEON_FLAG_ZERO_VRAM` and relies on the kernel clearing memory), CP DMA headers are tracked per chunk, and emulated task shaders stay enabled. The merge commit's message lists every conflict and its resolution |
 | `0013-disk-cache-index-without-map-fixed` | Crux2 | As in `ps5/patches/mesa`: the shader cache's index is mapped where the system chooses when a reserved range (MAP_FIXED) is refused |
 | `0014-radv-ps5-gfx101-hardware-workarounds` | Crux2 | The GPU keeps GC 10.1.3's shader core and fixed-function bugs under its GFX10.3 identity, so Mesa's GFX10-only workarounds are applied to it too: ACO's GFX10.1 hazard mitigations (VMEMtoScalarWrite, VcmpxPermlane, VcmpxExecWAR, SMEMtoVectorWrite, LdsBranchVmemWAR, NSAToVMEM waits, the 0x3f branch fix, NSA at most 5 addresses and out of hard clauses, no negative unaligned scratch offsets, no `s_inst_prefetch`, the NGG barrier before GS_ALLOC_REQ) through a new `ac_compiler_info.has_gfx101_hazards`, GFX10's late-alloc limits (LATE_ALLOC_GS at most 64, CU2-CU3 kept out), and the bug flags `has_ngg_fully_culled_bug`, `has_htile_stencil_mipmap_bug`, `has_zero_index_buffer_bug` and `has_two_planes_iterate256_bug`. Instruction selection and register programming stay GFX10.3's. `RADV_PS5_GFX101_WORKAROUNDS=0` turns them off (on by default); each device logs `radv/ps5: GFX10.1 hardware workarounds on/off`. The memory clock is reported as 875 MHz, 448 GB/s (it was 896) |
 | `0015-wsi-videoout-119.88-Hz-on-a-VRR-display` | PSFlyCast (Press5elect), as it is | After the high-frame-rate mode is taken, a VRR display with nothing flipped yet refreshes at the 48 Hz floor of its window (about 20.8 ms); the settle check took that for a display still at 60 Hz and restored 59.94 Hz. A period of 19.5-22.5 ms is now 119.88 Hz on a VRR display, and `PS5_VIDEOOUT_59HZ` keeps a title at 59.94 Hz whatever `param.json` declares. Each outcome is logged (`wsi/videoout: 119.88 Hz selected ...`) |
@@ -43,6 +43,25 @@ big enough, instead of failing; and `0019-radv-ps5-a-buffer-piece-is-mapped-only
 f5610fe2709 (a freed buffer kept until the GPU has run what was submitted before) is not taken:
 `0007` already does that for buffers, and the two do not merge; it adds sparse ranges, which
 PCSX2's renderer does not use.
+
+## Mesa main to `586fd4de6e1` (2026-11-09)
+
+The 58 commits after `6b41b56dea2` (81 files, all but 3 in RADV, ACO, NIR and `ac/`) were applied
+as `git apply -3` of main's diff onto the previous merged tree. No conflicts: 9 of the files are
+also changed by the PS5 port (`ac_surface.c`, `aco_isel_helpers.cpp`, `radv_meta.h`,
+`radv_cmd_buffer.c`, `radv_formats.c`, `radv_image.c`, `radv_query.c`, `zink_resource.c`,
+`envvars.rst`) and merged automatically. What matters for RADV/ACO: the compute blit shader
+(`ac_nir_meta_cs_blit`) is rewritten with scaled blits, min/max resolve modes and Z flipping;
+RADV's meta copy/resolve/fast-clear paths follow it and get DCC/HTILE metadata fixes
+(`radv_meta_fixup_dst_metadata`, conditional rendering respected by buffer clears/copies and
+suspended in barriers and query resets, comp-to-single clears on Raven2/Renoir, FMASK compression
+off on transfer queues); ACO's `opt_postRA`, scheduler, ILP scheduler and `insert_delay_alu` are
+reworked for speed (no change in output intended); NIR re-indexes variable modes and drops
+`nir_downgrade_pls_vars.c`. `0013` to `0019` apply as they were (`0013` and `0014` byte for byte
+the same changes). Checks on a PC (LLVM 18, the PS5 winsys): the full RADV and ACO build with
+`ninja -k 0` (801 steps, no failures, `libvulkan_radeon.so` links), and the series on the pin, applied the way
+`build-radv-crux2.sh` does, gives tree `c52ada2d7729e832058fb0ade9177778e45689c5` (the merge
+without `0013`: `4edd8016c359551766b1b11bfcb7e65bf507352c`).
 
 ## Mesa main to `6b41b56dea2` (2026-11-08)
 

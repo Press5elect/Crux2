@@ -1547,6 +1547,9 @@ them) into a direct one. It takes three steps, the middle one on the console:
    (`PS5PX_PGO_EQUAL=1` with a folder for each game makes the games weigh alike), and
    `PS5PX_PGO=use ps5/tools/build.sh` compiles with it (in `build/ps5-pgo-use`; the build
    identity names the profile, and a new profile compiles everything again).
+   `PS5PX_PGO_PORTABLE_STATICS=1` (off by default) names static functions without their file's path so a
+   profile matches across checkouts; the committed profile was made without it, so make a new profile
+   with the flag set (on the generate build too) before setting it for the use build.
 
 What it is worth is for the same scene to measure before and after; nothing has been measured
 yet.

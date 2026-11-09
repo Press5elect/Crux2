@@ -2,6 +2,20 @@
 
 ## v1.0.20 (2026-11-06)
 
+- Added (EE, VU, GS, audio; from the ARMSX2, LRPS2 and PCSX2 Reliquary studies, PCSX2 v2.9.164):
+  EE/VU float and timing fixes, event tests and opcode cycle tables, MTVU ring fixes, Vulkan
+  texture-cache and device fixes (mid-frame submit, hazard copies, pipeline memo, hash cache),
+  auto-flush handler tables, GIF counter false-sharing fix, low-latency audio sync (Reliquary's
+  rate controller, Output > Low-latency buffer), DEV9 TCP fixes, the S/PDIF mix gamefix, DVD timing,
+  and a profiler with sync-wait statistics. Nothing here has run on a console yet.
+- Added (Expert settings, all off): measured EE cycles, aged-target write-back, auto-flush all,
+  shadow-volume stencil counter, GPU palette from target. They change behaviour and are untested on
+  the console: turn one on to try it.
+- Not done: parking of aged targets, scale-aware CLUT sampling, auto-flush runs, the +4 event test
+  after MTC0/EI/ERET, the integer square-root shortcut in the soft recompilers, constant-Z fills.
+- Note: the RSQRT.S negative-zero change that was proposed was not made: a console capture showed
+  the existing behaviour was right.
+- Changed: the Mesa/RADV patch follows Mesa main at 586fd4de6e1 (2026-11-09).
 - Changed: SMAA is a switch beside FXAA (Settings > Picture > Post-processing) instead of an entry of
   the Look list, and runs before a Look, so the two can be used together.
 - Fixed: every look, and SMAA, left the screen black with no overlay: the look's passes bound their own
