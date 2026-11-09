@@ -4,14 +4,13 @@
 # Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 # Crux2 - the interface on a PC (ps5/tests/bigpicture/preview.cpp).
 #
-#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|all|dump]
+#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|all]
 #
 # Builds the interface's screens with PCSX2's own ImGui (and FreeType, as the title has it) and
 # the preview's Backend. "crawl" (the default): with the address and undefined-behaviour
 # sanitizers, every settings row changed in every way, then 60,000 steps of random buttons across
 # all screens, twice with different seeds. "shots": optimised, a picture of each screen (PNG, in
-# <work folder>/shots), which is what one looks at after a change to a screen. "all": both. "dump":
-# every settings row as JSON (<work folder>/settings-dump.json), for ps5/tools/settings-text.py.
+# <work folder>/shots), which is what one looks at after a change to a screen. "all": both.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -25,8 +24,7 @@ mkdir -p "$work/fonts" "$work/shots"
 
 # The fonts the title draws with.
 cp "$root/vendor/pcsx2/bin/resources/fonts/Roboto-Regular.ttf" "$root/vendor/pcsx2/bin/resources/fonts/fa-solid-900.ttf" \
-    "$ps5/package/resources/fonts/Roboto-Bold.ttf" "$ps5/package/resources/fonts/Saira-ExtraBold.ttf" \
-    "$ps5/package/resources/fonts/NotoSansCJK-Subset.otf" "$work/fonts/"
+    "$ps5/package/resources/fonts/Roboto-Bold.ttf" "$ps5/package/resources/fonts/Saira-ExtraBold.ttf" "$work/fonts/"
 
 sources=("$here/preview.cpp" "$front"/bp_*.cpp "$imgui/src/imgui.cpp" "$imgui/src/imgui_draw.cpp" "$imgui/src/imgui_tables.cpp"
     "$imgui/src/imgui_widgets.cpp" "$imgui/src/imgui_freetype.cpp")
@@ -50,12 +48,6 @@ build() { # build NAME FLAGS...
 }
 
 status=0
-if [[ $what == dump ]]; then
-    build dump -O1
-    "$work/dump/preview" dump-settings "$work/fonts" > "$work/settings-dump.json"
-    echo "preview: $(grep -c '"kind"' "$work/settings-dump.json") rows in $work/settings-dump.json"
-    exit 0
-fi
 if [[ $what == crawl || $what == all ]]; then
     echo "== the interface, with the sanitizers"
     build asan -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer

@@ -151,26 +151,6 @@ static void TestFold()
 	for (const std::string& line : lines)
 		std::printf("    %s\n", line.c_str());
 
-	// Without code ranges there is no split line; with them, the samples outside the program are
-	// told apart by range (the two outside samples are at 0x800012340).
-	CHECK(!Has(lines, "generated code:"));
-	{
-		const PS5ProfileRange ranges[] = {{0x700000000ull, 0x700100000ull, "EE recompiler"},
-			{0x800012000ull, 0x800013000ull, "VU1"}};
-		std::vector<std::string> split;
-		PS5ProfileFold(samples.data(), samples.size(), symbols, BASE, 10.0, "p:", split, 0, 0, 25, 12, 8, 8, ranges, 2);
-		CHECK(Has(split, "p: generated code: VU1 20.0%; elsewhere outside the program 0.0%"));
-		// A range nothing was in leaves no line, and one that holds only some leaves the rest "elsewhere".
-		const PS5ProfileRange none[] = {{0x700000000ull, 0x700100000ull, "EE recompiler"}};
-		split.clear();
-		PS5ProfileFold(samples.data(), samples.size(), symbols, BASE, 10.0, "p:", split, 0, 0, 25, 12, 8, 8, none, 1);
-		CHECK(!Has(split, "generated code:"));
-		const PS5ProfileRange edge[] = {{0x800012340ull, 0x800012341ull, "IOP recompiler"}, {0x800012000ull, 0x800013000ull, "VU1"}};
-		split.clear();
-		PS5ProfileFold(samples.data(), samples.size(), symbols, BASE, 10.0, "p:", split, 0, 0, 25, 12, 8, 8, edge, 2);
-		CHECK(Has(split, "p: generated code: IOP recompiler 20.0%; elsewhere outside the program 0.0%")); // first match wins
-	}
-
 	CHECK(Has(lines, "profile: graphics: 10.0 s, 10 samples, on a processor 85% of the time"));
 	CHECK(Has(lines, "the emulator 30.0%, the graphics driver 40.0%, the platform layer 0.0%, other libraries 10.0%, "
 					 "outside the program 20.0%"));

@@ -42,9 +42,6 @@ for argument in "$@"; do
     esac
 done
 vulkan=${PS5_VULKAN_DIR:-$parent/PS5_Vulkan}
-# The PS5_Vulkan revision Crux2 is built with (its link recipe, native tool, libc.prx, packaging and
-# the PS5 Mesa revision RADV is built from); check-sources.sh reads it here.
-vulkan_revision=ace98a99460c95a8d2821a9e33935c7b71070f7f
 mesa=${PS5_MESA_FORK:-$parent/PS5_Mesa}
 sdk_fork=${PS5_PAYLOAD_SDK_FORK:-$parent/PS5_PayloadSDK}
 problems=0
@@ -83,11 +80,6 @@ done
 
 step "PS5_Vulkan's build"
 if [[ -d $vulkan ]]; then
-    if [[ $(git -C "$vulkan" rev-parse HEAD 2> /dev/null) == "$vulkan_revision" ]]; then
-        ok "PS5_Vulkan at Crux2's pin ${vulkan_revision:0:12}"
-    else
-        todo "PS5_Vulkan is at $(git -C "$vulkan" rev-parse --short HEAD), Crux2 is built with ${vulkan_revision:0:12}: (cd $vulkan && git fetch origin && git checkout $vulkan_revision)"
-    fi
     sdk_pin=$(sed -n 's/^sdk_revision=//p' "$vulkan/tools/setup-native-dependencies.sh")
     if [[ -f $vulkan/.deps/native/ps5-payload-sdk/.ps5-sdk-revision &&
             $(< "$vulkan/.deps/native/ps5-payload-sdk/.ps5-sdk-revision") == "$sdk_pin" ]]; then

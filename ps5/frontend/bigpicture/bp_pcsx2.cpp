@@ -34,7 +34,6 @@
 #include "../ps5_disc_image.h"
 #include "../ps5_about.h"
 #include "../vfs/ps5_vfs.h"
-#include "../ps5_shares.h"
 #include "../ps5_extras.h"
 #include "../ps5_input_source.h"
 #include "../ps5_jobs.h"
@@ -101,7 +100,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <pthread.h>
 #include <set>
 #include <thread>
@@ -1674,7 +1672,7 @@ public:
 			PS5UI::Toast(kept < 90.0 ? fmt::format("Done. Only {:.0f}% of the time came through: the gaps are the crackle. "
 												   "crux2-boot.log's \"mic test\" lines say why.",
 											kept) :
-										 std::string("Done. If it sounded clear, the game will hear the same."));
+										 std::string("Done. If it sounded clear, SingStar will hear the same."));
 			s_testing = false;
 		}).detach();
 	}
@@ -1847,28 +1845,26 @@ public:
 					"Put them back", "Leave them");
 			},
 			bp::Option::AllGames));
-		// SingStar (v1.5.0): the PlayStation 2's USB microphones are the console's (ps5_mic.h); and
-		// the Logitech USB headset of SOCOM and other online games (v1.0.20).
+		// SingStar (v1.5.0): the PlayStation 2's USB microphones are the console's (ps5_mic.h).
 		{
-			page.rows.push_back(Heading("USB MICROPHONES"));
+			page.rows.push_back(Heading("SINGSTAR"));
 			bp::Option mics;
 			mics.kind = bp::Option::IntList;
-			mics.label = "USB microphones";
+			mics.label = "SingStar microphones";
 			mics.desc = "Uses the controller's microphone or a headset as the PS2's USB microphones, for SingStar and other singing "
-				"games; or as the USB headset of SOCOM and other games with voice, whose earpiece plays on player 1's headset "
-				"(or with the game's sound). USB port 2.";
+				"games.";
 			mics.section = "PS5";
 			mics.key = "SingStar";
 			mics.defInt = 0;
-			mics.names = {"None", "SingStar, one: player 1's", "SingStar, two: players 1 and 2", "Headset (SOCOM): player 1's"};
-			mics.ints = {0, 1, 2, 3};
+			mics.names = {"None", "One: player 1's", "Two: players 1 and 2"};
+			mics.ints = {0, 1, 2};
 			mics.flags = bp::Option::NextStart;
 			page.rows.push_back(std::move(mics));
 			for (int player = 0; player < 2; player++)
 			{
 				page.rows.push_back(Action(fmt::format("Test player {}'s microphone", player + 1),
 					"Speak or sing for five seconds; it is played back to you as a game would hear it, and the boot log's \"mic test\" "
-					"lines say how the microphone did (the headset's microphone is player 1's). Close the game first",
+					"lines say how the microphone did. Close the game first",
 					[player] { TestMicrophone(player); }, bp::Option::AllGames));
 			}
 		}
@@ -2775,314 +2771,6 @@ public:
 		ps5px_log("folders: %s now %s", kept.label, kept.now->c_str());
 	}
 
-	// ---- v1.0.19: network shares, added and changed here (from OGBox 0.0.3's share form) ----------
-
-	static std::string ShareKind(const PS5Shares::Share& s)
-	{
-		return s.nfs ? "NFS (a NAS or a Linux PC)" : "SMB (a Windows PC, most NAS)";
-	}
-
-	// The servers a search found, offered once it is done (the search runs on a thread of its own).
-	void SharesFrame()
-	{
-		std::vector<PS5Shares::FoundServer> found;
-		{
-			const std::lock_guard<std::mutex> lock(m_found_lock);
-			if (!m_found_ready)
-				return;
-			m_found_ready = false;
-			found.swap(m_found);
-		}
-		if (!m_share_draft)
-			return;
-		if (found.empty())
-		{
-			bp::toast("No SMB server answered on this network. Type its address instead.", 6.f);
-			return;
-		}
-		std::vector<std::string> names;
-		for (const PS5Shares::FoundServer& f : found)
-			names.push_back(f.name.empty() ? f.ip : f.name + "  (" + f.ip + ")");
-		bp::pick("The servers on this network", names, -1, [this, found](int i) {
-			if (!m_share_draft || i < 0 || i >= static_cast<int>(found.size()))
-				return;
-			m_share_draft->host = found[static_cast<size_t>(i)].ip;
-			if (m_share_draft->name.empty() && !found[static_cast<size_t>(i)].name.empty() && m_share_draft->path.empty())
-				m_share_draft->name = found[static_cast<size_t>(i)].name;
-			m_pages++;
-		});
-	}
-
-	void FindServers()
-	{
-		if (m_finding.exchange(true))
-		{
-			bp::toast("Still looking for servers...");
-			return;
-		}
-		bp::toast("Looking for SMB servers on this network (a few seconds)...", 3.f);
-		std::thread([this] {
-			std::vector<PS5Shares::FoundServer> found = PS5Shares::findServers();
-			ps5px_log("network shares: %zu SMB server(s) answered on the local network", found.size());
-			{
-				const std::lock_guard<std::mutex> lock(m_found_lock);
-				m_found = std::move(found);
-				m_found_ready = true;
-			}
-			m_finding = false;
-		}).detach();
-	}
-
-	// The draft into the shares, mounted, and network.cfg written.
-	void SaveShare()
-	{
-		PS5Shares::Share s = *m_share_draft;
-		while (!s.path.empty() && (s.path.back() == '/' || s.path.back() == ' '))
-			s.path.pop_back();
-		while (!s.nfs && !s.path.empty() && s.path.front() == '/')
-			s.path.erase(0, 1);
-		if (s.nfs && !s.path.empty() && s.path.front() != '/')
-			s.path.insert(0, "/");
-		if (s.host.empty() || s.path.empty() || s.path == "/")
-		{
-			bp::toast(s.host.empty() ? "Give the share's server first." : "Give the share's folder first.");
-			return;
-		}
-		if (s.nfs)
-			s.user.clear(), s.password.clear();
-		if (s.name.empty())
-			s.name = PS5Shares::shareDefaultName(s);
-		s.mount.clear();
-
-		PS5Shares::ShareFile& file = PS5Shares::Current();
-		PS5Shares::Share* target = nullptr;
-		const bool changing = m_share_index >= 0 && m_share_index < static_cast<int>(file.shares.size());
-		if (changing)
-		{
-			PS5Shares::unmountShare(file.shares[static_cast<size_t>(m_share_index)]);
-			file.shares[static_cast<size_t>(m_share_index)] = s;
-			target = &file.shares[static_cast<size_t>(m_share_index)];
-		}
-		else
-		{
-			file.shares.push_back(s);
-			target = &file.shares.back();
-		}
-		std::string why;
-		const bool mounted = PS5Shares::mountShare(*target, file, PS5Shares::MountsTaken(target), &why);
-		std::string saved_why;
-		const bool saved = PS5Shares::Save(&saved_why);
-		ps5px_log("network shares: %s \"%s\", %s, %s%s", changing ? "changed" : "added", target->name.c_str(),
-			PS5Shares::shareAddress(*target).c_str(), mounted ? ("at " + target->mount).c_str() : ("not mounted: " + why).c_str(),
-			saved ? "" : ("; network.cfg not written: " + saved_why).c_str());
-		m_share_draft.reset();
-		m_share_index = -1;
-		m_pages++;
-		if (!saved)
-			bp::toast("The share is there until Crux2 closes, but network.cfg could not be written: " + saved_why, 7.f);
-		else if (!mounted)
-			bp::toast("The share was kept, but " + why + ".", 6.f);
-		else
-			bp::toast(target->name + " added. Looking for its games...", 4.f);
-		scan(false);
-	}
-
-	void RemoveShare(size_t index)
-	{
-		PS5Shares::ShareFile& file = PS5Shares::Current();
-		if (index >= file.shares.size())
-			return;
-		const std::string name = file.shares[index].name;
-		PS5Shares::unmountShare(file.shares[index]);
-		file.shares.erase(file.shares.begin() + static_cast<long>(index));
-		std::string why;
-		const bool saved = PS5Shares::Save(&why);
-		ps5px_log("network shares: \"%s\" taken away%s", name.c_str(), saved ? "" : ("; network.cfg not written: " + why).c_str());
-		m_pages++;
-		bp::toast(saved ? name + " taken away: its games left the library." : "network.cfg could not be written: " + why, 5.f);
-		scan(false);
-	}
-
-	// The account the SMB shares without one of their own use: changed, and those shares connected with it again.
-	void SetSharesAccount(const std::string& user, const std::string& password)
-	{
-		PS5Shares::ShareFile& file = PS5Shares::Current();
-		file.user = user.empty() ? "guest" : user;
-		file.password = password;
-		for (PS5Shares::Share& s : file.shares)
-		{
-			if (s.nfs || !s.user.empty())
-				continue;
-			PS5Shares::unmountShare(s);
-			PS5Shares::mountShare(s, file, PS5Shares::MountsTaken(&s));
-		}
-		std::string why;
-		if (!PS5Shares::Save(&why))
-			bp::toast("network.cfg could not be written: " + why, 6.f);
-		ps5px_log("network shares: the shares' own account is now %s", file.user.c_str());
-		m_pages++;
-		scan(false);
-	}
-
-	void SharesRows(bp::Page& page)
-	{
-		constexpr unsigned flags = bp::Option::NoGame;
-		page.rows.push_back(Heading("NETWORK SHARES"));
-		PS5Shares::ShareFile& file = PS5Shares::Current();
-
-		if (m_share_draft)
-		{
-			PS5Shares::Share& d = *m_share_draft;
-			page.rows.push_back(Heading(m_share_index < 0 ? "A NEW SHARE" : "CHANGING " + file.shares[static_cast<size_t>(m_share_index)].name));
-			bp::Option kind = Action("Kind", "SMB for a Windows PC and most NAS; NFS for a NAS or a Linux PC that shares its folders that way.",
-				[this] {
-					bp::pick("Kind of share", {"SMB (a Windows PC, most NAS)", "NFS (a NAS or a Linux PC)"}, m_share_draft->nfs ? 1 : 0,
-						[this](int i) {
-							if (m_share_draft)
-								m_share_draft->nfs = (i == 1);
-							m_pages++;
-						});
-				},
-				flags);
-			kind.info = [k = ShareKind(d)] { return k; };
-			page.rows.push_back(std::move(kind));
-
-			bp::Option server = Action("Server", "The PC or NAS: found on this network, or typed (its IP address is the safe choice).",
-				[this] {
-					bp::pick("The share's server", {"Find SMB servers on this network", "Type its address"}, -1, [this](int i) {
-						if (i == 0)
-							FindServers();
-						else if (i == 1 && m_share_draft)
-							bp::editText("Server (192.168.1.10)", m_share_draft->host, false, [this](const std::string& text) {
-								if (m_share_draft)
-									m_share_draft->host = text;
-								m_pages++;
-							});
-					});
-				},
-				flags);
-			server.info = [h = d.host] { return h.empty() ? std::string("Not set") : h; };
-			page.rows.push_back(std::move(server));
-
-			bp::Option path = Action(d.nfs ? "Export and folder" : "Share and folder",
-				d.nfs ? "The folder on the NAS, as it exports it: /volume1/games/ps2." : "The share and the folder in it with the games: Games/PS2.",
-				[this] {
-					const bool nfs = m_share_draft->nfs;
-					bp::editText(nfs ? "Export and folder (/volume1/games/ps2)" : "Share and folder (Games/PS2)", m_share_draft->path, false,
-						[this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->path = text;
-							m_pages++;
-						},
-						160);
-				},
-				flags);
-			path.info = [p = d.path] { return p.empty() ? std::string("Not set") : p; };
-			page.rows.push_back(std::move(path));
-
-			bp::Option name = Action("Name", "How the share is shown in the library. Left empty: its last folder.",
-				[this] {
-					bp::editText("Name", m_share_draft->name, false, [this](const std::string& text) {
-						if (m_share_draft)
-							m_share_draft->name = text;
-						m_pages++;
-					});
-				},
-				flags);
-			name.info = [n = d.name, fallback = PS5Shares::shareDefaultName(d)] { return n.empty() ? fallback : n; };
-			page.rows.push_back(std::move(name));
-
-			if (!d.nfs)
-			{
-				bp::Option user = Action("User", "An account of the share's own. Left empty: the shares' account below (guest for an open share).",
-					[this] {
-						bp::editText("User (DOMAIN;user works too)", m_share_draft->user, false, [this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->user = text;
-							m_pages++;
-						});
-					},
-					flags);
-				user.info = [u = d.user] { return u.empty() ? std::string("The shares' account") : u; };
-				page.rows.push_back(std::move(user));
-				bp::Option password = Action("Password", "The password of the share's own account.",
-					[this] {
-						bp::editText("Password", m_share_draft->password, true, [this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->password = text;
-							m_pages++;
-						});
-					},
-					flags);
-				password.info = [has = !d.password.empty()] { return has ? std::string("\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2") : std::string("None"); };
-				page.rows.push_back(std::move(password));
-			}
-			page.rows.push_back(Action(m_share_index < 0 ? "Add the share" : "Save the share",
-				"Connects to it now and adds its games to the library; network.cfg keeps it for the next start.", [this] { SaveShare(); }, flags));
-			page.rows.push_back(Action("Cancel", "Leaves the share as it was.", [this] {
-				m_share_draft.reset();
-				m_share_index = -1;
-				m_pages++;
-			}, flags));
-			return;
-		}
-
-		page.rows.push_back(Action("Add a network share",
-			"A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS). Typed here with the on-screen "
-			"keyboard: network.cfg is written for you.",
-			[this] {
-				m_share_draft = PS5Shares::Share{};
-				m_share_index = -1;
-				m_pages++;
-			},
-			flags));
-		for (size_t i = 0; i < file.shares.size(); i++)
-		{
-			const PS5Shares::Share& s = file.shares[i];
-			bp::Option row = Action(s.name, "A network share. Press to change it or take it away.",
-				[this, i] {
-					if (i >= PS5Shares::Current().shares.size())
-						return;
-					const std::string name = PS5Shares::Current().shares[i].name;
-					bp::pick(name, {"Change it", "Take it away"}, -1, [this, i, name](int choice) {
-						if (choice == 0 && i < PS5Shares::Current().shares.size())
-						{
-							m_share_draft = PS5Shares::Current().shares[i];
-							m_share_draft->mount.clear();
-							m_share_index = static_cast<int>(i);
-							m_pages++;
-						}
-						else if (choice == 1)
-						{
-							bp::confirm("Take this share away?", name + "\n\nIts games leave the library. Nothing on the PC or NAS is deleted.",
-								[this, i](bool yes) {
-									if (yes)
-										RemoveShare(i);
-								},
-								"Take it away", "Keep it");
-						}
-					});
-				},
-				flags);
-			row.info = [address = PS5Shares::shareAddress(s), mounted = !s.mount.empty()] {
-				return mounted ? address : address + " (not connected)";
-			};
-			page.rows.push_back(std::move(row));
-		}
-		bp::Option account = Action("The shares' account",
-			"The user and password for the SMB shares without an account of their own: guest and no password for an open share.",
-			[this] {
-				const PS5Shares::ShareFile& now = PS5Shares::Current();
-				bp::editText("User for the shares (guest: an open share)", now.user, false, [this](const std::string& user) {
-					bp::editText("Password (empty: none)", PS5Shares::Current().password, true,
-						[this, user](const std::string& password) { SetSharesAccount(user, password); });
-				});
-			},
-			flags);
-		account.info = [u = file.user] { return u.empty() ? std::string("guest") : u; };
-		page.rows.push_back(std::move(account));
-	}
-
 	bp::Page foldersPage() override
 	{
 		bp::Page page;
@@ -3141,8 +2829,6 @@ public:
 		}
 		for (const std::string& path : found)
 			page.rows.push_back(Line("Found by Crux2", Shown(path)));
-
-		SharesRows(page);
 
 		page.rows.push_back(Heading("WHERE CRUX2 KEEPS ITS FILES"));
 		for (const KeptFolder& kept : KeptFolders())
@@ -3726,7 +3412,6 @@ public:
 	bp::Page logPage() override
 	{
 		bp::Page page{"\xef\x85\x9c", "Log", {}};
-		LogSettingsRows(page);
 		page.rows.push_back(Heading("WHAT CRUX2 WROTE DOWN"));
 		const auto show = [](const char* title, std::string path) {
 			return [title, path = std::move(path)] {
@@ -3740,21 +3425,7 @@ public:
 		const PS5Logs::Files files = PS5Jobs::LogFiles();
 		page.rows.push_back(Action("This run",
 			"Shows the log of this session.",
-			[show, now = files.now] {
-				// (kept in memory only: its folder's drive is out)
-				std::string text;
-				if (PS5Platform::LogInMemory(&text))
-				{
-					std::vector<std::string> lines = PS5Logs::TailText(text, 800, 2000);
-					if (lines.empty())
-						bp::toast("There is no such log (yet).");
-					else
-						bp::showText("The log of this run (kept in memory)", std::move(lines));
-					return;
-				}
-				show("The log of this run", now)();
-			},
-			bp::Option::AllGames));
+			show("The log of this run", files.now), bp::Option::AllGames));
 		{
 			bp::Option before = Action("The run before",
 				"Shows the log of the previous session, including a crash report if it crashed.",
@@ -3780,70 +3451,8 @@ public:
 		}
 		if (places.empty())
 			page.rows.push_back(Line("Copy the logs", "Put a USB drive in, or name a share in network.cfg; then open this page again"));
-		page.rows.push_back(Line("This run's log", files.now.empty() ? std::string("No file (kept in memory, or off)") : Shown(files.now)));
+		page.rows.push_back(Line("On the console", Shown(ps5px_title_dir()) + "crux2-boot.log"));
 		return page;
-	}
-
-	// v1.0.19: what is logged and where (ps5_platform.cpp reads these at the start, by hand).
-	void LogSettingsRows(bp::Page& page)
-	{
-		constexpr unsigned flags = bp::Option::AllGames;
-		page.rows.push_back(Heading("WHAT IS LOGGED, AND WHERE"));
-		page.rows.push_back(Toggle("Logs",
-			"Off: no logs at all, from the next start: no crux2-boot.log, no emulog.txt, no copy in the console's kernel log, the "
-			"graphics driver's messages dropped. A problem can then not be looked into; turn them on again to report one.",
-			"PS5", "Logs", true, flags));
-
-		bp::Option place = Action("Logs go to",
-			"The console's own drive (the title folder), or a USB drive's Crux2-logs folder, which spares the console's drive the "
-			"writes. A drive that is out at the start: the boot log is kept in memory for that session. From the next start.",
-			[this] {
-				std::vector<std::string> names = {"This console (the title folder)"};
-				std::vector<std::string> paths = {""};
-				for (const PS5Jobs::Place& p : PS5Jobs::Places())
-				{
-					if (p.path.rfind("/mnt/usb", 0) != 0)
-						continue; // (a share takes whole files only: a log can't be written to one as it grows)
-					names.push_back(p.name + " (" + p.path + "/Crux2-logs)");
-					paths.push_back(p.path + "/Crux2-logs");
-				}
-				const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-				int at = 0;
-				for (size_t i = 0; i < paths.size(); i++)
-					if (paths[i] == now)
-						at = static_cast<int>(i);
-				if (names.size() == 1)
-					names[0] += " (put a USB drive in for another place)";
-				bp::pick("Logs go to", names, at, [this, paths](int i) {
-					if (i < 0 || i >= static_cast<int>(paths.size()))
-						return;
-					Host::SetBaseStringSettingValue("PS5", "LogPlace", paths[static_cast<size_t>(i)].c_str());
-					Host::CommitBaseSettingChanges();
-					ps5px_log("logs: from the next start in %s", paths[static_cast<size_t>(i)].empty() ? "the title folder" : paths[static_cast<size_t>(i)].c_str());
-					bp::toast("The logs go there from the next start.");
-					m_pages++;
-				});
-			},
-			flags);
-		place.info = [] {
-			const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-			return now.empty() ? std::string("This console") : now;
-		};
-		page.rows.push_back(std::move(place));
-		page.rows.push_back(Toggle("Crux2's boot log",
-			"crux2-boot.log: the start, each game, its speed and pacing, and what went wrong (and a crash report). The file to "
-			"send with a report. From the next start.",
-			"PS5", "LogBoot", true, flags));
-		page.rows.push_back(Toggle("The graphics driver's messages",
-			"What the graphics driver prints, in the boot log: needed for a report of a graphics fault. From the next start.",
-			"PS5", "LogDriver", true, flags));
-		page.rows.push_back(Toggle("The emulator's own log",
-			"emulog.txt: PCSX2's own messages about the game (its disc, memory cards, the game's own debug output).",
-			"Logging", "EnableFileLogging", true, flags));
-		page.rows.push_back(Toggle("A copy in the console's kernel log",
-			"Each line of the boot log also to klog, for a computer that reads the console's log as it runs. Nothing is written "
-			"to a drive for it. From the next start.",
-			"PS5", "LogKlog", true, flags));
 	}
 
 	// What PCSX2's game database recommends for the open game and does not set by itself: the
@@ -3897,7 +3506,7 @@ public:
 		page.rows.push_back(Line("Build", ps5px_build_identity()));
 		page.rows.push_back(Line("Licence", "GPL-3.0 or later, with credit to Press5elect required (NOTICE.txt). LEGAL.txt and licenses/ in the title "
 											 "folder name every part"));
-		page.rows.push_back(Line("Log", PS5Platform::LogPath().empty() ? std::string("No file this run (Settings > Debug > Logs)") : Shown(PS5Platform::LogPath())));
+		page.rows.push_back(Line("Log", Shown(ps5px_title_dir()) + "crux2-boot.log"));
 		page.rows.push_back(Line("Crux2's files", PS5Platform::OutsideFolder().empty() ?
 			fmt::format("{} (a folder /data/crux2 is used in its place when there is one)", Shown(EmuFolders::DataRoot)) :
 			fmt::format("{}, outside the title folder", Shown(EmuFolders::DataRoot))));
@@ -4136,9 +3745,8 @@ public:
 		else if (w == "saves")
 		{
 			rows.push_back(Toggle("Sleep-safe saving",
-				"Saves the game's state when you open the PS5 menu (at most once a minute), so you can continue after the console "
-					"goes to rest mode. Every five minutes a state is also kept in memory, and written to the console only if "
-					"Crux2 crashes: the console's drive is spared the writes.",
+				"Saves the game's state when you open the PS5 menu and every five minutes, so you can continue after the "
+					"console goes to rest mode.",
 				"PS5", "SleepSafe", true, A));
 		}
 		else if (w == "network")
@@ -4279,7 +3887,6 @@ public:
 
 	void frame() override
 	{
-		SharesFrame();
 		// L1 and R1 held as the title starts: a television that shows nothing at 120 Hz gets 60 Hz
 		// from the next start (the screen is open by now: this start stays as it is).
 		if (!m_safe_asked && m_frame < 150 && (pad().held & (bp::Pad::L1 | bp::Pad::R1)) == (bp::Pad::L1 | bp::Pad::R1))
@@ -5422,9 +5029,6 @@ private:
 				si->SetUIntValue("USB2", "singstar_subtype", 0);
 				si->SetStringValue("USB2", "singstar_player1_device_name", setup.player1);
 				si->SetStringValue("USB2", "singstar_player2_device_name", setup.player2);
-				// The USB headset (choice 3): player 1's microphone, the earpiece to player 1's headset.
-				si->SetStringValue("USB2", "headset_input_device_name", setup.earpiece[0] ? setup.player1 : "");
-				si->SetStringValue("USB2", "headset_output_device_name", setup.earpiece);
 			}
 		}
 		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the
@@ -5908,14 +5512,6 @@ private:
 	u32 m_unlabelled = 0;
 
 	unsigned m_pages = 1;
-	// v1.0.19: Settings > Folders' network share being added (m_share_index -1) or changed, and the
-	// servers found on the network for it (found on a thread, offered at the next frame).
-	std::optional<PS5Shares::Share> m_share_draft;
-	int m_share_index = -1;
-	std::atomic<bool> m_finding{false};
-	std::mutex m_found_lock;
-	bool m_found_ready = false;
-	std::vector<PS5Shares::FoundServer> m_found;
 	// The backups: the place whose list was asked for, and how many lists had been read when the
 	// pages were last made.
 	std::string m_backup_asked;

@@ -24,7 +24,6 @@
 // this mechanism is taken from, has shown that on a console.
 
 #include "ps5_platform.h"
-#include "ps5_profiler.h"
 
 #include <atomic>
 #include <cerrno>
@@ -218,12 +217,6 @@ int main(int argc, char** argv)
 	// Named before the profiler runs: not a thread of its.
 	ps5px_profile_thread_named("GS");
 
-	// Code ranges registered while the sampler runs, and again by name, change nothing the test sees
-	// (no thread of the test runs generated code).
-	ps5px_profile_register_code_range("EE recompiler", 0x700000000ull, 0x700100000ull);
-	ps5px_profile_register_code_range("EE recompiler", 0x700000000ull, 0x700200000ull);
-	ps5px_profile_register_code_range("VU1", 0x700300000ull, 0x700400000ull);
-	ps5px_profile_register_code_range("empty", 5, 5);
 	ps5px_profile_start(1);
 	check(Has(s_log, "profile: the graphics, emulation and VU threads every 2 ms"), "the profiler starts");
 	ps5px_profile_start(1); // a second start changes nothing

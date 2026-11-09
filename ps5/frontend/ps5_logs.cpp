@@ -136,12 +136,8 @@ const char* SignalMeaning(const std::string& name)
 
 std::vector<std::string> Tail(const std::string& path, size_t most, size_t width, size_t bytes)
 {
-	return TailText(ReadEnd(path, bytes), most, width);
-}
-
-std::vector<std::string> TailText(const std::string& data, size_t most, size_t width)
-{
 	std::vector<std::string> lines;
+	const std::string data = ReadEnd(path, bytes);
 	width = std::max<size_t>(width, 40);
 	size_t at = 0;
 	while (at < data.size())

@@ -60,11 +60,6 @@ void ps5px_profile_thread_named(const char* name);
 
 /// The boot log's descriptor (-1: none), for the crash report.
 int ps5px_log_fd(void);
-// Everything logged so far into the file and onto the disk (waits up to 5 s for the log's writer).
-void ps5px_log_flush(void);
-// The same, at a moment that matters (a game starts or closes): the only times the boot log is
-// synced to the drive while Crux2 runs (v1.0.19).
-void ps5px_log_checkpoint(void);
 
 /// Gives the calling thread a stack of its own for the crash report, so that a stack overflow can
 /// be reported too (ps5_crash.cpp). The emulator's threads do this as they start.
@@ -85,12 +80,6 @@ namespace PS5Platform {
 /// First thing in main(), while the process has one thread: finds the title folder, leaves the
 /// sandbox when USB drives are wanted, then starts klog capture and the boot log.
 void EarlyInit();
-
-/// The boot log (v1.0.19: Settings > Debug > Logs chooses what and where): its file now and the run
-/// before's, "" when there is none; and its text when it is kept in memory only (false otherwise).
-std::string LogPath();
-std::string LogPreviousPath();
-bool LogInMemory(std::string* text);
 
 /// Whether a file of this name is in the title folder: a switch for when the interface cannot be
 /// reached (usb-off.txt, late-vulkan.txt).

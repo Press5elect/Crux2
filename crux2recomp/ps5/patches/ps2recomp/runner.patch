@@ -1,4 +1,4 @@
-Crux2 Recomp's changes to PS2Recomp (https://github.com/ran-j/PS2Recomp.git e5636981a1c9de368f6b71e819c3dc188dfedbf4). Copyright (C) 2026 Press5elect.
+Crux2 Recomp's changes to PS2Recomp (https://github.com/ran-j/PS2Recomp.git eb8688b2fd191129f103a39543002c005b33409c). Copyright (C) 2026 Press5elect.
 GPL-3.0-or-later, with the attribution term of the NOTICE: keep "Crux2 by Press5elect".
 
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt

@@ -244,8 +244,8 @@
 			"copyright": "BlackBearReloaded",
 			"modifications": "this title's ID",
 			"texts": {
-				"ps5-native-app-boilerplate-LICENSE.txt": "ps5/elevation/LICENSE",
-				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "ps5/elevation/THIRD_PARTY_NOTICES.md"
+				"ps5-native-app-boilerplate-LICENSE.txt": "../ps5-native-app-boilerplate/LICENSE",
+				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "../ps5-native-app-boilerplate/THIRD_PARTY_NOTICES.md"
 			},
 			"artifacts": [
 				"sandbox-elevator.elf",
@@ -658,7 +658,7 @@
 			"copyright": "Samuel Ugochukwu",
 			"modifications": "none",
 			"texts": {
-				"plutosvg-LICENSE.txt": ".deps/src/plutosvg-upstream/LICENSE"
+				"plutosvg-LICENSE.txt": ".deps/src/plutosvg/LICENSE"
 			},
 			"artifacts": [
 				"eboot.bin"
@@ -947,40 +947,6 @@
 			}
 		},
 		{
-			"id": "smaa",
-			"name": "SMAA, Enhanced Subpixel Morphological Anti-Aliasing (resources/shaders/slang/anti-aliasing/shaders/smaa/)",
-			"licence": "MIT (SMAA.hlsl and the lookup pictures); Unlicense (the three pass files)",
-			"copyright": "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez",
-			"modifications": "none: copied unchanged from libretro's slang-shaders; the preset that runs them (crux2/smaa.slangp) is Crux2's own",
-			"texts": {
-				"SMAA-LICENSE.txt": "ps5/licenses/SMAA-LICENSE.txt"
-			},
-			"artifacts": [
-				"resources/shaders/slang/anti-aliasing/"
-			],
-			"source": {
-				"url": "https://github.com/libretro/slang-shaders (anti-aliasing/shaders/smaa); original: https://github.com/iryoku/smaa",
-				"revision": "3685eda59ffd2ebe1b12cc4640581dc23552ce88"
-			}
-		},
-		{
-			"id": "noto-sans-cjk-subset",
-			"name": "Noto Sans CJK JP Regular, a subset (the letters of Japanese, Chinese and Korean game names)",
-			"licence": "SIL OFL 1.1",
-			"copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/)",
-			"modifications": "a subset: the letters Shift-JIS, GB 2312, Big5 and KS X 1001 can write, kana and CJK punctuation, made by ps5/tools/make-cjk-font.py from the fonts-noto-cjk package's NotoSansCJK-Regular.ttc (face 0); no outline changed, the Latin letters and the rest left out",
-			"texts": {
-				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
-			},
-			"artifacts": [
-				"resources/fonts/NotoSansCJK-Subset.otf"
-			],
-			"source": {
-				"url": "https://github.com/notofonts/noto-cjk",
-				"revision": "Version 2.004"
-			}
-		},
-		{
 			"id": "saira-extrabold",
 			"name": "Saira ExtraBold (the letters of the title's name)",
 			"licence": "SIL OFL 1.1",
@@ -1177,60 +1143,6 @@
 			"source": {
 				"url": "https://github.com/BlackBearReloaded/ps5-homebrew-ui",
 				"revision": "aed286b81cdf"
-			}
-		},
-		{
-			"id": "armsx2-fixes",
-			"name": "Fixes and features from ARMSX2 (EE/VU/GS timing and accuracy, Vulkan renderer fixes, stencil shadow counter, DEV9 and S/PDIF changes)",
-			"licence": "GPL-3.0-or-later",
-			"copyright": "ARMSX2 contributors and the PCSX2 Dev Team and contributors",
-			"modifications": "brought onto Crux2's PCSX2 by Press5elect (Copyright (C) 2026): part of ps5/patches/pcsx2/ps5.patch; each piece carries a 'From <fork> <commit>' comment",
-			"texts": {
-				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3"
-			},
-			"artifacts": [
-				"eboot.bin",
-				"resources/"
-			],
-			"source": {
-				"url": "https://github.com/ARMSX2/ARMSX2",
-				"revision": "aaf3212aa77c67168b9db64bfdd163fd13077ad2"
-			}
-		},
-		{
-			"id": "lrps2-fixes",
-			"name": "Fixes from LRPS2 (libretro parallel-ps2: texture cache, auto-flush, CLUT, GIF and counter changes)",
-			"licence": "GPL-3.0-or-later",
-			"copyright": "The libretro team, the paraLLEl-GS authors and the PCSX2 Dev Team and contributors",
-			"modifications": "brought onto Crux2's PCSX2 by Press5elect (Copyright (C) 2026): part of ps5/patches/pcsx2/ps5.patch; each piece carries a 'From <fork> <commit>' comment",
-			"texts": {
-				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3"
-			},
-			"artifacts": [
-				"eboot.bin",
-				"resources/"
-			],
-			"source": {
-				"url": "https://github.com/libretro/parallel-ps2",
-				"revision": "ef02489e0c7885c4d0125f0fddbf8f78aef4b085"
-			}
-		},
-		{
-			"id": "reliquary-audio-net",
-			"name": "Low-latency audio sync, DEV9 TCP and S/PDIF mix changes from PCSX2 Reliquary",
-			"licence": "GPL-3.0-or-later",
-			"copyright": "DiscoStarslayer, GitHubProUser67 and the PCSX2 Dev Team and contributors",
-			"modifications": "brought onto Crux2's PCSX2 by Press5elect (Copyright (C) 2026): part of ps5/patches/pcsx2/ps5.patch; each piece carries a 'From <fork> <commit>' comment",
-			"texts": {
-				"GPL-3.0.txt": "vendor/pcsx2/COPYING.GPLv3"
-			},
-			"artifacts": [
-				"eboot.bin",
-				"resources/"
-			],
-			"source": {
-				"url": "https://github.com/DiscoStarslayer/pcsx2-reliquary",
-				"revision": "030ea8c733525306ba1cc7f836f933fc018b738a"
 			}
 		}
 	]

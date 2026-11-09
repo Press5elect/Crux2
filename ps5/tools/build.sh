@@ -30,12 +30,6 @@
 #                                   (context-sensitive PGO); its counts are merged with the first
 #                                   round's (ps5/tools/merge-profiles.sh)
 #                      off          a normal build in build/ps5
-#   PS5PX_PGO_PORTABLE_STATICS  1 adds -mllvm -static-func-full-module-prefix=false to the generate,
-#                    cs-generate and use builds, so the names of static functions in a profile do not hold
-#                    the checkout's path. Off by default: the committed profile (ps5/pgo/crux2.profdata)
-#                    was made without it. Make a new profile with the flag set (generate, run, merge)
-#                    before setting it for "use": with a profile made without it, the static functions
-#                    (a good part of the emulator) get no counts.
 #   PS5PX_PGO_SPLIT  with "use", 1 also splits the cold blocks of hot functions away from them,
 #                    lays the functions out by cache-directed sort and applies a second round's
 #                    counts. Off by default: measured on the console (2026-10-12), the build with
@@ -44,11 +38,6 @@
 # Made from PS5 Vulkan Template's ps5/tools/build.sh (Copyright (C) 2026 Mihawk, MIT).
 
 set -euo pipefail
-
-# Every source up to date first (ps5/tools/check-sources.sh); PS5PX_ALLOW_STALE=1 builds anyway.
-if [[ ${PS5PX_ALLOW_STALE:-} != 1 ]]; then
-    bash "$(dirname -- "${BASH_SOURCE[0]}")/check-sources.sh"
-fi
 
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
@@ -102,11 +91,6 @@ case $pgo in
         ;;
     *) echo "PS5PX_PGO is use, generate, cs-generate or off, not '$pgo'" >&2; exit 1 ;;
 esac
-# Static functions are named in a profile with their file's path, which differs between checkouts.
-# This names them by the file's name alone, so a profile matches across checkouts (ARMSX2 0453dc794).
-if [[ ${PS5PX_PGO_PORTABLE_STATICS:-} == 1 && $pgo != off ]]; then
-    pgo_flags="$pgo_flags -mllvm -static-func-full-module-prefix=false"
-fi
 export PS5PX_PGO_PROFILE_PATH=$pgo_profile
 export PS5PX_PGO=$pgo
 ninja=$(command -v ninja || echo "$HOME/.local/bin/ninja")

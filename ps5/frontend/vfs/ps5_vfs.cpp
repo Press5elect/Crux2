@@ -50,12 +50,10 @@ struct MountPoint
   std::unique_ptr<Backend> backend;
 };
 
-/* Mounts are added at start-up (and, v1.0.19, from the settings), and a removed one's backend is
- * kept (s_retired, never freed), so a Backend pointer taken under the lock stays valid for the
- * process's lifetime. */
+/* Mounts are added at start-up and never removed, so a Backend pointer taken under the lock stays
+ * valid for the process's lifetime. */
 std::mutex s_mounts_mutex;
 std::vector<MountPoint> s_mounts;
-std::vector<std::unique_ptr<Backend>> s_retired;
 std::atomic<unsigned> s_mount_count{0};
 std::atomic<const char*> s_shadow_path{PS5VFS_SHADOW_PATH};
 
@@ -898,23 +896,6 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
       mounted++;
   }
   return mounted;
-}
-
-/* v1.0.19 (from OGBox 0.0.3): a mount point taken away, its backend kept (a read under way ends). */
-extern "C" int ps5vfs_unmount(const char* mount_point)
-{
-  if (!mount_point)
-    return -1;
-  std::lock_guard lock(s_mounts_mutex);
-  const auto at = std::find_if(s_mounts.begin(), s_mounts.end(),
-                               [&](const MountPoint& m) { return m.point == mount_point; });
-  if (at == s_mounts.end())
-    return -1;
-  Log("vfs: %s removed", mount_point);
-  s_retired.push_back(std::move(at->backend));
-  s_mounts.erase(at);
-  s_mount_count.store(static_cast<unsigned>(s_mounts.size()), std::memory_order_release);
-  return 0;
 }
 
 extern "C" const char* ps5vfs_mount_point(unsigned index)

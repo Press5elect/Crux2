@@ -374,8 +374,7 @@ password =
   the NAS or PC. One account serves all paths.
 - Each folder is shown as `/smb/<the folder's name>` and is added to the game list by itself.
 - SMB 2 and 3 are spoken (not the old SMB 1). The share is only ever read.
-- Restart Crux2 after changing the file. Or add, change and take away shares in Settings >
-  Folders, typed with the on-screen keyboard: they are connected at once, and Crux2 writes the file.
+- Restart Crux2 after changing the file.
 
 A game on a share is read from it as it plays, so the link to the NAS matters while playing:
 a wired connection is the safe choice. Settings > Speed > **Load the whole disc into memory** loads
@@ -470,97 +469,6 @@ On my console the adapter and the hard drive worked. The lines beginning `net:` 
 answered about its network, and count the adapter's name lookups and connections. A game's
 pings are not expected to work (the console refuses the socket for them); that does not stop
 TCP or UDP.
-
-## What v1.0.20 changed
-
-Changed:
-- **Built on PCSX2 v2.9.162** (was v2.9.158): the PS1 Analog Controller (DualShock 1) as a controller
-  type, downloaded covers named by serial and CRC (covers named by serial alone are still found),
-  and sort names for more games. **Save states made before v1.0.20 do not load** (PCSX2 changed
-  their version); memory cards are not affected.
-- **SMAA is a switch beside FXAA** (Settings > Picture > Post-processing), no longer an entry of the
-  Look list. It runs before a Look, so the two can be used together.
-- Less work in the EE's recompiled ADDA, MADDA, MSUBA and MULA; accurate floating point keeps more
-  of the EE's registers around its calls and compares without branches; VU adds take their fast path.
-- The pipelines a game needed last time are made on the optimiser's thread, not the GS thread: no
-  stalls in a game's first frames.
-- A picture shown twice gets its look and side picture once; the side picture builds only its own pass.
-- The pipeline list is merged without a quadratic search, the pipeline cache's dirty flag is
-  atomic, and draws that leave colour or depth alone no longer invalidate its copies.
-- The content version is 01.020.000.
-
-Fixed:
-- **Every look, and SMAA, left the screen black with no overlay** (the boot log showed the look loaded,
-  its pictures not black, and the game running): the look's passes bound their own quad as the vertex
-  buffer, and PCSX2 binds its own only once per command buffer, so the picture on the screen and the
-  overlay were drawn from the wrong vertices. PCSX2's buffer is bound again after the look.
-- **A look that cannot draw on the console is switched off** rather than leaving the screen black. The
-  first pictures of a look and of SMAA are checked (a small part of the middle is read back, once every
-  30 frames at most); one that is black while the game's own is not is switched off, said on the screen
-  and in the boot log, and the picture is shown as it was.
-- **Accurate floating point on the VUs** kept the game's own VU rounding mode after one rare add,
-  instead of the PS2's, so later results in games with a VU rounding fix came out slightly wrong;
-  on VU0 the instructions the EE runs itself (COP2) ran in the EE's rounding mode.
-- **The EE interpreter compared floats differently from the recompiler** when accurate floating
-  point was off (infinities and NaNs); SQRT.S no longer clears the FPU's overflow and underflow
-  flags (the PS2's only touches invalid and divide).
-- **A picture FSR enlarged long ago** could be shown under a menu or while paused after FSR had
-  stopped enlarging.
-
-## What v1.0.19 changed
-
-Added:
-- **SMAA anti-aliasing**, under Settings > Picture > Look beside the CRT and signal looks: sharper edges
-  than FXAA for a little more GPU time (a look is one preset, so it replaces a CRT look). FXAA stays
-  where it was; supersampling (SSAA) is the internal resolution, or paraLLEl-GS's samples.
-- **Settings > Debug > Logs: what is logged, and where.** *Logs* off turns every log off (no
-  crux2-boot.log, no emulog.txt, no copy in the console's kernel log). *Logs go to* chooses the
-  console or a USB drive's Crux2-logs folder (a drive that is out at the start keeps the boot log in
-  memory for that session, shown on the same page). Each log has its own switch: Crux2's boot log,
-  the graphics driver's messages, the emulator's own log, and the copy in klog.
-- **Network shares in Settings > Folders**: *Add a network share* asks for the kind (SMB or NFS),
-  the server (found on the network, or typed), the share and folder, a name, and an account of its
-  own if it has one, all typed with the on-screen keyboard. The share is connected at once and its
-  games join the library; a share can be changed or taken away the same way, and *The shares'
-  account* sets the user and password for those without one. network.cfg is written for you (a
-  file written by hand is read as before, and its shares keep their names).
-
-Changed:
-- **Built on PCSX2 v2.9.158** (was v2.9.150): out-of-bounds reads fixed when replacement textures
-  load, a Vulkan fix for the feedback-loop layout (a texture is marked changed when it switches),
-  a guard against out-of-bounds 4-bit texture reads from bad GS register
-  settings, more Japanese game serials and corrected titles, a newer controller database, and LZMA
-  (7-Zip's) 26.05.
-- **Games on a network share are read faster**: a share's connection asks for large buffers
-  (up to 4 MiB) before it connects. The console's small default window held a share to about
-  18 MB/s whatever the link.
-- **The boot log is written by a thread of its own**: a line no longer waits for the file system
-  on the thread that logged it (OGBox measured 600 to 900 ms a line while a game's own writes were
-  in flight). It is synced to the drive only when a game starts or closes and at the end.
-- **The five-minute safety save is kept in memory**: Sleep-safe saving wrote a whole state (about
-  15 MB) to the console's drive every five minutes, the most Crux2 wrote. That state is now zipped
-  into memory and written to the drive only if Crux2 crashes, so the library can still offer to go
-  on. The PS5 menu still saves to the drive, but not again within a minute, and automatic states
-  are compressed harder (in the background). *Auto-save every N minutes*, when you choose it, still
-  saves to the drive.
-- **PCSX2's own pipeline cache file is gone**: the graphics driver's shader cache already keeps
-  every compiled pipeline, so `cache/vulkan_pipelines.bin` (1 to 2 MB, written whole at every close
-  it had grown) held the same thing twice. The old file is removed once.
-- **The graphics driver carries two newer fixes of PS5_Mesa's**: a large GPU buffer is backed by
-  several pieces of the console's memory when no single free piece is big enough, instead of
-  failing, and each piece is placed only where nothing else is.
-- **The content version is 01.019.000.**
-
-Fixed:
-- **The console could go down after Crux2 was closed many times with USB drives on.** Leaving the
-  sandbox (for USB drives) wrote the console's root folder into Crux2's own without counting it,
-  so each exit released two references to the root it never took. The helper now trades its own
-  counted references with Crux2's.
-- **SingStar's microphones heard nothing.** Crux2 looked for the console's microphone library
-  while it ran, and a title can neither load a system library of its own choice nor look a
-  function up at run time, so the library was never found. The title now imports it, and the
-  console binds it when it starts the title. The boot log's `mic:` lines say whether it was bound
-  (`libSceAudioIn imported by the title: open bound, ...`) and how each microphone opened.
 
 ## What v1.0.18 changed
 
@@ -922,8 +830,7 @@ Added:
   states saved by themselves with "Undo the last load", backups to a share or a USB drive, and
   memory cards kept in sync both ways.
 - **Controllers**: up to four players with the multitap, controller profiles, pressure from R2,
-  GunCon 2 aimed by moving the controller, the USB microphones of karaoke games, the USB headset of
-  games with voice chat, a USB keyboard, light bars in the
+  GunCon 2 aimed by moving the controller, the USB microphones of karaoke games, a USB keyboard, light bars in the
   players' colours, and control from a phone.
 - **Care for an OLED screen**: dark after a while with nothing pressed, then a black screen with the
   mark, the hints fading, everything moved a few pixels now and then, dark grey bars beside a 4:3
@@ -1368,8 +1275,8 @@ title closed from the console's own menu is not a crash and is not reported as o
 - A game's picture is not moved by a few pixels as the menus are (Screen care): that would
   blur it or cut its edge.
 - RetroAchievements' sounds are not played (the notices are shown).
-- No video capture, no USB wheels or cameras passed to games (USB pads, microphones, the USB
-  headset, the GunCon 2 and a keyboard are), no network adapter emulation through a packet capture library.
+- No video capture, no USB wheels or cameras passed to games (USB pads, microphones, the GunCon 2
+  and a keyboard are), no network adapter emulation through a packet capture library.
 - English only: the translations are part of the desktop interface and are not in this build.
 - The performance overlay's EE, GS and VU percentages are what each thread reports of itself
   (whether a title may read another thread's processor time is not yet measured on the
@@ -1504,12 +1411,11 @@ ps5/tools/deploy.sh                # upload what changed over the console's FTP 
 ps5/tools/run.sh [game]            # a test run on the console
 ```
 
-Built from PCSX2 `4223d03c58f8` (v2.9.166), the payload SDK fork `e105cf6`, PS5_Vulkan `ace98a9`
-and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `1ba9874` (the revision PS5_Vulkan pins) with
-the 16 patches of `ps5/patches/mesa-27/` (their README says what each does and where it comes from),
-built by `ps5/tools/build-radv-crux2.sh` (it applies them as commits on a local `crux2-radv` branch
-of PS5_Mesa, so the boot log's Mesa revision is that branch's, not one on GitHub); without that
-archive, `build.sh` links PS5_Vulkan's own release archive, which has none of them.
+Built from PCSX2 `5b6e6e23eba4` (v2.9.131), the payload SDK fork `b5efad5`, PS5_Vulkan `f410e67`
+and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `9c03200` (the revision PS5_Vulkan pins) with
+the six patches of `ps5/patches/mesa/` (their README says what each does and where it comes from),
+built by `ps5/tools/build-radv-crux2.sh`; without that archive, `build.sh` links PS5_Vulkan's own
+release archive, which has none of them.
 
 The emulator's core, recompilers and GS are optimised across files at link time (PCSX2's
 `LTO_PCSX2_CORE` option, ThinLTO at `-O3`; PCSX2's own release builds are link-time optimised
@@ -1547,9 +1453,6 @@ them) into a direct one. It takes three steps, the middle one on the console:
    (`PS5PX_PGO_EQUAL=1` with a folder for each game makes the games weigh alike), and
    `PS5PX_PGO=use ps5/tools/build.sh` compiles with it (in `build/ps5-pgo-use`; the build
    identity names the profile, and a new profile compiles everything again).
-   `PS5PX_PGO_PORTABLE_STATICS=1` (off by default) names static functions without their file's path so a
-   profile matches across checkouts; the committed profile was made without it, so make a new profile
-   with the flag set (on the generate build too) before setting it for the use build.
 
 What it is worth is for the same scene to measure before and after; nothing has been measured
 yet.

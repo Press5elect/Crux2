@@ -18,17 +18,14 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cache="$root/.deps/native"
 sdk="$cache/ps5-payload-sdk"
 sdk_fork="${PS5_PAYLOAD_SDK_FORK:-$root/../PS5_PayloadSDK}"
-# e105cf6: the newest of the fork (2026-11): the heap, exec, shm, vrange and thread stacks try plain
-# direct memory first (sceKernelAllocateDirectMemoryForApp, the app's pool when it is refused), the
-# heap grows in 2 MiB steps instead of 16 (up to 8192 segments), and up to 16384 descriptor groups.
-# b5efad5 before it (2026-10-04): iswctype_l answers from the rune type (a crash in std::locale on
-# the console), files opened past the per-process limit, contended heap waits that block, and the
-# /data client; 6b63a2a before that gave localeconv in the C locale (ps5_localeconv).
-sdk_revision=e105cf6f25801d9e9981812a89a3b74021d2d2a2
+# b5efad5: the newest of the fork (2026-10-04): iswctype_l answers from the rune type (a crash in
+# std::locale on the console), files opened past the per-process limit, contended heap waits that
+# block, and the /data client; 6b63a2a before it gave localeconv in the C locale (ps5_localeconv).
+sdk_revision=b5efad528e0ac1b8289f39d72a0e890ff68ff0a6
 
 if [[ ! -f $sdk/.ps5-sdk-revision || $(<"$sdk/.ps5-sdk-revision") != "$sdk_revision" ]]; then
     git -C "$sdk_fork" cat-file -e "$sdk_revision^{commit}" 2>/dev/null || {
-        echo "the payload SDK fork at $sdk_fork does not have $sdk_revision: (cd $sdk_fork && git fetch origin)" >&2
+        echo "the payload SDK fork at $sdk_fork does not have $sdk_revision" >&2
         exit 2
     }
     mkdir -p "$cache"

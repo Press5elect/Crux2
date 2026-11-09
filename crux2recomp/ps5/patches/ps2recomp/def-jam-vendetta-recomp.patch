@@ -1,9 +1,7 @@
 def-jam-vendetta-recomp's changes to PS2Recomp's runtime (https://github.com/jcsix694/def-jam-vendetta-recomp
 7fff0066b724d9eabffdd49ef82cd265cf2a23d2, patches/ps2recomp-local.diff), by jcsix694; GPL-3.0. Rebased by
-Crux2 Recomp onto PS2Recomp e5636981a1c9: in ps2xRecomp/src/lib/fpu_translator.cpp, RSQRT.S keeps
-PS2Recomp's own FPU_RSQRT_S; in ps2xRuntime/src/lib/gs/gs_frontend.cpp, GS::processGIFPacket is
-def-jam-vendetta-recomp's (its continueGifTag already treats FLG=3 as IMAGE, as PS2Recomp's
-e563698 does). Otherwise unchanged.
+Crux2 Recomp onto PS2Recomp eb8688b2fd19: in ps2xRecomp/src/lib/fpu_translator.cpp, RSQRT.S keeps
+PS2Recomp's own FPU_RSQRT_S. Otherwise unchanged.
 
 diff --git a/ps2xIOP/CMakeLists.txt b/ps2xIOP/CMakeLists.txt
 index f8d3e44..e707569 100644
@@ -7215,7 +7213,7 @@ index 41e4387..84dfee4 100644
              {
                  uint8_t *pkt = getMemPtr(rdram, pktAddr);
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
-index aed4cb5..1bd42d7 100644
+index 9c54919..aeb02ef 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
 @@ -615,7 +615,7 @@ namespace ps2_stubs
@@ -10761,7 +10759,7 @@ index f0ad507..8fa3249 100644
      result.displayFbp = displayFrame.fbp;
      result.sourceFbp = selected.fbp;
 diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-index 9281d5f..79b729d 100644
+index 5658928..79b729d 100644
 --- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 @@ -1,8 +1,17 @@
@@ -11440,7 +11438,7 @@ index 9281d5f..79b729d 100644
  
          bool pre = ((tagLo >> 46) & 1) != 0;
          if (pre)
-@@ -695,62 +1165,135 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+@@ -695,61 +1165,135 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
          for (uint32_t i = 0; i < nreg; ++i)
              regs[i] = static_cast<uint8_t>((tagHi >> (i * 4)) & 0xF);
  
@@ -11490,7 +11488,7 @@ index 9281d5f..79b729d 100644
 +            continuation.loopsLeft = nloop;
 +            continuation.imageBytesLeft = 0;
          }
--        else if (flg == GIF_FMT_IMAGE || flg == GIF_FMT_DISABLED)
+-        else if (flg == GIF_FMT_IMAGE)
 +        offset += continueGifTag(continuation, data + offset, sizeBytes - offset);
 +    }
 +    static const bool contLog = std::getenv("VENDETTA_GSLOG") != nullptr;
@@ -11524,7 +11522,6 @@ index 9281d5f..79b729d 100644
 +    {
 +        if (tag.flg == GIF_FMT_PACKED)
          {
--            // FLG=3 ("disabled" in the GS manual) behaves exactly like IMAGE: NLOOP qwords of image data.
 -            uint32_t imageBytes = nloop * 16;
 -            if (offset + imageBytes > sizeBytes)
 -                imageBytes = sizeBytes - offset;
@@ -11609,7 +11606,7 @@ index 9281d5f..79b729d 100644
  
          const bool pre = ((tag.lo >> 46u) & 1u) != 0u;
          if (pre)
-@@ -763,8 +1306,10 @@ bool GS::processNativePackedGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+@@ -762,8 +1306,10 @@ bool GS::processNativePackedGIFPacket(const uint8_t *data, uint32_t sizeBytes)
              {
                  const uint64_t lo = loadLE64(data + offset);
                  const uint64_t hi = loadLE64(data + offset + 8u);
@@ -11620,7 +11617,7 @@ index 9281d5f..79b729d 100644
              }
          }
  
-@@ -784,7 +1329,9 @@ void GS::uploadImageNative(uint64_t bitbltbuf,
+@@ -783,7 +1329,9 @@ void GS::uploadImageNative(uint64_t bitbltbuf,
                             const uint8_t *data,
                             uint32_t sizeBytes)
  {
@@ -11630,7 +11627,7 @@ index 9281d5f..79b729d 100644
      uploadImageNativeUnlocked(bitbltbuf, trxpos, trxreg, trxdir, data, sizeBytes);
  }
  
-@@ -797,6 +1344,25 @@ void GS::uploadImageNativeUnlocked(uint64_t bitbltbuf,
+@@ -796,6 +1344,25 @@ void GS::uploadImageNativeUnlocked(uint64_t bitbltbuf,
  {
      if (!data || sizeBytes == 0 || !m_backend)
          return;
@@ -11656,7 +11653,7 @@ index 9281d5f..79b729d 100644
  
      writeRegisterUnlocked(GS_REG_BITBLTBUF, bitbltbuf);
      writeRegisterUnlocked(GS_REG_TRXPOS, trxpos);
-@@ -928,6 +1494,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -927,6 +1494,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
              }
          });
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11664,7 +11661,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(x) / 16.0f;
          vtx.y = static_cast<float>(y) / 16.0f;
          vtx.z = static_cast<float>(z);
-@@ -965,6 +1532,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -964,6 +1532,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
              }
          });
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11672,7 +11669,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(x) / 16.0f;
          vtx.y = static_cast<float>(y) / 16.0f;
          vtx.z = static_cast<float>(z);
-@@ -999,6 +1567,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -998,6 +1567,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
              }
          });
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11680,7 +11677,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(lo & 0xFFFF) / 16.0f;
          vtx.y = static_cast<float>((lo >> 32) & 0xFFFF) / 16.0f;
          vtx.z = static_cast<float>((hi >> 4) & 0xFFFFFF);
-@@ -1030,6 +1599,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -1029,6 +1599,7 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
              }
          });
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11688,7 +11685,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(lo & 0xFFFF) / 16.0f;
          vtx.y = static_cast<float>((lo >> 32) & 0xFFFF) / 16.0f;
          vtx.z = static_cast<float>(hi & 0xFFFFFFFF);
-@@ -1062,7 +1632,12 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+@@ -1061,7 +1632,12 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
  
  void GS::writeRegister(uint8_t regAddr, uint64_t value)
  {
@@ -11701,7 +11698,7 @@ index 9281d5f..79b729d 100644
      writeRegisterUnlocked(regAddr, value);
  }
  
-@@ -1187,6 +1762,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1186,6 +1762,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
      case GS_REG_XYZF3:
      {
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11709,7 +11706,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(value & 0xFFFF) / 16.0f;
          vtx.y = static_cast<float>((value >> 16) & 0xFFFF) / 16.0f;
          vtx.z = static_cast<double>((value >> 32) & 0xFFFFFF);
-@@ -1207,6 +1783,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1206,6 +1783,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
      case GS_REG_XYZ3:
      {
          GSVertex &vtx = m_vtxQueue[m_vtxCount % kMaxVerts];
@@ -11717,7 +11714,7 @@ index 9281d5f..79b729d 100644
          vtx.x = static_cast<float>(value & 0xFFFF) / 16.0f;
          vtx.y = static_cast<float>((value >> 16) & 0xFFFF) / 16.0f;
          vtx.z = static_cast<double>((value >> 32) & 0xFFFFFFFF);
-@@ -1241,6 +1818,14 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1240,6 +1818,14 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
          t.csa = static_cast<uint8_t>((value >> 56) & 0x1F);
          t.cld = static_cast<uint8_t>((value >> 61) & 0x7);
          m_backend->LoadClut(t, m_texclut);
@@ -11732,7 +11729,7 @@ index 9281d5f..79b729d 100644
          break;
      }
      case GS_REG_CLAMP_1:
-@@ -1393,6 +1978,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1392,6 +1978,7 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
              command.trxreg = m_trxreg;
              command.direction = m_trxdir;
              m_backend->BeginTransfer(command);
@@ -11740,7 +11737,7 @@ index 9281d5f..79b729d 100644
          }
          recordTransferDebugEventUnlocked();
          break;
-@@ -1576,8 +2162,16 @@ void GS::vertexKick(bool drawing)
+@@ -1575,8 +2162,16 @@ void GS::vertexKick(bool drawing)
      if (drawing && m_backend)
      {
          GSPrimitiveBatch batch = buildDrawBatch(needed);
@@ -11758,7 +11755,7 @@ index 9281d5f..79b729d 100644
          recordDrawDebugEventUnlocked(needed);
      }
  
-@@ -1591,15 +2185,19 @@ void GS::vertexKick(bool drawing)
+@@ -1590,15 +2185,19 @@ void GS::vertexKick(bool drawing)
          break;
      case GS_PRIM_LINESTRIP:
          m_vtxQueue[0] = m_vtxQueue[1];
@@ -11778,7 +11775,7 @@ index 9281d5f..79b729d 100644
          m_vtxCount = 2;
          break;
      default:
-@@ -1608,28 +2206,306 @@ void GS::vertexKick(bool drawing)
+@@ -1607,28 +2206,306 @@ void GS::vertexKick(bool drawing)
      }
  }
  
@@ -12087,7 +12084,7 @@ index 9281d5f..79b729d 100644
      return m_backend ? m_backend->ConsumeLocalToHostBytes(dst, maxBytes) : 0u;
  }
  
-@@ -1638,7 +2514,9 @@ void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
+@@ -1637,7 +2514,9 @@ void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
      if (!backend)
          backend = std::make_unique<GSCpuBackend>();
  
@@ -12097,7 +12094,7 @@ index 9281d5f..79b729d 100644
      std::lock_guard<std::mutex> backendLock(m_backendLifetimeMutex);
      if (m_backend)
      {
-@@ -1658,21 +2536,30 @@ void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
+@@ -1657,21 +2536,30 @@ void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
          }
      }
  
@@ -14980,10 +14977,10 @@ index 0000000..b6e4463
 +    return info;
 +}
 diff --git a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
-index c0507c7..eb4106d 100644
+index c289ba0..7adf0ae 100644
 --- a/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
 +++ b/ps2xRuntime/src/lib/gs/ps2_gif_arbiter.cpp
-@@ -38,26 +38,16 @@ void GifArbiter::drain()
+@@ -37,26 +37,16 @@ void GifArbiter::drain()
      if (!m_processFn)
          return;
  
@@ -20335,7 +20332,7 @@ index 45cb9d2..6dd4441 100644
      CloseWindow();
  
 diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
-index f872edd..8d1b1a9 100644
+index b02c7ca..8021142 100644
 --- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
 +++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
 @@ -1,6 +1,12 @@
@@ -20545,7 +20542,7 @@ index f872edd..8d1b1a9 100644
              pos += totalBytes;
  
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
-index f19e281..e8b6db2 100644
+index bd75bba..f7631d3 100644
 --- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
 +++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
 @@ -1,7 +1,14 @@

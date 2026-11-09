@@ -53,13 +53,7 @@ if [[ -d "$native/radv-release" ]]; then
 fi
 restore() { [[ -n "$hold" && -d "$hold/radv-release" ]] && { rm -rf "$native/radv-release"; mv "$hold/radv-release" "$native/"; rmdir "$hold"; }; }
 trap restore EXIT
-# On Mesa main the option PS5_Vulkan's script names for "no LLVM" has another form (meson-mesa27.sh).
-meson_tool=${MESON:-}
-if grep -q "'amd-options'" "$mesa/meson.options" 2>/dev/null; then
-	export CRUX2_REAL_MESON=${MESON:-$(command -v meson)}
-	meson_tool="$root/ps5/tools/meson-mesa27.sh"
-fi
-(cd "$vulkan" && PS5_MESA_REVISION="$revision" MESON="$meson_tool" bash tools/build-radv.sh release)
+(cd "$vulkan" && PS5_MESA_REVISION="$revision" bash tools/build-radv.sh release)
 rm -rf "$native/radv-crux2"
 mv "$native/radv-release" "$native/radv-crux2"
 {

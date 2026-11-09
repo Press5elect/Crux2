@@ -60,7 +60,6 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_osd.cpp
 	third_party/qrcodegen/qrcodegen.c
 	ps5_platform.cpp
-	ps5_shares.cpp
 	ps5_profiler.cpp
 	ps5_stubs.cpp
 	ps5_ui_audio.cpp

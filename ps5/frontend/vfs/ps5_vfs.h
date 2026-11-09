@@ -67,10 +67,6 @@ int ps5vfs_mount_ftp(const char* mount_point, unsigned port, const char* remote_
  * Returns the number of shares mounted, or -1 when the file cannot be read. */
 int ps5vfs_load_network_config(const char* config_path);
 
-/* v1.0.19: a mount point taken away ("/smb/nas"); its backend stays alive (a read under way ends).
- * Returns 0, or -1 when there is no such mount. */
-int ps5vfs_unmount(const char* mount_point);
-
 /* The mount points, one per call: index 0.. until NULL. */
 const char* ps5vfs_mount_point(unsigned index);
 

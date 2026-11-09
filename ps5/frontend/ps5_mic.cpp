@@ -1,4 +1,4 @@
-// Crux2 - the console's microphones for SingStar and the USB headset (ps5_mic.h).
+// Crux2 - the console's microphones for SingStar (ps5_mic.h).
 // SPDX-FileCopyrightText: 2026 Press5elect
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
@@ -32,17 +32,6 @@ extern "C" {
 int sceUserServiceGetInitialUser(int32_t* user_id);
 int sceUserServiceGetLoginUserIdList(int32_t* user_ids);
 void ps5px_log(const char* format, ...);
-
-// libSceAudioIn, imported by the title (linked against the SDK's stub of it): the loader binds a
-// title's own imports when it starts it, and that is the only way a title reaches a system module.
-// Up to v1.0.18 the module was looked for while the title ran instead, and a title can neither
-// load a system module of its own choice (0x80020063) nor look a function up at run time
-// (sceKernelDlsym answers ESRCH for every name: PS5_Vulkan's docs/HARDWARE_FINDINGS.md,
-// 2026-09-18 and 2026-09-27): SingStar's microphones heard nothing. An import the loader does not
-// bind is left at 0 rather than stopping the title, so each is read from its slot before use.
-int32_t sceAudioInOpen(int32_t user, uint32_t type, uint32_t index, uint32_t length, uint32_t frequency, uint32_t param);
-int32_t sceAudioInInput(int32_t handle, void* dest);
-int32_t sceAudioInClose(int32_t handle);
 }
 
 namespace PS5Mic
@@ -81,26 +70,7 @@ const Api& Functions()
 		s_api.input = reinterpret_cast<InputFn>(PS5SystemModules::FindInHandle(handle, "sceAudioInInput", "LozEOU8+anM"));
 		s_api.close = reinterpret_cast<CloseFn>(PS5SystemModules::FindInHandle(handle, "sceAudioInClose", "Jh6WbHhnI68"));
 	};
-	// The title's own imports first (above). Each address is read through a volatile slot: the
-	// compiler may take an imported function's address for not null, and here it can be.
-	{
-		OpenFn volatile open_slot = &sceAudioInOpen;
-		InputFn volatile input_slot = &sceAudioInInput;
-		CloseFn volatile close_slot = &sceAudioInClose;
-		const OpenFn o = open_slot;
-		const InputFn i = input_slot;
-		const CloseFn c = close_slot;
-		ps5px_log("mic: libSceAudioIn imported by the title: open %s, input %s, close %s", o ? "bound" : "NOT bound",
-			i ? "bound" : "NOT bound", c ? "bound" : "NOT bound");
-		if (o && i && c)
-		{
-			s_api.open = o;
-			s_api.input = i;
-			s_api.close = c;
-		}
-	}
-	if (!s_api.open)
-		find();
+	find();
 	if (!s_api.open)
 	{
 		// Not in the process yet. First as the console's own loaders bring it in: by its internal ID
@@ -485,165 +455,6 @@ private:
 	double m_phase = 0.0;
 	int16_t m_last = 0;
 };
-
-// ---- the headset's earpiece (USB headset, SOCOM's: Settings > Controllers > USB microphones)
-
-extern "C" {
-int sceAudioOutOpen(int user_id, int type, int index, unsigned length, unsigned frequency, unsigned format);
-int sceAudioOutClose(int handle);
-int sceAudioOutOutput(int handle, const void* samples);
-}
-
-/// What the game plays to the emulated headset's earpiece, played on the console: to player's own
-/// headset (the personal port of the player's user) when it opens, else with the game's sound.
-/// The game hands over a millisecond at a time at its own rate; a thread of its own brings it to
-/// 48 kHz and gives the console a grain at a time (silence when nothing came), so the console's
-/// output paces it. Needs proper testing on a console: which port opened is in the boot log
-/// ("earpiece:").
-class Earpiece final : public AudioDevice
-{
-public:
-	Earpiece(u32 channels, int player)
-		: AudioDevice(AUDIODIR_SINK, std::max<u32>(channels, 1))
-		, m_player(player)
-	{
-	}
-	~Earpiece() override { Stop(); }
-
-	bool Start() override
-	{
-		Stop();
-		m_running = true;
-		m_thread = std::thread([this] { Play(); });
-		return true; // (plugged in whether or not a port opens, as the microphone)
-	}
-
-	void Stop() override
-	{
-		m_running = false;
-		if (m_thread.joinable())
-			m_thread.join();
-		const std::lock_guard lock(m_mutex);
-		m_buffer.clear();
-	}
-
-	bool GetFrames(uint32_t* size) override
-	{
-		*size = 0;
-		return true;
-	}
-
-	uint32_t GetBuffer(int16_t*, uint32_t) override { return 0; }
-
-	// Interleaved frames at the game's rate, mChannels each.
-	uint32_t SetBuffer(int16_t* in, uint32_t frames) override
-	{
-		const std::lock_guard lock(m_mutex);
-		for (uint32_t i = 0; i < frames; i++)
-		{
-			const int16_t left = in[i * mChannels];
-			const int16_t right = (mChannels > 1) ? in[i * mChannels + 1] : left;
-			m_buffer.push_back(left);
-			m_buffer.push_back(right);
-		}
-		// Never more than about a tenth of a second behind: the oldest goes.
-		const size_t most = 2 * static_cast<size_t>(m_source_rate) / 10;
-		while (m_buffer.size() > most)
-		{
-			m_buffer.pop_front();
-			m_buffer.pop_front();
-		}
-		return frames;
-	}
-
-	void SetResampling(int samplerate) override
-	{
-		const std::lock_guard lock(m_mutex);
-		m_source_rate = std::clamp(samplerate, 8000, 96000);
-		m_buffer.clear();
-		m_phase = 0.0;
-		ps5px_log("earpiece: the game plays at %d Hz", m_source_rate);
-	}
-
-private:
-	static constexpr unsigned RATE = 48000;
-	static constexpr unsigned GRAIN = 256;
-	static constexpr int PORT_MAIN = 0;
-	static constexpr int PORT_PERSONAL = 3; // (a user's own headset)
-
-	int OpenPort()
-	{
-		const int32_t user = UserOf(m_player);
-		if (user >= 0)
-		{
-			const int port = sceAudioOutOpen(user, PORT_PERSONAL, 0, GRAIN, RATE, 1 /* 16-bit stereo */);
-			if (port >= 0)
-			{
-				ps5px_log("earpiece: player %d's own headset (user %d, personal port)", m_player + 1, user);
-				return port;
-			}
-			ps5px_log("earpiece: player %d's personal port refused: %#x", m_player + 1, static_cast<unsigned>(port));
-		}
-		const int port = sceAudioOutOpen(0xff, PORT_MAIN, 0, GRAIN, RATE, 1);
-		if (port >= 0)
-			ps5px_log("earpiece: played with the game's sound (main port)");
-		else
-			ps5px_log("earpiece: no port opened (%#x): the earpiece plays nothing", static_cast<unsigned>(port));
-		return port;
-	}
-
-	void Play()
-	{
-		PS5Priority::SetCurrentThread(PS5Priority::Role::Sound);
-		const int port = OpenPort();
-		if (port < 0)
-			return;
-		std::array<int16_t, GRAIN * 2> block;
-		while (m_running)
-		{
-			{
-				const std::lock_guard lock(m_mutex);
-				const double step = static_cast<double>(m_source_rate) / RATE;
-				for (unsigned i = 0; i < GRAIN; i++)
-				{
-					// Linear between the two frames around the position; silence when they are not there.
-					if (m_buffer.size() < 4)
-					{
-						block[2 * i] = block[2 * i + 1] = 0;
-						continue;
-					}
-					const double t = m_phase;
-					for (int c = 0; c < 2; c++)
-					{
-						const double a = m_buffer[static_cast<size_t>(c)];
-						const double b = m_buffer[static_cast<size_t>(2 + c)];
-						block[2 * i + c] = static_cast<int16_t>(std::lround(a + (b - a) * t));
-					}
-					m_phase += step;
-					while (m_phase >= 1.0 && m_buffer.size() >= 4)
-					{
-						m_phase -= 1.0;
-						m_buffer.pop_front();
-						m_buffer.pop_front();
-					}
-				}
-			}
-			if (sceAudioOutOutput(port, block.data()) < 0)
-				break;
-		}
-		sceAudioOutOutput(port, nullptr);
-		sceAudioOutClose(port);
-	}
-
-	const int m_player;
-	std::atomic_bool m_running{false};
-	std::thread m_thread;
-	std::mutex m_mutex;
-	std::deque<int16_t> m_buffer; // interleaved stereo at m_source_rate
-	int m_source_rate = 48000;
-	double m_phase = 0.0;
-};
-
 } // namespace
 
 // ---- the test (Settings > Controllers > SingStar > Test the microphone)
@@ -722,8 +533,6 @@ bool PlayBack(const std::vector<int16_t>& samples)
 
 std::unique_ptr<AudioDevice> Create(int dir, uint32_t channels, const std::string& name, int32_t latency)
 {
-	if (name.size() == 14 && name.compare(0, 13, "ps5-earpiece-") == 0 && name[13] >= '1' && name[13] <= '4')
-		return std::make_unique<Earpiece>(channels, name[13] - '1');
 	if (name.size() != 9 || name.compare(0, 8, "ps5-mic-") != 0 || name[8] < '1' || name[8] > '4')
 		return nullptr;
 	return std::make_unique<Microphone>(static_cast<AudioDir>(dir), channels, name[8] - '1', latency);
@@ -735,20 +544,13 @@ std::vector<std::pair<std::string, std::string>> Devices()
 		{"ps5-mic-4", "Player 4's microphone"}};
 }
 
-std::vector<std::pair<std::string, std::string>> OutputDevices()
-{
-	return {{"ps5-earpiece-1", "Player 1's headset"}, {"ps5-earpiece-2", "Player 2's headset"},
-		{"ps5-earpiece-3", "Player 3's headset"}, {"ps5-earpiece-4", "Player 4's headset"}};
-}
-
 UsbSetup SetupFor(int choice)
 {
 	switch (choice)
 	{
-		case 1: return {"singstar", "ps5-mic-1", "", ""};
-		case 2: return {"singstar", "ps5-mic-1", "ps5-mic-2", ""};
-		case 3: return {"headset", "ps5-mic-1", "", "ps5-earpiece-1"};
-		default: return {"None", "", "", ""};
+		case 1: return {"singstar", "ps5-mic-1", ""};
+		case 2: return {"singstar", "ps5-mic-1", "ps5-mic-2"};
+		default: return {"None", "", ""};
 	}
 }
 } // namespace PS5Mic

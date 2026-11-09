@@ -36,8 +36,6 @@
 
 extern "C" int sceKernelDebugOutText(int channel, const char* text);
 extern "C" int sceKernelUsleep(unsigned microseconds);
-// v1.0.19: the safety state held in memory, onto the drive (ps5_extras.cpp; signal-safe).
-extern "C" int ps5px_safety_state_write(void);
 
 // The first byte of the program's image (the linker script places it).
 extern "C" const char __executable_start[] __attribute__((weak));
@@ -287,8 +285,6 @@ void ReportEnding(const char* what, void* caller, const uintptr_t* frame)
   Line("==== end of the report ====");
   if (const int fd = ps5px_log_fd(); fd >= 0)
     fsync(fd);
-  if (ps5px_safety_state_write())
-    Line("(the game's safety state was written: the library offers to go on from it)");
 }
 } // namespace
 
@@ -449,9 +445,6 @@ void CrashHandler::CrashSignalHandler(int signal, siginfo_t* siginfo, void* ctx)
   Line("==== end of the report ====");
   if (const int fd = ps5px_log_fd(); fd >= 0)
     fsync(fd);
-  // The game's safety state, kept in memory, onto the drive: the library offers to go on from it.
-  if (ps5px_safety_state_write())
-    Line("(the game's safety state was written: the library offers to go on from it)");
 
   // Back to the console: returning re-executes the faulting instruction with the default action
   // in place, and the console closes the title with its own error screen.

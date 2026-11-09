@@ -757,10 +757,8 @@ void GameClosed()
 
 PS5Logs::Files LogFiles()
 {
-	// v1.0.19: where Settings > Debug > Logs put them (none: "", and a boot log kept in memory has no file).
-	const std::string place = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-	PS5Logs::Files files{PS5Platform::LogPath(), PS5Platform::LogPreviousPath(),
-		Path::Combine(place.empty() ? EmuFolders::Logs : place, "emulog.txt"), {}};
+	PS5Logs::Files files{Path::Combine(ps5px_title_dir(), "crux2-boot.log"), Path::Combine(ps5px_title_dir(), "crux2-boot.previous.log"),
+		Path::Combine(EmuFolders::Logs, "emulog.txt"), {}};
 	// A profiling build's counts go with the logs (ps5_pgo.h).
 	if (const std::string pgo = PS5Pgo::Folder(); !pgo.empty())
 	{
