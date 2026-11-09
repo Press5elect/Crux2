@@ -18,10 +18,10 @@ ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
 vendor="$root/vendor/pcsx2"
 patch="$ps5/patches/pcsx2/ps5.patch"
-revision=b09e6d3fc04d433982aca423bea80f3ef6012a51
-# The release tag at that revision: fetched with it, so PCSX2's build names its version (v2.9.164)
+revision=4223d03c58f8fd1787da7af28fe80c2140e1a22a
+# The release tag at that revision: fetched with it, so PCSX2's build names its version (v2.9.166)
 # rather than a bare hash.
-tag=v2.9.164
+tag=v2.9.166
 url=https://github.com/PCSX2/pcsx2
 
 if [[ ${1:-} == --export ]]; then

@@ -2,7 +2,7 @@
 
 ## v1.0.20 (2026-11-06)
 
-- Added (EE, VU, GS, audio; from the ARMSX2, LRPS2 and PCSX2 Reliquary studies, PCSX2 v2.9.164):
+- Added (EE, VU, GS, audio; from the ARMSX2, LRPS2 and PCSX2 Reliquary studies, PCSX2 v2.9.166):
   EE/VU float and timing fixes, event tests and opcode cycle tables, MTVU ring fixes, Vulkan
   texture-cache and device fixes (mid-frame submit, hazard copies, pipeline memo, hash cache),
   auto-flush handler tables, GIF counter false-sharing fix, low-latency audio sync (Reliquary's
