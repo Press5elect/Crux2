@@ -1504,7 +1504,7 @@ ps5/tools/deploy.sh                # upload what changed over the console's FTP 
 ps5/tools/run.sh [game]            # a test run on the console
 ```
 
-Built from PCSX2 `695e26713be0` (v2.9.162), the payload SDK fork `e105cf6`, PS5_Vulkan `ace98a9`
+Built from PCSX2 `b09e6d3fc04d` (v2.9.164), the payload SDK fork `e105cf6`, PS5_Vulkan `ace98a9`
 and PS5 Vulkan Template `91179df`. RADV is PS5 Mesa `1ba9874` (the revision PS5_Vulkan pins) with
 the 16 patches of `ps5/patches/mesa-27/` (their README says what each does and where it comes from),
 built by `ps5/tools/build-radv-crux2.sh` (it applies them as commits on a local `crux2-radv` branch
