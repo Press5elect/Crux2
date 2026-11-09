@@ -24,6 +24,10 @@
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
 #     page protection and the fault handler), over a stand-in for the platform layer with the same
 #     argument rules (mock_platform.cpp), compiled for 16 KiB host pages as the console build is;
+#   - the accurate-float model (vendor/pcsx2/pcsx2/PS2Float.cpp, softfloat/): the divide/square-root
+#     shortcut and the multiplier gate against the unchanged digit recurrence and Booth array (all
+#     radicands, 64 divisor significands against every dividend, random pairs, edge values), and the
+#     model against ARMSX2's console-captured rows (softfloat/data); SOFTFLOAT_SCALE=n runs n times more;
 #   - the interface's and host's sources: no setting read through Host while the settings' lock
 #     is held (check-settings-lock.py; such a read ends the title);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
@@ -137,6 +141,20 @@ if [[ -f $pcsx2/common/HostSys.h && -f $sdk_fork/platform/include/ps5platform/sh
     "$work/hostsys_test" || status=1
 else
     echo "skipped (needs vendor/pcsx2 and the SDK fork at $sdk_fork)"
+fi
+
+echo "== soft float (PS2Float against the recurrence it shortcuts, and against the console)"
+if [[ -f $pcsx2/pcsx2/PS2Float.cpp ]]; then
+    sf_flags="-std=c++20 -O2 -g -Wall -Wno-unused-parameter -pthread -D_M_X86=1 -D__POSIX__ -msse4.1 -I $pcsx2 -I $pcsx2/pcsx2 -I $pcsx2/common -I $pcsx2/3rdparty/fmt/include -I $pcsx2/3rdparty/include -I $pcsx2/3rdparty/fast_float/include"
+    # shellcheck disable=SC2086
+    clang++ $sf_flags "$tests/softfloat/softfloat_equiv_test.cpp" "$pcsx2/pcsx2/PS2Float.cpp" -o "$work/softfloat_equiv_test" &&
+        "$work/softfloat_equiv_test" "${SOFTFLOAT_SCALE:-1}" || status=1
+    # shellcheck disable=SC2086
+    clang++ $sf_flags -fsanitize=undefined -fno-sanitize-recover=undefined "$tests/softfloat/softfloat_corpus_test.cpp" \
+        "$pcsx2/pcsx2/PS2Float.cpp" -o "$work/softfloat_corpus_test" &&
+        "$work/softfloat_corpus_test" "$tests/softfloat/data/ee_fpu_golden.txt" | grep -v '^  ' || status=1
+else
+    echo "skipped (needs vendor/pcsx2)"
 fi
 
 if [[ -n ${LIBSMB2_PREFIX:-} ]]; then

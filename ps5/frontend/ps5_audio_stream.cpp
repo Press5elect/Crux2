@@ -73,7 +73,7 @@ namespace
 
 		void SetPaused(bool paused) override;
 
-		bool Start(bool stretch_enabled, Error* error);
+		bool Start(AudioSynchronizationMode sync_mode, Error* error);
 
 	private:
 		// Where each channel of an expansion mode goes in a frame of eight (-1: nowhere), in the
@@ -103,6 +103,9 @@ namespace
 		Threading::Thread m_thread;
 		std::atomic_bool m_running{true};
 		std::atomic_bool m_quit{false};
+		// Set while the thread reads from the buffer: a pause waits for it to be clear before the
+		// low latency mode resets the buffer (which moves both of its positions).
+		std::atomic_bool m_in_read{false};
 	};
 
 	std::once_flag s_audio_out_once;
@@ -167,9 +170,9 @@ PS5AudioStream::~PS5AudioStream()
 		sceAudioOutClose(m_port);
 }
 
-bool PS5AudioStream::Start(bool stretch_enabled, Error* error)
+bool PS5AudioStream::Start(AudioSynchronizationMode sync_mode, Error* error)
 {
-	BaseInitialize(LayoutOf(m_parameters.expansion_mode).reader, stretch_enabled);
+	BaseInitialize(LayoutOf(m_parameters.expansion_mode).reader, sync_mode);
 
 	if (!m_thread.Start([this]() { Run(); }))
 	{
@@ -177,9 +180,11 @@ bool PS5AudioStream::Start(bool stretch_enabled, Error* error)
 		return false;
 	}
 
-	ps5px_log("audio: port %d, %u Hz in, %u Hz out, %u channel(s) of %u (%s), %u frames per write, time stretching %s", m_port, m_sample_rate,
+	ps5px_log("audio: port %d, %u Hz in, %u Hz out, %u channel(s) of %u (%s), %u frames per write (%.1f ms; output latency asked for: %u ms, the port's smallest write is %u frames), sync mode %s", m_port, m_sample_rate,
 		AUDIO_OUT_RATE, static_cast<u32>(m_output_channels), m_eight ? 8u : 2u, GetExpansionModeName(m_parameters.expansion_mode), m_grain,
-		stretch_enabled ? "on" : "off");
+		1000.0 * m_grain / AUDIO_OUT_RATE, static_cast<u32>(m_parameters.output_latency_ms), AUDIO_OUT_FRAMES,
+		sync_mode == AudioSynchronizationMode::LowLatency ? "low latency (resampling)" :
+		sync_mode == AudioSynchronizationMode::TimeStretch ? "time stretching" : "off");
 	return true;
 }
 
@@ -188,8 +193,19 @@ void PS5AudioStream::SetPaused(bool paused)
 	if (m_paused == paused)
 		return;
 
-	m_running.store(!paused, std::memory_order_release);
-	m_paused = paused;
+	if (paused)
+	{
+		m_running.store(false);
+		// The thread is out of the buffer before the base class resets it (low latency mode).
+		for (int i = 0; i < 500 && m_in_read.load(); i++)
+			sceKernelUsleep(100);
+		AudioStream::SetPaused(true);
+	}
+	else
+	{
+		AudioStream::SetPaused(false);
+		m_running.store(true);
+	}
 }
 
 // (Stereo only: a stream at another rate than the port's is never expanded.)
@@ -249,10 +265,14 @@ void PS5AudioStream::Run()
 				if (GetBufferedFramesRelaxed() < m_grain)
 					s_short_writes.fetch_add(1, std::memory_order_relaxed);
 
-				if (m_sample_rate == AUDIO_OUT_RATE)
+				m_in_read.store(true);
+				if (!m_running.load())
+					std::fill(frames.begin(), frames.end(), 0.0f); // paused since the check above
+				else if (m_sample_rate == AUDIO_OUT_RATE)
 					ReadFrames(frames.data(), m_grain);
 				else
 					ReadResampled(frames.data());
+				m_in_read.store(false);
 			}
 			else
 			{
@@ -304,7 +324,7 @@ void PS5AudioStream::Run()
 }
 
 static std::unique_ptr<AudioStream> CreatePS5AudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
-	bool stretch_enabled, Error* error)
+	AudioSynchronizationMode sync_mode, Error* error)
 {
 	if (sample_rate < 8000 || sample_rate > 192000)
 	{
@@ -344,21 +364,21 @@ static std::unique_ptr<AudioStream> CreatePS5AudioStream(u32 sample_rate, const 
 	}
 
 	std::unique_ptr<PS5AudioStream> stream = std::make_unique<PS5AudioStream>(sample_rate, wanted, port, grain, eight);
-	if (!stream->Start(stretch_enabled, error))
+	if (!stream->Start(sync_mode, error))
 		stream.reset();
 	return stream;
 }
 
 std::unique_ptr<AudioStream> AudioStream::CreateCubebAudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
-	const char* driver_name, const char* device_name, bool stretch_enabled, Error* error)
+	const char* driver_name, const char* device_name, AudioSynchronizationMode sync_mode, Error* error)
 {
-	return CreatePS5AudioStream(sample_rate, parameters, stretch_enabled, error);
+	return CreatePS5AudioStream(sample_rate, parameters, sync_mode, error);
 }
 
 std::unique_ptr<AudioStream> AudioStream::CreateSDLAudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
-	bool stretch_enabled, Error* error)
+	AudioSynchronizationMode sync_mode, Error* error)
 {
-	return CreatePS5AudioStream(sample_rate, parameters, stretch_enabled, error);
+	return CreatePS5AudioStream(sample_rate, parameters, sync_mode, error);
 }
 
 std::vector<std::pair<std::string, std::string>> AudioStream::GetCubebDriverNames()
