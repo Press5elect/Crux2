@@ -28,6 +28,8 @@
 #     shortcut and the multiplier gate against the unchanged digit recurrence and Booth array (all
 #     radicands, 64 divisor significands against every dividend, random pairs, edge values), and the
 #     model against ARMSX2's console-captured rows (softfloat/data); SOFTFLOAT_SCALE=n runs n times more;
+#     and the x86 recompilers' emitted SQRT kernel (vendor/pcsx2/pcsx2/x86/SoftFloatEmitter.h), built
+#     with PCSX2's x86 emitter and run against PS2Float on every mantissa at a spread of exponents;
 #   - the interface's and host's sources: no setting read through Host while the settings' lock
 #     is held (check-settings-lock.py; such a read ends the title);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
@@ -153,6 +155,11 @@ if [[ -f $pcsx2/pcsx2/PS2Float.cpp ]]; then
     clang++ $sf_flags -fsanitize=undefined -fno-sanitize-recover=undefined "$tests/softfloat/softfloat_corpus_test.cpp" \
         "$pcsx2/pcsx2/PS2Float.cpp" -o "$work/softfloat_corpus_test" &&
         "$work/softfloat_corpus_test" "$tests/softfloat/data/ee_fpu_golden.txt" | grep -v '^  ' || status=1
+    # the x86 recompilers' emitted SQRT kernel, run against PS2Float (needs the x86 emitter)
+    # shellcheck disable=SC2086
+    clang++ $sf_flags "$tests/softfloat/softfloat_kernel_test.cpp" "$pcsx2/pcsx2/PS2Float.cpp" \
+        "$pcsx2"/common/emitter/*.cpp -o "$work/softfloat_kernel_test" &&
+        "$work/softfloat_kernel_test" || status=1
 else
     echo "skipped (needs vendor/pcsx2)"
 fi
