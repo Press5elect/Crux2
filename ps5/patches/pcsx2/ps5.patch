@@ -103,6 +103,80 @@ index 90a130d..f0c7938 100644
      getSkipCount: "GSC_NamcoGames"
  SLUS-21161:
    name: "Fight Night Round 2"
+diff --git a/bin/resources/shaders/vulkan/convert.glsl b/bin/resources/shaders/vulkan/convert.glsl
+index 2626708..13784fd 100644
+--- a/bin/resources/shaders/vulkan/convert.glsl
++++ b/bin/resources/shaders/vulkan/convert.glsl
+@@ -561,37 +561,46 @@ void ps_convert_rgba_8i()
+ }
+ #endif
+ 
+-#ifdef ps_convert_clut_4
++#if defined(ps_convert_clut_4) || defined(ps_convert_clut_8)
+ layout(push_constant) uniform cb10
+ {
+ 	uvec2 offset;
+ 	uint doffset;
+-	uint cb_pad1;
++	// PS5: < 0 reads the block's first fragment (as ever); otherwise texels into the entry's block of fragments.
++	float sample_at;
+ 	float scale;
+ 	vec3 cb_pad2;
+ };
+ 
++// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent (PS5GPUPaletteFromTarget)
++// A palette entry drawn at scale is a block of scale*scale fragments. The entry is its native pixel's one value:
++// with sample_at >= 0 it is read sample_at texels into the block on each axis (the block's middle, where the
++// native sample lies, with a linear fetch between two fragments at an even scale); with sample_at < 0 the block's
++// first fragment is fetched, the path every other mode takes.
++vec4 clut_entry(uvec2 pos)
++{
++	if (sample_at < 0.0f)
++	{
++		ivec2 final = ivec2(floor(vec2(offset + pos) * vec2(scale)));
++		return texelFetch(samp0, final, 0);
++	}
++	vec2 at = (vec2(offset + pos) * scale + sample_at) / vec2(textureSize(samp0, 0));
++	return texture(samp0, at);
++}
++#endif
++
++#ifdef ps_convert_clut_4
+ void ps_convert_clut_4()
+ {
+ 	// CLUT4 is easy, just two rows of 8x8.
+ 	uint index = uint(gl_FragCoord.x) + doffset;
+ 	uvec2 pos = uvec2(index % 8u, index / 8u);
+ 
+-	ivec2 final = ivec2(floor(vec2(offset + pos) * vec2(scale)));
+-	o_col0 = texelFetch(samp0, final, 0);
++	o_col0 = clut_entry(pos);
+ }
+ #endif
+ 
+ #ifdef ps_convert_clut_8
+-layout(push_constant) uniform cb10
+-{
+-	uvec2 offset;
+-	uint doffset;
+-	uint cb_pad1;
+-	float scale;
+-	vec3 cb_pad2;
+-};
+-
+ void ps_convert_clut_8()
+ {
+ 	uint index = min(uint(gl_FragCoord.x) + doffset, 255u);
+@@ -603,8 +612,7 @@ void ps_convert_clut_8()
+ 	pos.x = (index % 8u) + ((subgroup >= 2u) ? 8u : 0u);
+ 	pos.y = ((index / 32u) * 2u) + (subgroup % 2u);
+ 
+-	ivec2 final = ivec2(floor(vec2(offset + pos) * vec2(scale)));
+-	o_col0 = texelFetch(samp0, final, 0);
++	o_col0 = clut_entry(pos);
+ }
+ #endif
+ 
 diff --git a/bin/resources/shaders/vulkan/stencil_counter.glsl b/bin/resources/shaders/vulkan/stencil_counter.glsl
 new file mode 100644
 index 0000000..8c2afb2
@@ -2465,6 +2539,39 @@ index 9d00abc..97d7fbc 100644
 +	# from both by a last bit.
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
+diff --git a/pcsx2/COP0.cpp b/pcsx2/COP0.cpp
+index d68512b..b52e8ee 100644
+--- a/pcsx2/COP0.cpp
++++ b/pcsx2/COP0.cpp
+@@ -24,7 +24,7 @@ void WriteCP0Status(u32 value)
+ {
+ 	COP0_UpdatePCCR();
+ 	cpuRegs.CP0.n.Status.val = value;
+-	cpuSetNextEventDelta(4);
++	cpuTestIntsAfterStatusChange(); // From ARMSX2 8330ebc02 (GPL-3.0-or-later)
+ }
+ 
+ void WriteCP0Config(u32 value)
+@@ -659,7 +659,7 @@ cpuRegs.PERF.n.pccr, cpuRegs.PERF.n.pcr0, cpuRegs.PERF.n.pcr1, _Imm_ & 0x3F);*/
+ 			cpuRegs.CP0.n.Status.b.EXL = 0;
+ 		}
+ 		cpuUpdateOperationMode();
+-		cpuSetNextEventDelta(4);
++		cpuTestIntsAfterStatusChange(); // From ARMSX2 8330ebc02 (GPL-3.0-or-later)
+ 		intSetBranch();
+ 	}
+ 
+@@ -680,8 +680,8 @@ cpuRegs.PERF.n.pccr, cpuRegs.PERF.n.pcr0, cpuRegs.PERF.n.pcr1, _Imm_ & 0x3F);*/
+ 			cpuRegs.CP0.n.Status.b.ERL || (cpuRegs.CP0.n.Status.b.KSU == 0))
+ 		{
+ 			cpuRegs.CP0.n.Status.b.EIE = 1;
+-			// schedule an event test, which will check for and raise pending IRQs.
+-			cpuSetNextEventDelta(4);
++			// schedule an event test if there is an IRQ it could raise.
++			cpuTestIntsAfterStatusChange(); // From ARMSX2 8330ebc02 (GPL-3.0-or-later)
+ 		}
+ 	}
+ 
 diff --git a/pcsx2/Cache.cpp b/pcsx2/Cache.cpp
 index cb540ff..72fdfe9 100644
 --- a/pcsx2/Cache.cpp
@@ -5173,7 +5280,7 @@ index a0b988f..10304f8 100644
  
  #include <sys/mman.h>
 diff --git a/pcsx2/GS/GSClut.cpp b/pcsx2/GS/GSClut.cpp
-index 5232c6a..b4007a3 100644
+index 5232c6a..658ef97 100644
 --- a/pcsx2/GS/GSClut.cpp
 +++ b/pcsx2/GS/GSClut.cpp
 @@ -8,6 +8,7 @@
@@ -5194,6 +5301,19 @@ index 5232c6a..b4007a3 100644
  		{
  			const bool is_4bit = (TEX0.PSM == PSMT4 || TEX0.PSM == PSMT4HL || TEX0.PSM == PSMT4HH);
  
+@@ -465,7 +467,11 @@ void GSClut::Read32(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA)
+ 					if (m_gpu_clut_dirty)
+ 					{
+ 						m_last_gpu_clut = src;
+-						g_gs_device->UpdateCLUTTexture(src, scale, offset.x, offset.y, dst, dOffset, dst_size);
++						// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent: with PS5GPUPaletteFromTarget the entries are
++						// read at their native pixels' samples on the scaled target (the texture cache says where); the
++						// sample is < 0 otherwise, which is the plain copy.
++						g_gs_device->PS5UpdateCLUTTextureSampled(src, scale, g_texture_cache->PS5PaletteSourceSample(),
++							offset.x, offset.y, dst, dOffset, dst_size);
+ 					}
+ 
+ 					m_gpu_clut_dirty = false;
 diff --git a/pcsx2/GS/GSDump.cpp b/pcsx2/GS/GSDump.cpp
 index 2fdb1ac..4a208ff 100644
 --- a/pcsx2/GS/GSDump.cpp
@@ -5267,7 +5387,7 @@ index d4defa8..d74eb92 100644
  
  		// Reused counters for HW.
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 88fdbb3..ce4ab25 100644
+index 88fdbb3..776599b 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
 @@ -18,6 +18,7 @@
@@ -5288,7 +5408,15 @@ index 88fdbb3..ce4ab25 100644
  }
  
  constexpr int GSState::GetSaveStateSize(int version)
-@@ -214,26 +216,37 @@ void GSState::Reset(bool hardware_reset)
+@@ -150,6 +152,7 @@ std::string GSState::GetDrawDumpPath(const char* format, ...)
+ 
+ void GSState::Reset(bool hardware_reset)
+ {
++	PS5ResetSegments(); // PS5: no batch survives a reset (PS5AutoFlushAll segments)
+ 	Flush(GSFlushReason::RESET);
+ 
+ 	// FIXME: bios logo not shown cut in half after reset, missing graphics in GoW after first FMV
+@@ -214,26 +217,37 @@ void GSState::Reset(bool hardware_reset)
  template<bool auto_flush>
  void GSState::SetPrimHandlers()
  {
@@ -5346,19 +5474,23 @@ index 88fdbb3..ce4ab25 100644
  
  #undef SetHandlerXYZ
  }
-@@ -734,6 +747,7 @@ void GSState::ResetHandlers()
+@@ -734,6 +748,10 @@ void GSState::ResetHandlers()
  	m_fpGIFPackedRegHandlers[GIF_REG_A_D] = &GSState::GIFPackedRegHandlerA_D;
  	m_fpGIFPackedRegHandlers[GIF_REG_NOP] = &GSState::GIFPackedRegHandlerNOP;
  
 +	m_ps5_af_select = GSIsHardwareRenderer() && GSConfig.PS5AutoFlushAll;
++	// PS5: segments are recorded against one vertex buffer; the draw buffering hack keeps several.
++	m_ps5_af_runs = m_ps5_af_select && !GSConfig.UserHacks_DrawBuffering;
++	PS5ResetSegments();
  	if (IsAutoFlushEnabled())
  		SetPrimHandlers<true>();
  	else
-@@ -811,9 +825,14 @@ void GSState::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
+@@ -811,9 +829,15 @@ void GSState::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
  	if (
  		GSConfig.AutoFlushSW != old_config.AutoFlushSW ||
  		GSConfig.UserHacks_AutoFlush != old_config.UserHacks_AutoFlush ||
 +		GSConfig.PS5AutoFlushAll != old_config.PS5AutoFlushAll ||
++		(GSConfig.PS5AutoFlushAll && GSConfig.UserHacks_DrawBuffering != old_config.UserHacks_DrawBuffering) ||
  		GSConfig.UserHacks_ForceEvenSpritePosition != old_config.UserHacks_ForceEvenSpritePosition)
  	{
  		ResetHandlers();
@@ -5369,7 +5501,7 @@ index 88fdbb3..ce4ab25 100644
  	}
  }
  
-@@ -1494,6 +1513,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -1494,6 +1518,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -5383,7 +5515,7 @@ index 88fdbb3..ce4ab25 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1516,6 +1542,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -1516,6 +1547,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  		r += 3;
  	}
  
@@ -5394,7 +5526,7 @@ index 88fdbb3..ce4ab25 100644
  	m_q = r[-3].STQ.Q; // remember the last one, STQ outputs this to the temp Q each time
  }
  
-@@ -1528,6 +1558,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1528,6 +1563,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -5408,7 +5540,7 @@ index 88fdbb3..ce4ab25 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1549,6 +1586,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1549,6 +1591,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  		r += 3;
  	}
  
@@ -5419,7 +5551,7 @@ index 88fdbb3..ce4ab25 100644
  	m_q = r[-3].STQ.Q; // remember the last one, STQ outputs this to the temp Q each time
  }
  
-@@ -1710,6 +1751,12 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
+@@ -1710,6 +1756,12 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
  		GIFRegBITBLTBUF BITBLTBUF = {};
  		GSVector4i r;
  
@@ -5432,7 +5564,7 @@ index 88fdbb3..ce4ab25 100644
  		if (TEX0.CSM == 0)
  		{
  			BITBLTBUF.SBP = TEX0.CBP;
-@@ -1764,6 +1811,10 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
+@@ -1764,6 +1816,10 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_TEX0);
  	}
@@ -5443,7 +5575,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  template <int i>
-@@ -1880,6 +1931,10 @@ void GSState::GIFRegHandlerTEX1(const GIFReg* RESTRICT r)
+@@ -1880,6 +1936,10 @@ void GSState::GIFRegHandlerTEX1(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_TEX1);
  	}
@@ -5454,7 +5586,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  template <int i>
-@@ -1988,6 +2043,10 @@ void GSState::GIFRegHandlerMIPTBP1(const GIFReg* RESTRICT r)
+@@ -1988,6 +2048,10 @@ void GSState::GIFRegHandlerMIPTBP1(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_MIPTBP1);
  	}
@@ -5465,7 +5597,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  template <int i>
-@@ -2004,6 +2063,10 @@ void GSState::GIFRegHandlerMIPTBP2(const GIFReg* RESTRICT r)
+@@ -2004,6 +2068,10 @@ void GSState::GIFRegHandlerMIPTBP2(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_MIPTBP2);
  	}
@@ -5476,7 +5608,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  void GSState::GIFRegHandlerTEXA(const GIFReg* RESTRICT r)
-@@ -2124,6 +2187,10 @@ void GSState::GIFRegHandlerTEST(const GIFReg* RESTRICT r)
+@@ -2124,6 +2192,10 @@ void GSState::GIFRegHandlerTEST(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_TEST);
  	}
@@ -5487,7 +5619,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  void GSState::GIFRegHandlerPABE(const GIFReg* RESTRICT r)
-@@ -2202,6 +2269,10 @@ void GSState::GIFRegHandlerFRAME(const GIFReg* RESTRICT r)
+@@ -2202,6 +2274,10 @@ void GSState::GIFRegHandlerFRAME(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_FRAME);
  	}
@@ -5498,7 +5630,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  template <int i>
-@@ -2237,6 +2308,10 @@ void GSState::GIFRegHandlerZBUF(const GIFReg* RESTRICT r)
+@@ -2237,6 +2313,10 @@ void GSState::GIFRegHandlerZBUF(const GIFReg* RESTRICT r)
  		else
  			m_dirty_gs_regs &= ~(1 << DIRTY_REG_ZBUF);
  	}
@@ -5509,7 +5641,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  void GSState::GIFRegHandlerBITBLTBUF(const GIFReg* RESTRICT r)
-@@ -2317,6 +2392,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
+@@ -2317,6 +2397,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
  
  void GSState::Flush(GSFlushReason reason)
  {
@@ -5519,7 +5651,7 @@ index 88fdbb3..ce4ab25 100644
  	SetDrawBuffDirty();
  
  	FlushWrite();
-@@ -2327,6 +2405,9 @@ void GSState::Flush(GSFlushReason reason)
+@@ -2327,6 +2410,9 @@ void GSState::Flush(GSFlushReason reason)
  
  void GSState::FlushDraw(GSFlushReason reason)
  {
@@ -5529,7 +5661,24 @@ index 88fdbb3..ce4ab25 100644
  	FlushWrite();
  
  	if (m_index->tail > 0)
-@@ -3348,6 +3429,44 @@ void GSState::ReadbackTextureCache()
+@@ -2655,7 +2741,15 @@ void GSState::FlushPrim()
+ 		}
+ 
+ 		if (!skip_draw)
+-			Draw();
++		{
++			// From LRPS2 1b83fc768 (GPL-3.0-or-later): a batch auto flush split into segments goes as one draw when
++			// the renderer draws it as runs, else one segment at a time (PS5AutoFlushAll).
++			if (m_ps5_af_seg_count && !PS5CanDrawRuns())
++				PS5FlushSegments();
++			else
++				Draw();
++		}
++		PS5ResetSegments();
+ 
+ 		g_perfmon.Put(GSPerfMon::Draw, 1);
+ 		g_perfmon.Put(GSPerfMon::Prim, idx_buff.tail / GSUtil::GetVertexCount(PRIM->PRIM));
+@@ -3348,6 +3442,44 @@ void GSState::ReadbackTextureCache()
  {
  }
  
@@ -5574,7 +5723,7 @@ index 88fdbb3..ce4ab25 100644
  template void GSState::Transfer<0>(const u8* mem, u32 size);
  template void GSState::Transfer<1>(const u8* mem, u32 size);
  template void GSState::Transfer<2>(const u8* mem, u32 size);
-@@ -3412,6 +3531,19 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3412,6 +3544,19 @@ void GSState::Transfer(const u8* mem, u32 size)
  						{
  							case GIFPath::TYPE_UNKNOWN:
  							{
@@ -5594,7 +5743,7 @@ index 88fdbb3..ce4ab25 100644
  								u32 reg = 0;
  
  								do
-@@ -3422,6 +3554,10 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3422,6 +3567,10 @@ void GSState::Transfer(const u8* mem, u32 size)
  
  									reg = reg & ((int)(reg - path.nreg) >> 31); // resets reg back to 0 when it becomes equal to path.nreg
  								} while (--total > 0);
@@ -5605,7 +5754,7 @@ index 88fdbb3..ce4ab25 100644
  							}
  							break;
  							case GIFPath::TYPE_ADONLY: // very common
-@@ -3808,6 +3944,7 @@ void GSState::UpdateContext()
+@@ -3808,6 +3957,7 @@ void GSState::UpdateContext()
  	m_context = const_cast<GSDrawingContext*>(&m_draw_env->CTXT[PRIM->CTXT]);
  
  	UpdateScissor();
@@ -5613,7 +5762,7 @@ index 88fdbb3..ce4ab25 100644
  }
  
  void GSState::UpdateScissor()
-@@ -3819,19 +3956,36 @@ void GSState::UpdateScissor()
+@@ -3819,19 +3969,36 @@ void GSState::UpdateScissor()
  void GSState::UpdateVertexKick()
  {
  	const u32 prim = PRIM->PRIM;
@@ -5621,25 +5770,27 @@ index 88fdbb3..ce4ab25 100644
 +	int tex_layer = 0;
 +	m_ps5_af_kick = !m_ps5_af_select || IsAutoFlushDraw(prim, tex_layer, true);
 +	const int af = m_ps5_af_kick ? 1 : 0;
-+
-+	m_fpGIFPackedRegHandlers[GIF_REG_XYZF2] = m_fpGIFPackedRegHandlerXYZ[af][prim][0];
-+	m_fpGIFPackedRegHandlers[GIF_REG_XYZF3] = m_fpGIFPackedRegHandlerXYZ[af][prim][1];
-+	m_fpGIFPackedRegHandlers[GIF_REG_XYZ2] = m_fpGIFPackedRegHandlerXYZ[af][prim][2];
-+	m_fpGIFPackedRegHandlers[GIF_REG_XYZ3] = m_fpGIFPackedRegHandlerXYZ[af][prim][3];
  
 -	m_fpGIFPackedRegHandlers[GIF_REG_XYZF2] = m_fpGIFPackedRegHandlerXYZ[prim][0];
 -	m_fpGIFPackedRegHandlers[GIF_REG_XYZF3] = m_fpGIFPackedRegHandlerXYZ[prim][1];
 -	m_fpGIFPackedRegHandlers[GIF_REG_XYZ2] = m_fpGIFPackedRegHandlerXYZ[prim][2];
 -	m_fpGIFPackedRegHandlers[GIF_REG_XYZ3] = m_fpGIFPackedRegHandlerXYZ[prim][3];
-+	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF2] = m_fpGIFRegHandlerXYZ[af][prim][0];
-+	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF3] = m_fpGIFRegHandlerXYZ[af][prim][1];
-+	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ2] = m_fpGIFRegHandlerXYZ[af][prim][2];
-+	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ3] = m_fpGIFRegHandlerXYZ[af][prim][3];
++	m_fpGIFPackedRegHandlers[GIF_REG_XYZF2] = m_fpGIFPackedRegHandlerXYZ[af][prim][0];
++	m_fpGIFPackedRegHandlers[GIF_REG_XYZF3] = m_fpGIFPackedRegHandlerXYZ[af][prim][1];
++	m_fpGIFPackedRegHandlers[GIF_REG_XYZ2] = m_fpGIFPackedRegHandlerXYZ[af][prim][2];
++	m_fpGIFPackedRegHandlers[GIF_REG_XYZ3] = m_fpGIFPackedRegHandlerXYZ[af][prim][3];
  
 -	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF2] = m_fpGIFRegHandlerXYZ[prim][0];
 -	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF3] = m_fpGIFRegHandlerXYZ[prim][1];
 -	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ2] = m_fpGIFRegHandlerXYZ[prim][2];
 -	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ3] = m_fpGIFRegHandlerXYZ[prim][3];
++	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF2] = m_fpGIFRegHandlerXYZ[af][prim][0];
++	m_fpGIFRegHandlers[GIF_A_D_REG_XYZF3] = m_fpGIFRegHandlerXYZ[af][prim][1];
++	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ2] = m_fpGIFRegHandlerXYZ[af][prim][2];
++	m_fpGIFRegHandlers[GIF_A_D_REG_XYZ3] = m_fpGIFRegHandlerXYZ[af][prim][3];
+ 
+-	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[prim];
+-	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[prim];
 +	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[af][prim];
 +	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[af][prim];
 +}
@@ -5651,16 +5802,14 @@ index 88fdbb3..ce4ab25 100644
 +{
 +	if (!m_ps5_af_select || !m_context || !PRIM || m_draw_env != &m_env)
 +		return;
- 
--	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[prim];
--	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[prim];
++
 +	int tex_layer = 0;
 +	if (IsAutoFlushDraw(PRIM->PRIM, tex_layer, true) != m_ps5_af_kick)
 +		UpdateVertexKick();
  }
  
  static void GrowBuffer(void** pbuff, size_t old_size, size_t new_size, bool vertices)
-@@ -5350,9 +5504,11 @@ void GSState::GetQuadRasterizedPoints(GSVector4& xy, bool keep_order)
+@@ -5350,9 +5517,11 @@ void GSState::GetQuadRasterizedPoints(GSVector4& xy, bool keep_order)
  	GetQuadRasterizedPoints(xy, tex_ignore, keep_order);
  }
  
@@ -5674,7 +5823,7 @@ index 88fdbb3..ce4ab25 100644
  		return false;
  
  	// Not using the same channels.
-@@ -5360,7 +5516,7 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
+@@ -5360,7 +5529,7 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
  		return false;
  
  	// Try to detect shuffles, because these will not autoflush, they by design clash.
@@ -5683,7 +5832,17 @@ index 88fdbb3..ce4ab25 100644
  		return false;
  
  	// Check if one of the texture being used is the same as the FRAME or ZBUF.
-@@ -5460,7 +5616,49 @@ __forceinline void GSState::HandleAutoFlush()
+@@ -5451,7 +5620,8 @@ template<u32 prim>
+ __forceinline void GSState::HandleAutoFlush()
+ {
+ 	// Kind of a cheat, making the assumption that 2 consecutive fan/strip triangles won't overlap each other (*should* be safe)
+-	if ((m_index->tail & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
++	// (PS5: with runs on, every primitive is classified first, so the cheat moves below the classification.)
++	if (!m_ps5_af_runs && (m_index->tail & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
+ 		return;
+ 
+ 	GSVertexBuff& vtx_buff = *m_vertex;
+@@ -5460,7 +5630,49 @@ __forceinline void GSState::HandleAutoFlush()
  	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
  	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
  	int tex_layer = 0;
@@ -5733,8 +5892,297 @@ index 88fdbb3..ce4ab25 100644
  	{
  		int  n = 1;
  		u32 buff[3];
+@@ -5495,6 +5707,26 @@ __forceinline void GSState::HandleAutoFlush()
+ 				break;
+ 		}
+ 
++		// From LRPS2 e7eea2c4f (GPL-3.0-or-later) (PS5AutoFlushAll): every primitive is classified; one that reads
++		// elsewhere than its own pixels, after an overlap was let through, flushes before it.
++		bool ps5_pixel = false;
++		if (m_ps5_af_runs)
++		{
++			ps5_pixel = m_ps5_pixel_feedback_ok && PS5IsPixelFeedbackPrim(prim, buff, n);
++			if (!ps5_pixel)
++			{
++				if (m_ps5_af_skipped)
++				{
++					Flush(GSFlushReason::AUTOFLUSH);
++					m_ps5_af_pixel_batch = false;
++					return;
++				}
++				m_ps5_af_pixel_batch = false;
++			}
++			if ((idx_buff.tail & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
++				return;
++		}
++
+ 		const bool possible_mipmap = m_context->TEX1.MXL > 0 && m_context->TEX1.MMIN >= 2 && m_context->TEX1.MMIN <= 5;
+ 		const float K = static_cast<float>(m_context->TEX1.K) / 16;
+ 		const float powL = static_cast<float>(1 << m_context->TEX1.L);
+@@ -5651,11 +5883,13 @@ __forceinline void GSState::HandleAutoFlush()
+ 		}
+ 
+ 		// Nothing being drawn intersect with the new texture, so no point in checking further.
+-		if (tex_psm.depth == frame_psm.depth && tex_rect.rintersect(temp_draw_rect).rempty())
++		// (PS5 runs: what the segments before this one drew, this one reads after; the current segment's rect.)
++		const GSVector4i& ps5_batch_draw = m_ps5_af_runs ? m_ps5_af_seg_draw : temp_draw_rect;
++		if (tex_psm.depth == frame_psm.depth && tex_rect.rintersect(ps5_batch_draw).rempty())
+ 			return;
+ 		else if (m_texflush_flag)
+ 		{
+-			Flush(GSFlushReason::AUTOFLUSH);
++			PS5AutoFlushOverlap(ps5_pixel);
+ 			return;
+ 		}
+ 
+@@ -5675,8 +5909,9 @@ __forceinline void GSState::HandleAutoFlush()
+ 				const GSVector4i scissor = m_context->scissor.in;
+ 				GSVector4i old_draw_rect = GSVector4i::zero();
+ 				int current_draw_end = idx_buff.tail;
++				const int ps5_seg_begin = (m_ps5_af_runs && m_ps5_af_seg_count) ? static_cast<int>(m_ps5_af_seg_start[m_ps5_af_seg_count - 1]) : 0;
+ 
+-				while (current_draw_end >= n)
++				while (current_draw_end >= ps5_seg_begin + n)
+ 				{
+ 					for (int i = current_draw_end - 1; i >= current_draw_end - n; i--)
+ 					{
+@@ -5726,7 +5961,7 @@ __forceinline void GSState::HandleAutoFlush()
+ 					old_draw_rect = tex_rect.rintersect(old_draw_rect);
+ 					if (!old_draw_rect.rintersect(scissor).rempty())
+ 					{
+-						Flush(GSFlushReason::AUTOFLUSH);
++						PS5AutoFlushOverlap(ps5_pixel);
+ 						return;
+ 					}
+ 
+@@ -5747,21 +5982,191 @@ __forceinline void GSState::HandleAutoFlush()
+ 					const int frame_page_mask_x = ~(frame_psm.pgs.x - 1);
+ 					const int frame_page_mask_y = ~(frame_psm.pgs.y - 1);
+ 					const GSVector4i frame_page_mask = { frame_page_mask_x, frame_page_mask_y, frame_page_mask_x, frame_page_mask_y };
+-					GSVector4i area_out = temp_draw_rect;
++					GSVector4i area_out = ps5_batch_draw;
+ 					area_out += GSVector4i(0, 0, frame_psm.pgs.x - 1, frame_psm.pgs.y - 1); // round up to the next page as we will be comparing by page.
+ 					area_out &= frame_page_mask;
+ 					area_out = GSVector4i(area_out.x / frame_psm.pgs.x, area_out.y / frame_psm.pgs.y, area_out.z / frame_psm.pgs.x, area_out.w / frame_psm.pgs.y);
+ 
+ 					if (!area_out.rintersect(tex_rect).rempty())
+-						Flush(GSFlushReason::AUTOFLUSH);
++						PS5AutoFlushOverlap(ps5_pixel);
+ 				}
+ 				else // Formats are too different so just flush it.
+-					Flush(GSFlushReason::AUTOFLUSH);
++					PS5AutoFlushOverlap(ps5_pixel);
+ 			}
+ 		}
+ 	}
+ }
+ 
++// From LRPS2 e7eea2c4f (GPL-3.0-or-later)
++// The primitive being kicked reads only the pixels it writes: the texture is the frame, sampled nearest, each
++// vertex's texel within a texel of its pixel and inside any region clamp, and the primitive is a sprite or a
++// triangle writing alpha alone -- the cases the hardware renderer draws reading the target in place (tex-is-fb).
++bool GSState::PS5IsPixelFeedbackPrim(u32 prim, const u32* buff, int n) const
++{
++	const GSDrawingContext* ctx = m_context;
++	const GS_PRIM_CLASS pc = GSUtil::GetPrimClass(prim);
++	const float ox = static_cast<float>(ctx->XYOFFSET.OFX) / 16.0f;
++	const float oy = static_cast<float>(ctx->XYOFFSET.OFY) / 16.0f;
++	const float tw = static_cast<float>(1 << ctx->TEX0.TW);
++	const float th = static_cast<float>(1 << ctx->TEX0.TH);
++
++	if (ctx->FRAME.Block() != ctx->TEX0.TBP0 || ctx->TEX1.MMAG || ctx->TEX1.MMIN)
++		return false;
++	if (pc != GS_SPRITE_CLASS && !(pc == GS_TRIANGLE_CLASS && ctx->FRAME.FBMSK == 0x00FFFFFFu))
++		return false;
++	if (ctx->CLAMP.WMS == CLAMP_REGION_REPEAT || ctx->CLAMP.WMT == CLAMP_REGION_REPEAT)
++		return false;
++
++	const GSVertexBuff& vtx_buff = *m_vertex;
++	for (int i = 0; i < n; i++)
++	{
++		const GSVertex* v = (i == 0) ? &m_v : &vtx_buff.buff[buff[i - 1]];
++		const float x = static_cast<float>(v->XYZ.X) / 16.0f - ox;
++		const float y = static_cast<float>(v->XYZ.Y) / 16.0f - oy;
++		float u, t;
++		if (PRIM->FST)
++		{
++			u = static_cast<float>(v->U) / 16.0f;
++			t = static_cast<float>(v->V) / 16.0f;
++		}
++		else
++		{
++			// A sprite's Q is its second vertex's.
++			const float q = (pc == GS_SPRITE_CLASS) ? m_v.RGBAQ.Q : v->RGBAQ.Q;
++			if (!(q != 0.0f))
++				return false;
++			u = v->ST.S / q * tw;
++			t = v->ST.T / q * th;
++		}
++		if (!(std::fabs(x - u) < 1.0f) || !(std::fabs(y - t) < 1.0f))
++			return false;
++		if (ctx->CLAMP.WMS == CLAMP_REGION_CLAMP && (u < static_cast<float>(ctx->CLAMP.MINU) || u > static_cast<float>(ctx->CLAMP.MAXU + 1)))
++			return false;
++		if (ctx->CLAMP.WMT == CLAMP_REGION_CLAMP && (t < static_cast<float>(ctx->CLAMP.MINV) || t > static_cast<float>(ctx->CLAMP.MAXV + 1)))
++			return false;
++	}
++	return true;
++}
++
++// From LRPS2 e7eea2c4f (GPL-3.0-or-later): the first primitive of a batch, classified as HandleAutoFlush classifies
++// the rest (the batch is a pixel batch until one reads elsewhere).
++void GSState::PS5ClassifyFirstPrim(u32 prim)
++{
++	const u32 head = m_vertex->head;
++	const u32 tail = m_vertex->tail;
++	u32 buff[3];
++	int n;
++
++	switch (prim)
++	{
++		case GS_POINTLIST:
++			buff[0] = tail - 1;
++			n = 1;
++			break;
++		case GS_LINELIST:
++		case GS_LINESTRIP:
++		case GS_SPRITE:
++			buff[0] = tail - 1;
++			n = 2;
++			break;
++		case GS_TRIANGLELIST:
++		case GS_TRIANGLESTRIP:
++			buff[0] = tail - 2;
++			buff[1] = tail - 1;
++			n = 3;
++			break;
++		case GS_TRIANGLEFAN:
++			buff[0] = head;
++			buff[1] = tail - 1;
++			n = 3;
++			break;
++		default:
++			m_ps5_af_pixel_batch = false;
++			return;
++	}
++
++	int tex_layer = 0;
++	m_ps5_af_pixel_batch = m_ps5_pixel_feedback_ok && IsAutoFlushDraw(prim, tex_layer) && PS5IsPixelFeedbackPrim(prim, buff, n);
++}
++
++// From LRPS2 e7eea2c4f/1b83fc768 (GPL-3.0-or-later)
++// An overlap found: a batch of primitives all reading only their own pixels takes it in the draw (in place); else,
++// when the renderer can draw runs, a segment boundary is recorded; anything else flushes before the primitive.
++void GSState::PS5AutoFlushOverlap(bool pixel)
++{
++	if (!m_ps5_af_runs)
++	{
++		Flush(GSFlushReason::AUTOFLUSH);
++		return;
++	}
++	if (pixel && m_ps5_af_pixel_batch && m_ps5_af_seg_count == 0)
++	{
++		m_ps5_af_skipped = true;
++		return;
++	}
++	// A batch drawn in place cannot take segments read from a copy.
++	if (!m_ps5_af_skipped && m_ps5_af_seg_count < PS5_AF_MAX_SEGMENTS)
++	{
++		m_ps5_af_seg_start[m_ps5_af_seg_count++] = m_index->tail;
++		m_ps5_af_seg_fresh = true;
++		m_ps5_af_pixel_batch = false;
++		return;
++	}
++	Flush(GSFlushReason::AUTOFLUSH);
++	m_ps5_af_pixel_batch = pixel;
++}
++
++// From LRPS2 1b83fc768 (GPL-3.0-or-later)
++// The batch one segment at a time, each with its own vertex trace, as flushing at each boundary drew it: a
++// segment's vertices are moved to the front of the buffer and its indices rebased onto them, since a draw may
++// rewrite every vertex it is given.
++void GSState::PS5FlushSegments()
++{
++	GSVertexBuff& vtx_buff = *m_vertex;
++	GSIndexBuff& idx_buff = *m_index;
++	const u32 total = idx_buff.tail;
++	const u32 nverts = vtx_buff.tail;
++	const u32 segs = m_ps5_af_seg_count;
++	const GS_PRIM_CLASS pc = GSUtil::GetPrimClass(PRIM->PRIM);
++
++	m_ps5_af_seg_count = 0;
++
++	std::vector<u16> saved_index(idx_buff.buff, idx_buff.buff + total);
++	std::vector<GSVertex> saved_vertex(vtx_buff.buff, vtx_buff.buff + nverts);
++
++	u32 start = 0;
++	for (u32 i = 0; i <= segs; i++)
++	{
++		const u32 end = (i < segs) ? m_ps5_af_seg_start[i] : total;
++		if (end > start)
++		{
++			u32 vmin = saved_index[start];
++			u32 vmax = saved_index[start];
++			for (u32 k = start + 1; k < end; k++)
++			{
++				vmin = std::min<u32>(vmin, saved_index[k]);
++				vmax = std::max<u32>(vmax, saved_index[k]);
++			}
++			std::memcpy(vtx_buff.buff, saved_vertex.data() + vmin, sizeof(GSVertex) * (vmax - vmin + 1));
++			for (u32 k = start; k < end; k++)
++				idx_buff.buff[k - start] = static_cast<u16>(saved_index[k] - vmin);
++			vtx_buff.head = 0;
++			vtx_buff.tail = vmax - vmin + 1;
++			vtx_buff.next = vtx_buff.tail;
++			idx_buff.tail = end - start;
++			m_vt.Update(vtx_buff.buff, idx_buff.buff, vtx_buff.tail, idx_buff.tail, pc);
++			m_quad_check_valid = false;
++			m_quad_check_valid_shuffle = false;
++			m_drawlist.clear();
++			m_drawlist_bbox.clear();
++			if (start)
++				IncDraw();
++			Draw();
++		}
++		start = end;
++	}
++}
++
+ __inline bool GSState::CheckOverlapVerts(u32 n)
+ {
+ 	GSVertexBuff& vtx_buff = *m_vertex;
+@@ -5857,9 +6262,12 @@ __forceinline void GSState::VertexKick(u32 skip)
+ 		if (CheckOverlapVerts(n))
+ 			Flush(CONTEXTCHANGE);
+ 	
+-	if (auto_flush && skip == 0 && idx_buff.tail > 0 && ((vtx_buff.tail + 1) - vtx_buff.head) >= n)
++	if (auto_flush && skip == 0 && ((vtx_buff.tail + 1) - vtx_buff.head) >= n)
+ 	{
+-		HandleAutoFlush<prim>();
++		if (idx_buff.tail > 0)
++			HandleAutoFlush<prim>();
++		else if (m_ps5_af_runs)
++			PS5ClassifyFirstPrim(prim); // From LRPS2 e7eea2c4f: the batch's first primitive is classified too.
+ 	}
+ 
+ 	u32 head = vtx_buff.head;
+@@ -6095,6 +6503,15 @@ __forceinline void GSState::VertexKick(u32 skip)
+ 	else
+ 		temp_draw_rect = draw_rect;
+ 	temp_draw_rect = temp_draw_rect.rintersect(m_context->scissor.in);
++	// From LRPS2 1b83fc768 (GPL-3.0-or-later): the current segment's draw rect (PS5AutoFlushAll).
++	if (m_ps5_af_runs)
++	{
++		if (m_ps5_af_seg_fresh || idx_buff.tail == n)
++			m_ps5_af_seg_draw = draw_rect.rintersect(m_context->scissor.in);
++		else
++			m_ps5_af_seg_draw = m_ps5_af_seg_draw.runion(draw_rect).rintersect(m_context->scissor.in);
++		m_ps5_af_seg_fresh = false;
++	}
+ 
+ 	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
+ 	if (max_vertices != 0 && vtx_buff.tail >= max_vertices)
 diff --git a/pcsx2/GS/GSState.h b/pcsx2/GS/GSState.h
-index 3e0b354..b9e95df 100644
+index 3e0b354..d9ba93b 100644
 --- a/pcsx2/GS/GSState.h
 +++ b/pcsx2/GS/GSState.h
 @@ -30,7 +30,9 @@ private:
@@ -5765,7 +6213,7 @@ index 3e0b354..b9e95df 100644
  
  	template<u32 prim, bool auto_flush> void GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u32 size);
  	template<u32 prim, bool auto_flush> void GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32 size);
-@@ -183,9 +185,15 @@ protected:
+@@ -183,9 +185,42 @@ protected:
  	void UpdateScissor();
  
  	void UpdateVertexKick();
@@ -5775,6 +6223,33 @@ index 3e0b354..b9e95df 100644
 +	bool m_ps5_af_select = false; // PS5AutoFlushAll is on (hardware renderer) and auto flush is enabled for the draw
 +	bool m_ps5_af_kick = true;    // the set UpdateVertexKick last picked (true: the auto-flush set)
 +	void UpdateAutoFlushKick();
++
++	// From LRPS2 e7eea2c4f/1b83fc768 (GPL-3.0-or-later) (PS5AutoFlushAll, hardware renderer, draw buffering off)
++	// Where auto flush would end a batch (a primitive reading what an earlier one of the batch drew), the batch keeps
++	// going and a segment boundary is recorded instead (an index count each, up to PS5_AF_MAX_SEGMENTS). The
++	// hardware renderer draws the whole batch as a run per segment (PS5CanDrawRuns, GSRendererHW::PS5RenderRuns),
++	// else the batch is handed to Draw one segment at a time (PS5FlushSegments). Detection looks back over the
++	// current segment only, against what it drew (m_ps5_af_seg_draw). A batch whose primitives each read only the
++	// pixels they write (PS5IsPixelFeedbackPrim) is let through whole, to be drawn reading the target in place.
++	bool m_ps5_af_runs = false; // m_ps5_af_select && !UserHacks_DrawBuffering: segments and pixel batches are recorded
++	bool m_ps5_af_pixel_batch = true;
++	bool m_ps5_af_skipped = false;
++	static constexpr u32 PS5_AF_MAX_SEGMENTS = 64;
++	u32 m_ps5_af_seg_start[PS5_AF_MAX_SEGMENTS] = {};
++	u32 m_ps5_af_seg_count = 0;
++	GSVector4i m_ps5_af_seg_draw = {};
++	bool m_ps5_af_seg_fresh = true;
++	bool PS5IsPixelFeedbackPrim(u32 prim, const u32* buff, int n) const;
++	void PS5ClassifyFirstPrim(u32 prim);
++	void PS5AutoFlushOverlap(bool pixel);
++	void PS5FlushSegments();
++	__fi void PS5ResetSegments()
++	{
++		m_ps5_af_pixel_batch = true;
++		m_ps5_af_skipped = false;
++		m_ps5_af_seg_count = 0;
++		m_ps5_af_seg_fresh = true;
++	}
  
  	void GrowVertexBuffer();
 -	bool IsAutoFlushDraw(u32 prim, int& tex_layer);
@@ -5782,7 +6257,17 @@ index 3e0b354..b9e95df 100644
  	template<u32 prim> void HandleAutoFlush();
  	bool EarlyDetectShuffle(u32 prim);
  	void CheckCLUTValidity(u32 prim);
-@@ -299,6 +307,18 @@ public:
+@@ -290,6 +325,9 @@ public:
+ 	const GSDrawingEnvironment* m_draw_env = &m_env;
+ 	GSDrawingContext* m_context = nullptr;
+ 	GSVector4i temp_draw_rect;
++	// PS5 (From LRPS2 e7eea2c4f): set by a renderer that draws a primitive reading only its own pixels correctly
++	// however the draw's primitives overlap (tex-is-fb with barriers): auto flush then lets such overlaps through.
++	bool m_ps5_pixel_feedback_ok = false;
+ 	std::unique_ptr<GSDumpBase> m_dump;
+ 	bool m_scissor_invalid = false;
+ 	bool m_quad_check_valid = false;
+@@ -299,6 +337,18 @@ public:
  	bool m_nativeres = false;
  	bool m_mipmap = false;
  	bool m_texflush_flag = false;
@@ -5801,6 +6286,17 @@ index 3e0b354..b9e95df 100644
  	bool m_isPackedUV_HackFlag = false;
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
+@@ -503,6 +553,10 @@ public:
+ 	bool TestDrawChanged();
+ 	void FlushWrite();
+ 	virtual void Draw() = 0;
++	// PS5 (PS5AutoFlushAll): whether the renderer draws a segmented batch at once, each segment reading what the ones
++	// before it drew. Asked with the vertex trace of the whole batch made; false hands the segments to Draw one at a
++	// time.
++	virtual bool PS5CanDrawRuns() { return false; }
+ 	virtual void PurgeTextureCache(bool sources, bool targets, bool hash_cache);
+ 	virtual void ReadbackTextureCache();
+ 	virtual void InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r) {}
 diff --git a/pcsx2/GS/GSUtil.cpp b/pcsx2/GS/GSUtil.cpp
 index c217846..544f2f8 100644
 --- a/pcsx2/GS/GSUtil.cpp
@@ -6608,7 +7104,7 @@ index b3c8d65..da88793 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 421f8ea..c369a37 100644
+index 421f8ea..ba77283 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1322,6 +1322,19 @@ struct alignas(16) GSHWDrawConfig
@@ -6737,7 +7233,23 @@ index 421f8ea..c369a37 100644
  	GSTexture* GetColorClipTexture() const { return m_colclip_rt; }
  		
  	void SetColorClipTexture(GSTexture* tex) { m_colclip_rt = tex; }
-@@ -1738,6 +1822,85 @@ public:
+@@ -1718,6 +1802,15 @@ public:
+ 	/// Updates a GPU CLUT texture from a source texture.
+ 	virtual void UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize) = 0;
+ 
++	/// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent (PS5GPUPaletteFromTarget)
++	/// As UpdateCLUTTexture, but each entry is read at sSample texels into its native pixel's block of fragments on
++	/// the scaled source (its middle: the native sample), with a linear fetch, instead of at the block's first
++	/// fragment. sSample < 0 is UpdateCLUTTexture as it is. Backends without the sampled copy take the plain one.
++	virtual void PS5UpdateCLUTTextureSampled(GSTexture* sTex, float sScale, float sSample, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize)
++	{
++		UpdateCLUTTexture(sTex, sScale, offsetX, offsetY, dTex, dOffset, dSize);
++	}
++
+ 	/// Converts a colour format to an indexed format texture.
+ 	virtual void ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, u32 SBW, u32 SPSM, GSTexture* dTex, u32 DBW, u32 DPSM) = 0;
+ 
+@@ -1738,6 +1831,85 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -7464,7 +7976,7 @@ index 14c6efa..130750a 100644
  
  	void GenerateMipmapsIfNeeded();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index be2145c..b972118 100644
+index be2145c..1e1e32e 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -11,6 +11,9 @@
@@ -7477,17 +7989,20 @@ index be2145c..b972118 100644
  
  using PS_ATST  = GSShader::PS_ATST;
  using PS_AFAIL = GSShader::PS_AFAIL;
-@@ -21,6 +24,9 @@ GSRendererHW::GSRendererHW()
+@@ -21,6 +24,12 @@ GSRendererHW::GSRendererHW()
  	MULTI_ISA_SELECT(GSRendererHWPopulateFunctions)(*this);
  	m_mipmap = GSConfig.HWMipmap;
  	SetTCOffset();
++	// From LRPS2 e7eea2c4f (GPL-3.0-or-later): the same test CanUseTexIsFB starts with (PS5AutoFlushAll).
++	m_ps5_pixel_feedback_ok = g_gs_device && g_gs_device->Features().texture_barrier &&
++		GSConfig.AccurateBlendingUnit != AccBlendLevel::Minimum;
 +#ifdef __PROSPERO__
 +	m_ps5_reuse_copies = Host::GetBoolSettingValue("EmuCore/GS", "PS5ReuseRTCopies", true);
 +#endif
  
  	pxAssert(!g_texture_cache);
  	g_texture_cache = std::make_unique<GSTextureCache>();
-@@ -43,17 +49,50 @@ void GSRendererHW::SetTCOffset()
+@@ -43,17 +52,50 @@ void GSRendererHW::SetTCOffset()
  
  GSRendererHW::~GSRendererHW()
  {
@@ -7538,7 +8053,7 @@ index be2145c..b972118 100644
  	g_texture_cache->RemoveAll(sources, targets, hash_cache);
  }
  
-@@ -84,6 +123,9 @@ void GSRendererHW::Reset(bool hardware_reset)
+@@ -84,6 +126,9 @@ void GSRendererHW::Reset(bool hardware_reset)
  		g_texture_cache->ReadbackAll();
  
  	g_texture_cache->RemoveAll(true, true, true);
@@ -7548,7 +8063,13 @@ index be2145c..b972118 100644
  
  	GSRenderer::Reset(hardware_reset);
  }
-@@ -97,6 +139,11 @@ void GSRendererHW::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
+@@ -93,10 +138,17 @@ void GSRendererHW::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
+ 	GSRenderer::UpdateSettings(old_config);
+ 	m_mipmap = GSConfig.HWMipmap;
+ 	SetTCOffset();
++	m_ps5_pixel_feedback_ok = g_gs_device && g_gs_device->Features().texture_barrier &&
++		GSConfig.AccurateBlendingUnit != AccBlendLevel::Minimum;
+ }
  
  void GSRendererHW::VSync(u32 field, bool registers_written, bool idle_frame)
  {
@@ -7560,7 +8081,7 @@ index be2145c..b972118 100644
  	if (GSConfig.LoadTextureReplacements)
  		GSTextureReplacements::ProcessAsyncLoadedTextures();
  
-@@ -1629,6 +1676,189 @@ bool GSRendererHW::NextDrawColClip() const
+@@ -1629,6 +1681,189 @@ bool GSRendererHW::NextDrawColClip() const
  	return true;
  }
  
@@ -7750,7 +8271,39 @@ index be2145c..b972118 100644
  bool GSRendererHW::IsPossibleChannelShuffle() const
  {
  	if (!PRIM->TME || m_cached_ctx.TEX0.PSM != PSMT8 || // 8-bit texture draw
-@@ -2589,7 +2819,9 @@ void GSRendererHW::SwSpriteRender()
+@@ -2314,6 +2549,10 @@ void GSRendererHW::InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GS
+ {
+ 	// printf("HW: [%d] InvalidateLocalMem %d,%d - %d,%d %05x (%d)\n", static_cast<int>(g_perfmon.GetFrame()), r.left, r.top, r.right, r.bottom, static_cast<int>(BITBLTBUF.SBP), static_cast<int>(BITBLTBUF.SPSM));
+ 
++	// From LRPS2 010e92c7d (GPL-3.0-or-later): a CLUT loads from local memory too (PS5AgedTargetWriteback).
++	if (g_texture_cache->PS5HasParked())
++		g_texture_cache->PS5FlushParkedRect(m_mem.GetOffset(BITBLTBUF.SBP, BITBLTBUF.SBW, BITBLTBUF.SPSM), r);
++
+ 	if (clut)
+ 		return; // FIXME
+ 
+@@ -2432,6 +2671,20 @@ void GSRendererHW::SwSpriteRender()
+ 	pxAssert(!PRIM->TME || m_cached_ctx.TEX0.PSM == PSMCT32);
+ 	pxAssert(m_cached_ctx.FRAME.PSM == PSMCT32);
+ 
++	// From LRPS2 010e92c7d (GPL-3.0-or-later), by intent: drawn from and into local memory, so parked targets'
++	// pixels there go to it first (PS5AgedTargetWriteback).
++	if (g_texture_cache->PS5HasParked())
++	{
++		g_texture_cache->PS5FlushParked(m_cached_ctx.FRAME.Block(), GSLocalMemory::GetUnwrappedEndBlockAddress(
++			m_cached_ctx.FRAME.Block(), m_cached_ctx.FRAME.FBW, m_cached_ctx.FRAME.PSM, m_r));
++		if (PRIM->TME)
++		{
++			g_texture_cache->PS5FlushParked(m_cached_ctx.TEX0.TBP0, GSLocalMemory::GetUnwrappedEndBlockAddress(
++				m_cached_ctx.TEX0.TBP0, m_cached_ctx.TEX0.TBW, m_cached_ctx.TEX0.PSM,
++				GSVector4i(0, 0, 1 << m_cached_ctx.TEX0.TW, 1 << m_cached_ctx.TEX0.TH)));
++		}
++	}
++
+ 	// No rasterization required
+ 	pxAssert(PRIM->PRIM == GS_SPRITE
+ 		|| ((PRIM->IIP || m_vt.m_eq.rgba == 0xffff)
+@@ -2589,7 +2842,9 @@ void GSRendererHW::SwSpriteRender()
  		}
  	}
  
@@ -7761,7 +8314,19 @@ index be2145c..b972118 100644
  }
  
  bool GSRendererHW::CanUseSwSpriteRender()
-@@ -3131,7 +3363,7 @@ void GSRendererHW::Draw()
+@@ -3113,6 +3368,11 @@ void GSRendererHW::Draw()
+ 
+ 	CalculatePrimitiveCoversWithoutGaps();
+ 
++	// From LRPS2 8dfb24941 (GPL-3.0-or-later): a constant Z written into pages a colour target holds goes to local
++	// memory and that target, with no depth buffer made for the draw (PS5AgedTargetWriteback).
++	if (GSConfig.PS5AgedTargetWriteback && PS5WriteDepthIntoColourMemory(no_rt, no_ds) && no_rt)
++		return;
++
+ 	const bool not_writing_to_all = (m_primitive_covers_without_gaps != NoGapsType::FullCover || AreAnyPixelsDiscarded() || !all_depth_tests_pass);
+ 	bool preserve_depth =
+ 		not_writing_to_all || (!no_ds && (!all_depth_tests_pass || !m_cached_ctx.DepthWrite() || m_cached_ctx.TEST.ATE));
+@@ -3131,7 +3391,7 @@ void GSRendererHW::Draw()
  
  	// SW CLUT Render enable.
  	bool force_preload = GSConfig.PreloadFrameWithGSData;
@@ -7770,7 +8335,7 @@ index be2145c..b972118 100644
  	{
  		const CLUTDrawTestResult result = (GSConfig.UserHacks_CPUCLUTRender == 2) ? PossibleCLUTDrawAggressive() : PossibleCLUTDraw();
  		m_mem.m_clut.ClearDrawInvalidity();
-@@ -5431,7 +5663,10 @@ void GSRendererHW::Draw()
+@@ -5431,7 +5691,10 @@ void GSRendererHW::Draw()
  		if (m_mem.m_clut.GetGPUTexture() && m_mem.m_clut.GetGPUTexture() == rt->m_texture)
  			m_mem.m_clut.SetGPUTextureDirty(rt->m_last_draw, rt->m_texture);
  
@@ -7782,7 +8347,7 @@ index be2145c..b972118 100644
  
  		// Remove overwritten Zs at the FBP.
  		g_texture_cache->InvalidateVideoMemType(GSTextureCache::DepthStencil, m_cached_ctx.FRAME.Block(),
-@@ -7722,6 +7957,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
+@@ -7722,6 +7985,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
  	}
  }
  
@@ -7804,7 +8369,7 @@ index be2145c..b972118 100644
  void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
  {
  	const GSDevice::FeatureSupport& features = g_gs_device->Features();
-@@ -7798,6 +8048,19 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+@@ -7798,6 +8076,19 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
  	// Heuristic: only activate ROV if we save at least one draw call by doing so.
  	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
  
@@ -7824,7 +8389,54 @@ index be2145c..b972118 100644
  	if (!color_is_rov && !depth_is_rov && !activate)
  	{
  		// Not enough barriers or no feedback to activate, and ROV is not already active.
-@@ -8542,10 +8805,16 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8520,12 +8811,16 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+ 
+ 	// Detect framebuffer read that will need special handling
+ 	const GSTextureCache::Target* src_target = nullptr;
++	m_ps5_runs_copy.dst = nullptr;
++	m_ps5_runs_direct = false;
+ 	if (!m_downscale_source || !tex->m_from_target)
+ 	{
+ 		if (rt && m_conf.tex == m_conf.rt)
+ 		{
+ 			// Can we read the framebuffer directly? (i.e. sample location matches up).
+-			if (CanUseTexIsFB(rt, tex, tmm) && !(m_channel_shuffle && tex_diff != frame_diff))
++			// From LRPS2 e7eea2c4f (GPL-3.0-or-later): a batch auto flush let overlaps through for is one whose
++			// primitives each read only their own pixels: it has to be read in place (PS5AutoFlushAll).
++			if (((m_ps5_af_skipped && m_ps5_pixel_feedback_ok) || CanUseTexIsFB(rt, tex, tmm)) && !(m_channel_shuffle && tex_diff != frame_diff))
+ 			{
+ 				m_conf.tex = nullptr;
+ 				m_conf.ps.tex_is_fb = true;
+@@ -8539,13 +8834,45 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+ 				return;
+ 			}
+ 
++			// From LRPS2 663c78c08 (GPL-3.0-or-later), on Vulkan's feedback-loop road (PS5AutoFlushAll): a batch drawn
++			// as runs, on a device that samples its target anywhere behind a texture barrier, reads it in place, so
++			// nothing is copied. Every texel read, a texel out for filtering, has to be inside the texture and the
++			// target both, where a sampler bound to the target reads what one bound to a copy of the texture's size
++			// would. PS5RenderRunsInPlace groups the runs; the device puts a barrier before each group.
++			if (m_ps5_af_seg_count && g_gs_device->Features().texture_barrier && !target_region &&
++				!m_texture_shuffle && !m_channel_shuffle && !m_downscale_source)
++			{
++				const GSVector2i rt_size = rt->GetUnscaledSize();
++				const int lim_x = std::min(1 << m_cached_ctx.TEX0.TW, rt_size.x);
++				const int lim_y = std::min(1 << m_cached_ctx.TEX0.TH, rt_size.y);
++				const GSVector4i c = tmm.coverage;
++				const int m = m_vt.IsLinear() ? 1 : 0;
++				if (c.x >= m && c.y >= m && c.z + m <= lim_x && c.w + m <= lim_y)
++				{
++					m_ps5_runs_direct = true;
++					m_ps5_runs_rt_size = rt_size;
++					m_ps5_runs_rt_scale = rt->GetScale();
++					m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_RT;
++					m_conf.require_full_barrier = true;
++					unscaled_size = rt_size;
++					scale = m_ps5_runs_rt_scale;
++					return;
++				}
++			}
++
  			if (!m_channel_shuffle)
  			{
  				const GSVector4i src_box_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.y);
@@ -7843,7 +8455,7 @@ index be2145c..b972118 100644
  				{
  					if (HandleBarrierHazard(true))
  					{
-@@ -8776,7 +9045,65 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8776,7 +9103,79 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  
  	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
  		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
@@ -7874,6 +8486,18 @@ index be2145c..b972118 100644
 +	const bool ps5_need_clear = src_target->m_texture->IsRenderTarget() &&
 +		(m_downscale_source || !HazardCopyCoversSampling(rt, ds, tex, dst_rect, copy_size, scaled_copy_size, scale));
 +
++	// From LRPS2 1b83fc768 (GPL-3.0-or-later): the copy of the drawn target, for PS5RenderRuns to refresh run by run
++	// (dst filled in where the copy is picked below). Its range is the one the copy below fills.
++	const bool ps5_runs_source = (src_target == rt && !m_downscale_source && !src_target->m_texture->IsDepthStencil());
++	if (ps5_runs_source)
++	{
++		m_ps5_runs_copy.src = src_target->m_texture;
++		m_ps5_runs_copy.range = adj_copy_range;
++		m_ps5_runs_copy.offset = copy_range - GSVector4i(copy_dst_offset).xyxy();
++		m_ps5_runs_copy.src_size = src_unscaled_size;
++		m_ps5_runs_copy.scale = scale;
++	}
++
 +#ifdef __PROSPERO__
 +	// Crux2: the same copy as the last one, of a source not written since and into a copy not written since,
 +	// would be the same pixels: sample that one (PS5ReuseRTCopies). Everything the copy below reads is in the key:
@@ -7901,6 +8525,8 @@ index be2145c..b972118 100644
 +			GL_CACHE("HW: Reusing the previous copy of the source (not written since).");
 +			g_perfmon.Put(GSPerfMon::RTCopiesReused, 1);
 +			m_conf.tex = m_ps5_hazard_copy.get();
++			if (ps5_runs_source)
++				m_ps5_runs_copy.dst = m_conf.tex;
 +			return;
 +		}
 +	}
@@ -7910,7 +8536,7 @@ index be2145c..b972118 100644
  	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
  	if (!src_copy) [[unlikely]]
  	{
-@@ -8786,6 +9113,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8786,6 +9185,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  		return;
  	}
  
@@ -7919,7 +8545,7 @@ index be2145c..b972118 100644
  	if (m_downscale_source)
  	{
  		// Can't use box filtering on depth (yet), or fractional scales.
-@@ -8814,22 +9143,154 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8814,20 +9215,496 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  	}
  	else
  	{
@@ -7947,12 +8573,356 @@ index be2145c..b972118 100644
 +		m_ps5_hazard_copy_gen = m_ps5_hazard_copy->PS5WriteGen();
 +		m_ps5_hazard_copy_cleared = clear;
 +		m_conf.tex = m_ps5_hazard_copy.get();
++		if (ps5_runs_source)
++			m_ps5_runs_copy.dst = m_conf.tex;
 +		return;
 +	}
 +#endif
  	m_conf.tex = src_copy.get();
- }
- 
++	if (ps5_runs_source)
++		m_ps5_runs_copy.dst = m_conf.tex;
++}
++
++// From LRPS2 1b83fc768 (GPL-3.0-or-later)
++// A batch auto flush split into segments goes to the device at once only if it will be drawn as an ordinary draw:
++// textured sprites or triangles reading their own frame, in the frame's format, 32 or 24 bits a pixel, written
++// whole -- no shuffle, no channel copy, no masked or depth read -- with no game hook and no draw on the CPU. Any
++// other goes one segment at a time.
++bool GSRendererHW::PS5CanDrawRuns()
++{
++	const GSDrawingContext* ctx = m_context;
++	const GS_PRIM_CLASS pc = m_vt.m_primclass;
++
++	if (!PRIM->TME || (pc != GS_SPRITE_CLASS && pc != GS_TRIANGLE_CLASS))
++		return false;
++	if (ctx->TEX0.TBP0 != ctx->FRAME.Block() || ctx->TEX0.PSM != ctx->FRAME.PSM || ctx->TEX0.TBW != ctx->FRAME.FBW)
++		return false;
++	if ((ctx->TEX0.PSM != PSMCT32 && ctx->TEX0.PSM != PSMCT24) || ctx->FRAME.FBMSK != 0)
++		return false;
++	if (!ctx->ZBUF.ZMSK && ctx->ZBUF.Block() == ctx->TEX0.TBP0)
++		return false;
++	if (m_oi || m_gsc || GSConfig.UserHacks_CPUSpriteRenderBW != 0 || GSConfig.PS5StencilShadowCounter)
++		return false;
++	// The batch's primitives, which PS5RenderRuns holds the draw's against.
++	m_ps5_runs_n_gs = (pc == GS_SPRITE_CLASS) ? 2u : 3u;
++	m_ps5_runs_prims = m_index->tail / m_ps5_runs_n_gs;
++	return true;
++}
++
++// From LRPS2 1b83fc768 (GPL-3.0-or-later)
++// The copy refreshed from the target over the texels the vertices [vmin, vmax] of the draw read, a texel out for
++// filtering; the whole of what was first copied when they reach outside the texture. The same copy the hazard
++// path makes (StretchRectAuto: the device ends the pass and orders the target's writes before the read).
++void GSRendererHW::PS5RefreshRunsCopy(u32 vmin, u32 vmax)
++{
++	const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
++	const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
++	float umin = 1e30f, vmn = 1e30f, umax = -1e30f, vmx = -1e30f;
++	bool whole = false;
++
++	for (u32 i = vmin; i <= vmax && !whole; i++)
++	{
++		const GSVertex* v = &m_ps5_runs_conf.verts[i];
++		float u, t;
++		if (PRIM->FST)
++		{
++			u = static_cast<float>(v->U) / 16.0f;
++			t = static_cast<float>(v->V) / 16.0f;
++		}
++		else
++		{
++			const float q = v->RGBAQ.Q;
++			if (!(q != 0.0f))
++			{
++				whole = true;
++				break;
++			}
++			u = v->ST.S / q * tw;
++			t = v->ST.T / q * th;
++		}
++		if (!(u >= 0.0f && t >= 0.0f && u <= tw && t <= th))
++			whole = true;
++		umin = std::min(umin, u);
++		umax = std::max(umax, u);
++		vmn = std::min(vmn, t);
++		vmx = std::max(vmx, t);
++	}
++
++	GSVector4i rect;
++	if (whole)
++		rect = m_ps5_runs_copy.range;
++	else
++		rect = GSVector4i(static_cast<int>(std::floor(umin)) - 1, static_cast<int>(std::floor(vmn)) - 1,
++			static_cast<int>(std::ceil(umax)) + 1, static_cast<int>(std::ceil(vmx)) + 1).rintersect(m_ps5_runs_copy.range);
++	if (rect.rempty())
++		return;
++
++	g_perfmon.Put(GSPerfMon::RTCopies, 1);
++	g_gs_device->StretchRectAuto(m_ps5_runs_copy.src, GSVector4(rect) / GSVector4(m_ps5_runs_copy.src_size).xyxy(),
++		m_ps5_runs_copy.dst, (GSVector4(rect) - GSVector4(m_ps5_runs_copy.offset).xyxy()) * m_ps5_runs_copy.scale, Nearest);
++}
++
++// From LRPS2 1b83fc768/663c78c08 (GPL-3.0-or-later)
++// The batch as a run per segment, each with only the vertices it uses and its indices rebased onto them, so the
++// vertices go up once in all; before each run after the first the copy takes what the runs before it drew. The
++// draw is set up once. A batch reading the target in place goes as one draw in barrier groups instead.
++void GSRendererHW::PS5RenderRuns()
++{
++	const u32 ipp = m_conf.indices_per_prim;
++	const u32 prims = ipp ? (m_conf.nindices / ipp) : 0;
++	const bool expand = (m_conf.vs.expand != GSHWDrawConfig::VSExpand::None);
++	// (Point and Sprite expansion take the vertices in order with the device's fixed index buffer; the line and
++	// AA1 expansions have index lists of their own, which no run path takes.)
++	const bool expand_ok = !expand || m_conf.vs.expand == GSHWDrawConfig::VSExpand::Point ||
++		m_conf.vs.expand == GSHWDrawConfig::VSExpand::Sprite;
++	const u32 vpp = (m_conf.vs.expand == GSHWDrawConfig::VSExpand::Point) ? 1u : 2u;
++	GSDevice::RecycledTexture own_copy;
++
++	// Every path of the draw's setup gives its primitives a fixed count of indices, or of vertices when the vertex
++	// shader expands them.
++	const bool shaped = ipp != 0 && prims * ipp == m_conf.nindices && expand_ok && (!expand || m_conf.nverts >= prims * vpp);
++
++	if (m_ps5_runs_direct)
++	{
++		if (shaped && PS5RenderRunsInPlace())
++			return;
++		// Read from a copy of the whole target after all, of its size, so the draw's texture setup holds for it as
++		// it is. The barriers HandleTextureHazards asked for the in-place read go; those the blending needs (the
++		// shader reads the target for it, IsFeedbackLoopRT) stay, with the draw list DetermineBarriers made.
++		m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_NONE;
++		if (!m_conf.ps.IsFeedbackLoopRT())
++		{
++			m_conf.require_full_barrier = false;
++			m_conf.require_one_barrier = false;
++			m_conf.drawlist = nullptr;
++			m_conf.drawlist_bbox = nullptr;
++		}
++		if (!PS5CopyWholeTargetForRuns(own_copy))
++		{
++			m_conf.tex = nullptr;
++			m_conf.ps.tfx = 4;
++			g_gs_device->RenderHW(m_conf);
++			return;
++		}
++	}
++	if (!shaped)
++	{
++		g_gs_device->RenderHW(m_conf);
++		return;
++	}
++
++	// The draw kept the batch's primitives one for one, in order, so the runs are the batch's; otherwise its setup
++	// merged or split them, and every primitive is a run of its own, which sees every write before it as the GS
++	// does. A draw whose primitives need a barrier each (software blending over overlapping sprites: the draw list
++	// is the whole draw's) goes a primitive at a time too, with one barrier before each.
++	const bool per_prim_barrier = m_conf.require_full_barrier;
++	const bool each = (prims != m_ps5_runs_prims) || per_prim_barrier;
++	// Indices rebased to the run's first vertex, so a run uploads only its own vertices.
++	const bool rebase = !expand;
++	if (rebase)
++		m_ps5_runs_index.resize(m_conf.nindices);
++
++	m_ps5_runs_conf = m_conf;
++	u32 p0 = 0;
++	u32 r = 0;
++	while (p0 < prims)
++	{
++		u32 p1 = p0 + 1;
++		if (!each)
++		{
++			p1 = prims;
++			while (r < m_ps5_af_seg_count)
++			{
++				const u32 k = m_ps5_af_seg_start[r++] / m_ps5_runs_n_gs;
++				if (k > p0)
++				{
++					p1 = (k < prims) ? k : prims;
++					break;
++				}
++			}
++		}
++		m_conf = m_ps5_runs_conf;
++		// (the draw list counts runs of the whole draw)
++		m_conf.drawlist = nullptr;
++		m_conf.drawlist_bbox = nullptr;
++		if (per_prim_barrier)
++		{
++			m_conf.require_full_barrier = false;
++			m_conf.require_one_barrier = true;
++		}
++		m_conf.nindices = (p1 - p0) * ipp;
++		u32 vmin, vmax;
++		if (expand)
++		{
++			// Expanded in the vertex shader: the vertices in order, so many a primitive, and no index list.
++			vmin = p0 * vpp;
++			vmax = p1 * vpp - 1;
++		}
++		else
++		{
++			vmin = m_ps5_runs_conf.indices[p0 * ipp];
++			vmax = vmin;
++			for (u32 k = p0 * ipp; k < p1 * ipp; k++)
++			{
++				vmin = std::min<u32>(vmin, m_ps5_runs_conf.indices[k]);
++				vmax = std::max<u32>(vmax, m_ps5_runs_conf.indices[k]);
++			}
++		}
++		if (p0 > 0)
++			PS5RefreshRunsCopy(vmin, vmax);
++		m_conf.verts = m_ps5_runs_conf.verts + vmin;
++		m_conf.nverts = vmax - vmin + 1;
++		if (rebase)
++		{
++			for (u32 k = p0 * ipp; k < p1 * ipp; k++)
++				m_ps5_runs_index[k - p0 * ipp] = static_cast<u16>(m_ps5_runs_conf.indices[k] - vmin);
++			m_conf.indices = m_ps5_runs_index.data();
++		}
++		g_gs_device->RenderHW(m_conf);
++		p0 = p1;
++	}
++	m_conf = m_ps5_runs_conf;
++}
++
++// Whether two unscaled rects share a texel.
++static bool ps5_runs_overlap(const GSVector4i& a, const GSVector4i& b)
++{
++	return a.x < b.z && b.x < a.z && a.y < b.w && b.y < a.w;
++}
++
++// From LRPS2 663c78c08 (GPL-3.0-or-later)
++// The batch reading its target in place, as one draw in groups with a texture barrier before each (the device's
++// full-barrier draw list, PS5FeedbackBarrierIfOwed before each group): a primitive starts a group when it reads
++// where the group wrote or writes where it read (or, when the pixels blend with what is under them, where it
++// wrote), so within a group no texel is both fetched and written and every write before the group is visible to
++// it. Each primitive's rects are taken from its vertices as the draw has them, the writes a pixel out and the
++// reads a texel out when filtered. False, having drawn nothing, when a primitive reads what it writes, or the
++// draw takes a second pass over the target or draws to anything but it.
++bool GSRendererHW::PS5RenderRunsInPlace()
++{
++	const u32 ipp = m_conf.indices_per_prim;
++	const u32 prims = m_conf.nindices / ipp;
++	const bool expand = (m_conf.vs.expand != GSHWDrawConfig::VSExpand::None);
++	const u32 per = expand ? ((m_conf.vs.expand == GSHWDrawConfig::VSExpand::Point) ? 1u : 2u) : ipp;
++	const bool blend_reads = m_conf.require_full_barrier || m_conf.require_one_barrier || m_conf.drawlist != nullptr ||
++		m_conf.ps.IsFeedbackLoopRT();
++	const float ofx = static_cast<float>(m_context->XYOFFSET.OFX);
++	const float ofy = static_cast<float>(m_context->XYOFFSET.OFY);
++	const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
++	const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
++	const int pad = m_conf.sampler.biln ? 1 : 0;
++	const GSVector4i whole = GSVector4i(0, 0, m_ps5_runs_rt_size.x, m_ps5_runs_rt_size.y);
++
++	if (m_conf.colclip_mode != GSHWDrawConfig::ColClipMode::NoModify || m_conf.alpha_second_pass.enable ||
++		m_conf.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
++		m_conf.ps.HasColorROV() || m_conf.ps.HasDepthROV() || m_conf.tex != m_conf.rt)
++	{
++		return false;
++	}
++
++	m_ps5_runs_groups.clear();
++	GSVector4i group_rd = GSVector4i::zero();
++	GSVector4i group_wr = GSVector4i::zero();
++	for (u32 p = 0; p < prims; p++)
++	{
++		float xmin = 1e30f, ymin = 1e30f, umin = 1e30f, vmin = 1e30f;
++		float xmax = -1e30f, ymax = -1e30f, umax = -1e30f, vmax = -1e30f;
++		bool all = false;
++		for (u32 j = 0; j < per; j++)
++		{
++			const u32 vi = expand ? (p * per + j) : m_conf.indices[p * ipp + j];
++			const GSVertex* v = &m_conf.verts[vi];
++			const float x = (static_cast<float>(v->XYZ.X) - ofx) / 16.0f;
++			const float y = (static_cast<float>(v->XYZ.Y) - ofy) / 16.0f;
++			xmin = std::min(xmin, x);
++			xmax = std::max(xmax, x);
++			ymin = std::min(ymin, y);
++			ymax = std::max(ymax, y);
++			float u, t;
++			if (PRIM->FST)
++			{
++				u = static_cast<float>(v->U) / 16.0f;
++				t = static_cast<float>(v->V) / 16.0f;
++			}
++			else
++			{
++				const float q = v->RGBAQ.Q;
++				if (!(q != 0.0f))
++				{
++					all = true;
++					continue;
++				}
++				u = v->ST.S / q * tw;
++				t = v->ST.T / q * th;
++			}
++			if (!(u >= 0.0f && t >= 0.0f && u <= tw && t <= th))
++				all = true;
++			umin = std::min(umin, u);
++			umax = std::max(umax, u);
++			vmin = std::min(vmin, t);
++			vmax = std::max(vmax, t);
++		}
++		const GSVector4i wr = GSVector4i(static_cast<int>(std::floor(xmin)) - 1, static_cast<int>(std::floor(ymin)) - 1,
++			static_cast<int>(std::ceil(xmax)) + 1, static_cast<int>(std::ceil(ymax)) + 1);
++		GSVector4i rd;
++		if (all)
++			rd = whole;
++		else
++			rd = GSVector4i(static_cast<int>(std::floor(umin)) - pad, static_cast<int>(std::floor(vmin)) - pad,
++				static_cast<int>(std::ceil(umax)) + pad, static_cast<int>(std::ceil(vmax)) + pad);
++		if (ps5_runs_overlap(rd, wr))
++			return false;
++		if (m_ps5_runs_groups.empty() || ps5_runs_overlap(rd, group_wr) || ps5_runs_overlap(wr, group_rd) ||
++			(blend_reads && ps5_runs_overlap(wr, group_wr)))
++		{
++			m_ps5_runs_groups.push_back(0);
++			group_rd = rd;
++			group_wr = wr;
++		}
++		else
++		{
++			group_rd = group_rd.runion(rd);
++			group_wr = group_wr.runion(wr);
++		}
++		m_ps5_runs_groups.back()++;
++	}
++
++	// The device's split draw: a barrier before each group (SendHWDraw, PS5FeedbackBarrierIfOwed), the target
++	// sampled in the feedback-loop layout (tex_hazard).
++	m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_RT;
++	m_conf.require_one_barrier = false;
++	m_conf.require_full_barrier = true;
++	m_conf.drawlist = &m_ps5_runs_groups;
++	m_conf.drawlist_bbox = nullptr;
++	g_gs_device->RenderHW(m_conf);
++	return true;
++}
++
++// From LRPS2 663c78c08 (GPL-3.0-or-later)
++// A copy of the whole render target, of its size, read in place of it: the copy PS5RenderRuns refreshes run by run.
++bool GSRendererHW::PS5CopyWholeTargetForRuns(GSDevice::RecycledTexture& own_copy)
++{
++	GSTexture* const src = m_conf.rt;
++	if (!src)
++		return false;
++
++	own_copy.reset(g_gs_device->CreateCompatible(src, src->GetSize(), false));
++	if (!own_copy)
++		return false;
++
++	g_perfmon.Put(GSPerfMon::RTCopies, 1);
++	g_gs_device->StretchRectAuto(src, GSVector4::cxpr(0.0f, 0.0f, 1.0f, 1.0f), own_copy.get(),
++		GSVector4(0.0f, 0.0f, static_cast<float>(src->GetWidth()), static_cast<float>(src->GetHeight())), Nearest);
++	m_ps5_runs_copy.src = src;
++	m_ps5_runs_copy.dst = own_copy.get();
++	m_ps5_runs_copy.range = GSVector4i(0, 0, m_ps5_runs_rt_size.x, m_ps5_runs_rt_size.y);
++	m_ps5_runs_copy.offset = GSVector4i::zero();
++	m_ps5_runs_copy.src_size = m_ps5_runs_rt_size;
++	m_ps5_runs_copy.scale = m_ps5_runs_rt_scale;
++	m_conf.tex = own_copy.get();
++	return true;
++}
++
 +// From ARMSX2 ecf289fb2 (GPL-3.0-or-later), narrowed by Crux2 (no sprite edge snap here; the texture offset
 +// hacks beyond RealignTargetTextureCoordinate refuse).
 +// Whether every texel this draw can fetch from its hazard copy lies inside copied_rect, the part of the copy
@@ -8080,12 +9050,10 @@ index be2145c..b972118 100644
 +
 +	return axis_covered(cmin.x, cmax.x, CLAMP.WMS, CLAMP.MINU, CLAMP.MAXU, scaled_copy_size.x, copied_rect.x, copied_rect.z) &&
 +	       axis_covered(cmin.y, cmax.y, CLAMP.WMT, CLAMP.MINV, CLAMP.MAXV, scaled_copy_size.y, copied_rect.y, copied_rect.w);
-+}
-+
+ }
+ 
  bool GSRendererHW::CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextureCache::Source* tex,
- 	const TextureMinMaxResult& tmm)
- {
-@@ -9669,6 +10130,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
+@@ -9669,8 +10546,21 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
  		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
  	}
  
@@ -8094,9 +9062,21 @@ index be2145c..b972118 100644
 +		SetupStencilCounterDraw(rt);
 +
  	if (!m_channel_shuffle_width)
- 		g_gs_device->RenderHW(m_conf);
+-		g_gs_device->RenderHW(m_conf);
++	{
++		// From LRPS2 1b83fc768/663c78c08 (GPL-3.0-or-later) (PS5AutoFlushAll): segments read from a copy of the
++		// target, refreshed run by run, or from the target in place behind a barrier a group of runs. A batch reading
++		// its own pixels in place sees every earlier write as it is, and one reading anything else read it before
++		// the batch.
++		if (m_ps5_af_seg_count && (m_ps5_runs_copy.dst || m_ps5_runs_direct) && !m_conf.stencil_counter.enable)
++			PS5RenderRuns();
++		else
++			g_gs_device->RenderHW(m_conf);
++	}
  	else
-@@ -9789,7 +10254,7 @@ GSRendererHW::CLUTDrawTestResult GSRendererHW::PossibleCLUTDraw()
+ 		m_last_rt = rt;
+ 
+@@ -9789,7 +10679,7 @@ GSRendererHW::CLUTDrawTestResult GSRendererHW::PossibleCLUTDraw()
  		const GSVector4i r = GetTextureMinMax(m_cached_ctx.TEX0, m_cached_ctx.CLAMP, m_vt.IsLinear(), false).coverage;
  
  		// If we have GPU CLUT enabled, don't do a CPU draw when it would result in a download.
@@ -8105,7 +9085,175 @@ index be2145c..b972118 100644
  		{
  			if (HasEEUpload(r))
  				return CLUTDrawTestResult::CLUTDrawOnCPU;
-@@ -11213,6 +11678,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
+@@ -10067,6 +10957,167 @@ bool GSRendererHW::DetectStripedDoubleClear(bool& no_rt, bool& no_ds)
+ 	return true;
+ }
+ 
++// From LRPS2 8dfb24941 (GPL-3.0-or-later)
++// A sprite that passes its depth test everywhere and has one Z writes that Z into memory in the Z format's layout,
++// whatever was drawn there before. When that memory is held by a colour target drawn after any depth buffer over
++// it, the colour target is what reads it next, as colour: a depth buffer would keep the write where no colour
++// lookup sees it. The Z is written into local memory and the colour target refreshed from there (on the GPU by a
++// fill where it can, PS5FillDepthWriteIntoTarget, else by reloading the pages from memory).
++//
++// Only whole pages: every block of a page written with one value is the same in any layout, so the colour
++// target's pages hold exactly what the Z wrote, and no part of a page the GPU drew is reloaded from memory that
++// is behind it. The colour this draw writes must not share a page with its Z, since the order of the two writes
++// in one pixel is not modelled.
++bool GSRendererHW::PS5WriteDepthIntoColourMemory(bool no_rt, bool& no_ds)
++{
++	const u32 zpsm = m_cached_ctx.ZBUF.PSM;
++	const u32 fbw = m_cached_ctx.FRAME.FBW;
++	const GSVector4i r = m_r;
++
++	if (no_ds || m_cached_ctx.ZBUF.ZMSK || m_cached_ctx.TEST.ZTST != ZTST_ALWAYS)
++		return false;
++	if (zpsm != PSMZ32 && zpsm != PSMZ24)
++		return false;
++	if (m_vt.m_primclass != GS_SPRITE_CLASS || !m_vt.m_eq.z || m_primitive_covers_without_gaps != NoGapsType::FullCover)
++		return false;
++	// Pixels the alpha test fails or the scan mask drops write no Z.
++	if (m_cached_ctx.TEST.ATE || (m_draw_env->SCANMSK.MSK & 2))
++		return false;
++
++	const GSVector2i zpgs = GSLocalMemory::m_psm[zpsm].pgs;
++	if (fbw == 0 || r.z > static_cast<int>(fbw * 64) || r.x < 0 || r.y < 0 ||
++		(r.x & (zpgs.x - 1)) || (r.z & (zpgs.x - 1)) || (r.y & (zpgs.y - 1)) || (r.w & (zpgs.y - 1)))
++	{
++		return false;
++	}
++
++	if (!no_rt)
++	{
++		u32 frame_pages[GS_MAX_PAGES / 32] = {};
++		const GSVector2i fpgs = GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].pgs;
++		for (int py = r.y / fpgs.y; py <= (r.w - 1) / fpgs.y; py++)
++		{
++			for (int px = r.x / fpgs.x; px <= (r.z - 1) / fpgs.x; px++)
++			{
++				const u32 page = (m_cached_ctx.FRAME.FBP + static_cast<u32>(py) * fbw + static_cast<u32>(px)) & (GS_MAX_PAGES - 1);
++				frame_pages[page >> 5] |= 1u << (page & 31);
++			}
++		}
++		for (int py = r.y / zpgs.y; py < r.w / zpgs.y; py++)
++		{
++			for (int px = r.x / zpgs.x; px < r.z / zpgs.x; px++)
++			{
++				const u32 zpage = (m_cached_ctx.ZBUF.ZBP + static_cast<u32>(py) * fbw + static_cast<u32>(px)) & (GS_MAX_PAGES - 1);
++				if (frame_pages[zpage >> 5] & (1u << (zpage & 31)))
++					return false;
++			}
++		}
++	}
++
++	GSTextureCache::Target* rt = g_texture_cache->PS5FindColourUnderDepthWrite(m_cached_ctx.ZBUF.Block(), fbw, zpsm, r);
++	if (!rt)
++		return false;
++
++	GL_INS("HW: Constant Z %x written into colour target 0x%x's memory (pages %d,%d => %d,%d)", GetConstantDirectWriteMemClearDepth(),
++		rt->m_TEX0.TBP0, r.x, r.y, r.z, r.w);
++
++	const u32 zval = GetConstantDirectWriteMemClearDepth();
++	ClearGSLocalMemory(m_context->offset.zb, r, zval);
++	// From LRPS2 fecb2c91d (GPL-3.0-or-later): the colour target filled with it on the GPU keeps those pages as
++	// memory now has them; every other target over them reloads them.
++	g_texture_cache->InvalidateVideoMem(m_context->offset.zb, r, true, 0xFFFFFFFFu,
++		PS5FillDepthWriteIntoTarget(rt, r, zval) ? rt : nullptr);
++
++	// A target made over these pages later loads them from memory.
++	GSUploadQueue write;
++	write.blit.U64 = 0;
++	write.blit.DBP = m_cached_ctx.ZBUF.Block();
++	write.blit.DBW = fbw;
++	write.blit.DPSM = zpsm;
++	write.draw = s_n;
++	write.rect = r;
++	write.transfer_type = EEGS_TransferType::EE_to_GS;
++	write.was_hardware_only = false;
++	m_draw_transfers.push_back(write);
++	s_last_transfer_draw_n = s_n;
++
++	m_cached_ctx.ZBUF.ZMSK = true;
++	no_ds = true;
++	return true;
++}
++
++// From LRPS2 fecb2c91d (GPL-3.0-or-later), without its target widening
++// The pages a constant Z wrote, given the same value in the colour target holding them by a fill on the GPU,
++// rather than uploaded to it again from local memory. Only for a target laid out by pages from a page boundary,
++// keeping 8 bits a channel as memory does, whose pages all lie within its size (LRPS2 widens the target for pages
++// past its width; here those fall back to the reload from memory). A PSMZ24 write leaves alpha alone.
++bool GSRendererHW::PS5FillDepthWriteIntoTarget(GSTextureCache::Target* rt, const GSVector4i& r, u32 zval)
++{
++	static constexpr u32 MAX_FILL_RECTS = 32;
++	GSVector4i rects[MAX_FILL_RECTS];
++	const bool keep_alpha = (m_cached_ctx.ZBUF.PSM == PSMZ24);
++	const GSVector2i pgs = GSLocalMemory::m_psm[PSMCT32].pgs;
++	const u32 fbw = m_cached_ctx.FRAME.FBW;
++	const u32 tbw = std::max<u32>(rt->m_TEX0.TBW, 1u);
++	const u32 tpage = rt->m_TEX0.TBP0 >> 5;
++	u32 n = 0;
++
++	if ((rt->m_TEX0.PSM != PSMCT32 && rt->m_TEX0.PSM != PSMCT24) || !rt->m_texture ||
++		rt->m_texture->GetFormat() != GSTexture::Format::Color || (rt->m_TEX0.TBP0 & (GS_BLOCKS_PER_PAGE - 1)) ||
++		(!keep_alpha && rt->m_rt_alpha_scale))
++	{
++		return false;
++	}
++
++	for (int py = r.y / pgs.y; py < r.w / pgs.y; py++)
++	{
++		for (int px = r.x / pgs.x; px < r.z / pgs.x; px++)
++		{
++			const u32 zpage = m_cached_ctx.ZBUF.ZBP + static_cast<u32>(py) * fbw + static_cast<u32>(px);
++			if (zpage < tpage)
++				return false;
++			const u32 rel = zpage - tpage;
++			const int x = static_cast<int>(rel % tbw) * pgs.x;
++			const int y = static_cast<int>(rel / tbw) * pgs.y;
++			if (x + pgs.x > rt->m_unscaled_size.x || y + pgs.y > rt->m_unscaled_size.y)
++				return false;
++			const GSVector4i pr(x, y, x + pgs.x, y + pgs.y);
++			if (n && rects[n - 1].x == pr.x && rects[n - 1].z == pr.z && rects[n - 1].w == pr.y)
++				rects[n - 1].w = pr.w;
++			else if (n && rects[n - 1].y == pr.y && rects[n - 1].w == pr.w && rects[n - 1].z == pr.x)
++				rects[n - 1].z = pr.z;
++			else if (n == MAX_FILL_RECTS)
++				return false;
++			else
++				rects[n++] = pr;
++		}
++	}
++
++	if (n == 0)
++		return false;
++
++	GSTexture* fill = g_gs_device->CreateRenderTarget(1, 1, GSTexture::Format::Color, false);
++	if (!fill)
++		return false;
++	g_gs_device->ClearRenderTarget(fill, zval);
++	for (u32 i = 0; i < n; i++)
++	{
++		g_gs_device->StretchRectAutoMask(fill, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), rt->m_texture,
++			GSVector4(rects[i]) * GSVector4(rt->m_scale), true, true, true, !keep_alpha);
++		rt->UpdateValidity(rects[i]);
++	}
++	g_gs_device->Recycle(fill);
++
++	// (Not drawn-since-read: memory holds the same value, there is nothing to write back.)
++	rt->m_valid_rgb = true;
++	if (!keep_alpha)
++	{
++		rt->m_valid_alpha_low = true;
++		rt->m_valid_alpha_high = true;
++	}
++	return true;
++}
++
+ bool GSRendererHW::DetectDoubleHalfClear(bool& no_rt, bool& no_ds)
+ {
+ 	if (m_cached_ctx.TEST.ZTST != ZTST_ALWAYS || m_cached_ctx.ZBUF.ZMSK)
+@@ -11213,6 +12264,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
  			const GSVector4i copy_rect = config.drawarea.rintersect(src->GetRect());
  			g_gs_device->CopyRect(src, copy, copy_rect - copy_rect.xyxy(), copy_rect.x, copy_rect.y);
  			config.tex = copy;
@@ -8114,10 +9262,20 @@ index be2145c..b972118 100644
  	}
  
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.h b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-index 6adcc67..854bdf0 100644
+index 6adcc67..407ee3e 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.h
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-@@ -228,6 +228,11 @@ private:
+@@ -76,6 +76,9 @@ private:
+ 	void ClearGSLocalMemory(const GSOffset& off, const GSVector4i& r, u32 vert_color);
+ 	bool DetectDoubleHalfClear(bool& no_rt, bool& no_ds);
+ 	bool DetectStripedDoubleClear(bool& no_rt, bool& no_ds);
++	// From LRPS2 8dfb24941/fecb2c91d (GPL-3.0-or-later) (PS5AgedTargetWriteback)
++	bool PS5WriteDepthIntoColourMemory(bool no_rt, bool& no_ds);
++	bool PS5FillDepthWriteIntoTarget(GSTextureCache::Target* rt, const GSVector4i& r, u32 zval);
+ 	bool DetectRedundantBufferClear(bool& no_rt, bool& no_ds, u32 fm_mask);
+ 	bool TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Target* ds, bool preserve_rt_color, bool preserve_depth);
+ 	void SetNewFRAME(u32 bp, u32 bw, u32 psm);
+@@ -228,9 +231,23 @@ private:
  	void HandleTextureHazards(const GSTextureCache::Target* rt, const GSTextureCache::Target* ds,
  		const GSTextureCache::Source* tex, const TextureMinMaxResult& tmm, GSTextureCache::SourceRegion& source_region,
  		bool& target_region, GSVector2i& unscaled_size, float& scale, GSDevice::RecycledTexture& src_copy);
@@ -8129,7 +9287,19 @@ index 6adcc67..854bdf0 100644
  	bool CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextureCache::Source* tex,
  		const TextureMinMaxResult& tmm);
  
-@@ -255,12 +260,21 @@ private:
++	// From LRPS2 1b83fc768/663c78c08 (GPL-3.0-or-later) (PS5AutoFlushAll)
++	// An auto-flushed batch drawn at once (GSState's segments): the draw of one as a run per segment, the copy of the
++	// target it reads refreshed for each run's texels in turn, or, reading the target in place, as one draw in groups
++	// with a barrier before each (the device's full-barrier draw list).
++	void PS5RenderRuns();
++	bool PS5RenderRunsInPlace();
++	bool PS5CopyWholeTargetForRuns(GSDevice::RecycledTexture& own_copy);
++	void PS5RefreshRunsCopy(u32 vmin, u32 vmax);
++
+ 	void EmulateZbuffer(const GSTextureCache::Target* ds);
+ 	void EmulateAA1();
+ 	static void GetAlphaTestConfigPS(const u32 atst, const u8 aref, const bool invert_test, PS_ATST& ps_atst_out, float& aref_out);
+@@ -255,12 +272,21 @@ private:
  
  	void GetForcedROVUsage(bool& color_cov, bool& depth_rov); // Whether having color or depth with the current config forces the other.
  	void DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Heuristics to determine whether to enable/disable ROV
@@ -8151,10 +9321,33 @@ index 6adcc67..854bdf0 100644
  	bool IsPossibleChannelShuffle() const;
  	bool IsPageCopy() const;
  	bool NextDrawMatchesShuffle() const;
-@@ -341,8 +355,56 @@ private:
+@@ -341,8 +367,79 @@ private:
  	GSHWDrawConfig m_conf = {};
  	HWCachedCtx m_cached_ctx;
  
++	// From LRPS2 1b83fc768/663c78c08 (GPL-3.0-or-later) (PS5AutoFlushAll)
++	// The copy of the render target the draw reads (HandleTextureHazards), for PS5RenderRuns: the target's texture,
++	// the copy, the target rect it took, the offset from a target rect to the copy's, the target's unscaled size
++	// and the scale. dst is null when nothing was copied. m_ps5_runs_direct: the batch reads the target in place,
++	// its runs grouped by PS5RenderRunsInPlace.
++	struct PS5RunsCopy
++	{
++		GSTexture* src;
++		GSTexture* dst;
++		GSVector4i range;
++		GSVector4i offset;
++		GSVector2i src_size;
++		float scale;
++	} m_ps5_runs_copy = {};
++	GSHWDrawConfig m_ps5_runs_conf = {};
++	std::vector<u16> m_ps5_runs_index;
++	std::vector<size_t> m_ps5_runs_groups;
++	GSVector2i m_ps5_runs_rt_size = {};
++	float m_ps5_runs_rt_scale = 1.0f;
++	u32 m_ps5_runs_prims = 0;
++	u32 m_ps5_runs_n_gs = 3;
++	bool m_ps5_runs_direct = false;
++
 +#ifdef __PROSPERO__
 +	// Crux2 ([EmuCore/GS] PS5ReuseRTCopies, on by default, read when the renderer is made and at each game
 +	// start): the last copy
@@ -8208,8 +9401,46 @@ index 6adcc67..854bdf0 100644
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
  	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
  
+@@ -380,6 +477,7 @@ public:
+ 	void InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut = false) override;
+ 	void Move() override;
+ 	void Draw() override;
++	bool PS5CanDrawRuns() override; // From LRPS2 1b83fc768 (GPL-3.0-or-later)
+ 
+ 	void PurgeTextureCache(bool sources, bool targets, bool hash_cache) override;
+ 	void ReadbackTextureCache() override;
+diff --git a/pcsx2/GS/Renderers/HW/GSRendererHWMultiISA.cpp b/pcsx2/GS/Renderers/HW/GSRendererHWMultiISA.cpp
+index 04412c8..25d1f4d 100644
+--- a/pcsx2/GS/Renderers/HW/GSRendererHWMultiISA.cpp
++++ b/pcsx2/GS/Renderers/HW/GSRendererHWMultiISA.cpp
+@@ -41,6 +41,25 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
+ 
+ 	hw.m_sw_vertex_buffer.resize(((hw.m_vertex->next + 1) & ~1));
+ 
++	// From LRPS2 010e92c7d (GPL-3.0-or-later): drawn from and into local memory, so parked targets' pixels there go
++	// to it first (PS5AgedTargetWriteback).
++	if (g_texture_cache->PS5HasParked())
++	{
++		g_texture_cache->PS5FlushParked(hw.m_cached_ctx.FRAME.Block(), GSLocalMemory::GetUnwrappedEndBlockAddress(
++			hw.m_cached_ctx.FRAME.Block(), hw.m_cached_ctx.FRAME.FBW, hw.m_cached_ctx.FRAME.PSM, hw.m_r));
++		if (!hw.m_cached_ctx.ZBUF.ZMSK || hw.m_cached_ctx.TEST.ZTE)
++		{
++			g_texture_cache->PS5FlushParked(hw.m_cached_ctx.ZBUF.Block(), GSLocalMemory::GetUnwrappedEndBlockAddress(
++				hw.m_cached_ctx.ZBUF.Block(), hw.m_cached_ctx.FRAME.FBW, hw.m_cached_ctx.ZBUF.PSM, hw.m_r));
++		}
++		if (PRIM->TME)
++		{
++			g_texture_cache->PS5FlushParked(hw.m_cached_ctx.TEX0.TBP0, GSLocalMemory::GetUnwrappedEndBlockAddress(
++				hw.m_cached_ctx.TEX0.TBP0, hw.m_cached_ctx.TEX0.TBW, hw.m_cached_ctx.TEX0.PSM,
++				GSVector4i(0, 0, 1 << hw.m_cached_ctx.TEX0.TW, 1 << hw.m_cached_ctx.TEX0.TH)));
++		}
++	}
++
+ 	data.primclass = vt.m_primclass;
+ 	data.buff = nullptr;
+ 	data.vertex = hw.m_sw_vertex_buffer.data();
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index 6da6498..31c679c 100644
+index 6da6498..f5a218f 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 @@ -17,6 +17,7 @@
@@ -8220,16 +9451,26 @@ index 6da6498..31c679c 100644
  #include <cinttypes>
  #include <math.h>
  
-@@ -68,6 +69,8 @@ GSTextureCache::~GSTextureCache()
+@@ -68,6 +69,9 @@ GSTextureCache::~GSTextureCache()
  
  void GSTextureCache::ReadbackAll()
  {
 +	// PS5: every target's copy is recorded first, the GPU is waited for once.
 +	PS5ReadBatch batch(this);
++	PS5FlushParked(0, 0xFFFFFFFFu); // From LRPS2 010e92c7d (GPL-3.0-or-later)
  	for (int type = 0; type < 2; type++)
  	{
  		for (auto t : m_dst[type])
-@@ -4758,7 +4761,84 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
+@@ -98,6 +102,8 @@ void GSTextureCache::RemoveAll(bool sources, bool targets, bool hash_cache)
+ 
+ 		m_target_heights.clear();
+ 		m_surface_offset_cache.clear();
++		PS5DeleteParked(); // From LRPS2 010e92c7d (GPL-3.0-or-later)
++		std::memset(m_ps5_page_read_draw, 0, sizeof(m_ps5_page_read_draw));
+ 		m_target_memory_usage = 0;
+ 	}
+ 
+@@ -4758,7 +4764,84 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
  
  // Goal: invalidate data sent to the GPU when the source (GS memory) is modified
  // Called each time you want to write to the GS memory
@@ -8311,11 +9552,11 @@ index 6da6498..31c679c 100644
 +	return (write_mask & PS5PsmWordBits(src_psm)) == 0;
 +}
 +
-+void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target, u32 write_mask)
++void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target, u32 write_mask, const Target* keep)
  {
  	const u32 bp = off.bp();
  	const u32 bw = off.bw();
-@@ -4783,6 +4863,9 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4783,6 +4866,9 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  				Source* s = *i;
  				++i;
  
@@ -8325,7 +9566,7 @@ index 6da6498..31c679c 100644
  				if ((GSUtil::HasSharedBits(psm, s->m_TEX0.PSM) && (end_bp > s->m_TEX0.TBP0 && start_bp < s->UnwrappedEndBlock()) && !s->m_target) ||
  					(GSUtil::HasSharedBits(bp, psm, s->m_from_target_TEX0.TBP0, s->m_TEX0.PSM) && s->m_target))
  				{
-@@ -4802,6 +4885,9 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4802,6 +4888,9 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  					Source* s = *i;
  					++i;
  
@@ -8335,7 +9576,7 @@ index 6da6498..31c679c 100644
  					if (GSUtil::HasSharedBits(bbp, psm, s->m_TEX0.TBP0, s->m_TEX0.PSM))
  					{
  						m_src.RemoveAt(s);
-@@ -4816,13 +4902,16 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4816,13 +4905,16 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  	// But this causes rects to be too big, especially in WRC games, I don't think there's any need to align them here.
  	GSVector4i r = rect;
  
@@ -8353,7 +9594,7 @@ index 6da6498..31c679c 100644
  			if (GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
  			{
  				bool b = bp == s->m_TEX0.TBP0;
-@@ -4878,6 +4967,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4878,6 +4970,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  		}
  	});
  
@@ -8365,18 +9606,40 @@ index 6da6498..31c679c 100644
  	if (!target)
  		return;
  
-@@ -4968,6 +5062,10 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4894,7 +4991,8 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+ 			Target* t = *j;
+ 
+ 			// Don't bother checking any further if the target doesn't overlap with the write/invalidation.
+-			if ((bp < t->m_TEX0.TBP0 && end_bp < t->m_TEX0.TBP0) || bp > t->UnwrappedEndBlock())
++			// Nor for the one the caller has brought up to date itself (From LRPS2 fecb2c91d (GPL-3.0-or-later)).
++			if ((bp < t->m_TEX0.TBP0 && end_bp < t->m_TEX0.TBP0) || bp > t->UnwrappedEndBlock() || t == keep)
+ 			{
+ 				++i;
+ 				continue;
+@@ -4961,6 +5059,10 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+ 			}
+ 		}
+ 	}
++
++	// From LRPS2 010e92c7d (GPL-3.0-or-later): the write makes these pages of parked targets stale.
++	if (!m_ps5_parked.empty())
++		PS5RetireParked(off, rect);
+ }
+ 
+ // Goal: retrive the data from the GPU to the GS memory.
+@@ -4968,6 +5070,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  // full_flush is set when it's a Local->Local stransfer and both src and destination are the same.
  void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush)
  {
 +	// PS5: the reads of every target this walks over are recorded first, the GPU is waited for once and they are stored
 +	// in the same order when the walk ends. From LRPS2 6f81ad452 (GPL-3.0-or-later)
 +	PS5ReadBatch ps5_read_batch(this);
++	PS5FlushParkedRect(off, r); // From LRPS2 010e92c7d (GPL-3.0-or-later): a read of memory parked targets drew.
 +
  	const u32 bp = off.bp();
  	const u32 psm = off.psm();
  	[[maybe_unused]] const u32 bw = off.bw();
-@@ -5083,7 +5181,8 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
+@@ -5083,7 +5190,8 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
  
  				if (t->m_drawn_since_read.eq(GSVector4i::zero()))
  				{
@@ -8386,7 +9649,7 @@ index 6da6498..31c679c 100644
  						return;
  					else
  						continue;
-@@ -5093,7 +5192,11 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
+@@ -5093,7 +5201,11 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
  				{
  					// The draw rect and read rect overlap somewhat, we should update the target before downloading it.
  					if (t->m_TEX0.TBP0 == bp && !dirty_rect.rintersect(targetr).rempty())
@@ -8398,7 +9661,7 @@ index 6da6498..31c679c 100644
  
  					Read(t, draw_rect);
  
-@@ -5209,7 +5312,8 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
+@@ -5209,7 +5321,8 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
  
  			if (t->m_drawn_since_read.eq(GSVector4i::zero()))
  			{
@@ -8408,7 +9671,7 @@ index 6da6498..31c679c 100644
  					return;
  				else
  					continue;
-@@ -5264,7 +5368,11 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
+@@ -5264,7 +5377,11 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
  
  				// The draw rect and read rect overlap somewhat, we should update the target before downloading it.
  				if (exact_bp && !dirty_rect.rintersect(targetr).rempty())
@@ -8420,7 +9683,38 @@ index 6da6498..31c679c 100644
  
  				Read(t, targetr);
  
-@@ -6054,6 +6162,103 @@ void GSTextureCache::ReplaceSourceTexture(Source* s, GSTexture* new_texture, flo
+@@ -5888,6 +6005,30 @@ GSTextureCache::Target* GSTextureCache::FindOverlappingTarget(u32 BP, u32 BW, u3
+ 	return FindOverlappingTarget(BP, end_bp);
+ }
+ 
++// From LRPS2 8dfb24941 (GPL-3.0-or-later)
++GSTextureCache::Target* GSTextureCache::PS5FindColourUnderDepthWrite(u32 zbp, u32 bw, u32 zpsm, const GSVector4i& r)
++{
++	Target* found = nullptr;
++	for (Target* t : m_dst[RenderTarget])
++	{
++		if (!t->m_valid_rgb || (found && t->m_last_draw <= found->m_last_draw))
++			continue;
++		if (t->Overlaps(zbp, bw, zpsm, r))
++			found = t;
++	}
++
++	if (!found)
++		return nullptr;
++
++	for (Target* t : m_dst[DepthStencil])
++	{
++		if (t->m_last_draw >= found->m_last_draw && t->Overlaps(zbp, bw, zpsm, r))
++			return nullptr;
++	}
++
++	return found;
++}
++
+ GSVector2i GSTextureCache::GetTargetSize(u32 bp, u32 fbw, u32 psm, s32 min_width, s32 min_height, bool can_expand)
+ {
+ 	TargetHeightElem search = {};
+@@ -6054,6 +6195,113 @@ void GSTextureCache::ReplaceSourceTexture(Source* s, GSTexture* new_texture, flo
  		m_source_memory_usage += s->m_texture->GetMemUsage();
  }
  
@@ -8486,6 +9780,16 @@ index 6da6498..31c679c 100644
 +						}
 +					}
 +				}
++				// From LRPS2 fba4607fd (GPL-3.0-or-later): nor a page holding newer pixels, from a newer target dropped in
++				// the same pass or one a read has put there; a page this target takes is marked as its own.
++				if (use)
++				{
++					const u32 page = (start_bp >> 5) & (GS_MAX_PAGES - 1);
++					if (m_ps5_drop_page_draw[page] > t->m_last_draw + 1 || m_ps5_page_read_draw[page] > t->m_last_draw + 1)
++						use = false;
++					else
++						m_ps5_drop_page_draw[page] = t->m_last_draw + 1;
++				}
 +			}
 +			ok[static_cast<size_t>(py - py0) * static_cast<size_t>(ncols) + static_cast<size_t>(px - px0)] = use ? 1 : 0;
 +			all_ok &= use;
@@ -8524,7 +9828,7 @@ index 6da6498..31c679c 100644
  void GSTextureCache::IncAge()
  {
  	static constexpr int max_age = 3;
-@@ -6082,6 +6287,9 @@ void GSTextureCache::IncAge()
+@@ -6082,6 +6330,9 @@ void GSTextureCache::IncAge()
  	// Toss and recompute sizes after 2 seconds of not being used. Should be sufficient for most loading screens.
  	static constexpr int max_size_age = 120;
  
@@ -8534,18 +9838,42 @@ index 6da6498..31c679c 100644
  	for (int type = 0; type < 2; type++)
  	{
  		auto& list = m_dst[type];
-@@ -6095,6 +6303,10 @@ void GSTextureCache::IncAge()
+@@ -6093,8 +6344,18 @@ void GSTextureCache::IncAge()
+ 			{
+ 				const Target* overlapping_tgt = FindOverlappingTarget(t);
  
- 				if (overlapping_tgt != nullptr || t->m_dirty.GetTotalRect(t->m_TEX0, GSVector2i(t->m_valid.width(), t->m_valid.height())).rintersect(t->m_valid).eq(t->m_valid))
+-				if (overlapping_tgt != nullptr || t->m_dirty.GetTotalRect(t->m_TEX0, GSVector2i(t->m_valid.width(), t->m_valid.height())).rintersect(t->m_valid).eq(t->m_valid))
++				const bool all_dirty = t->m_dirty.GetTotalRect(t->m_TEX0, GSVector2i(t->m_valid.width(), t->m_valid.height())).rintersect(t->m_valid).eq(t->m_valid);
++				if (GSConfig.PS5AgedTargetWriteback && !all_dirty && overlapping_tgt != nullptr)
  				{
-+					// PS5: what was drawn since the last read is written to local memory before the target goes.
-+					if (GSConfig.PS5AgedTargetWriteback)
-+						PS5WriteBackAgedTarget(t);
-+
++					// From LRPS2 010e92c7d (GPL-3.0-or-later): out of the lists, its texture kept until what it drew is
++					// read from memory (then written back and freed) or the parked set is over its cap.
++					i = list.erase(i);
++					GL_CACHE("TC: Park Target(%s): (0x%x) due to age", to_string(type), t->m_TEX0.TBP0);
++					PS5ParkTarget(t);
++				}
++				else if (overlapping_tgt != nullptr || all_dirty)
++				{
++					// (All dirty: memory already holds everything newer than what the target drew, nothing to write.)
  					i = list.erase(i);
  					GL_CACHE("TC: Remove Target(%s): (0x%x) due to age", to_string(type),
  						t->m_TEX0.TBP0);
-@@ -7293,7 +7505,15 @@ GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, i
+@@ -6134,6 +6395,14 @@ void GSTextureCache::IncAge()
+ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA, const GIFRegCLAMP& CLAMP, Target* dst, int x_offset, int y_offset, const GSVector2i* lod, const GSVector4i* src_range, GSTexture* gpu_clut, SourceRegion region, bool force_temp)
+ {
+ 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[TEX0.PSM];
++
++	// From LRPS2 010e92c7d (GPL-3.0-or-later): a source from local memory reads what parked targets drew there.
++	if (!dst && !m_ps5_parked.empty())
++	{
++		PS5FlushParked(TEX0.TBP0, GSLocalMemory::GetUnwrappedEndBlockAddress(TEX0.TBP0, TEX0.TBW, TEX0.PSM,
++			GSVector4i(0, 0, 1 << TEX0.TW, 1 << TEX0.TH)));
++	}
++
+ 	Source* src = new Source(TEX0, TEXA);
+ 
+ 	// For debugging, we have an option to force copies instead of sampling the target directly.
+@@ -7293,8 +7562,27 @@ GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, i
  	return t;
  }
  
@@ -8558,11 +9886,23 @@ index 6da6498..31c679c 100644
 +	return GSConfig.UserHacks_GPUTargetCLUTMode;
 +}
 +
-+GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVector2i& offset, float* scale, const GSVector2i& size, bool probe_only)
++// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent. LRPS2 places the sample by its own scaled-draw grid (the
++// first fragment, or the middle under its half-pixel offsets); Crux2 draws with PCSX2's geometry, where a native
++// pixel's centre lands at the middle of its block of fragments whatever the offset mode, so the middle it is.
++float GSTextureCache::PS5NativeSample(const Target* t)
  {
++	return t->m_scale * 0.5f;
++}
++
++GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVector2i& offset, float* scale, const GSVector2i& size, bool probe_only)
++{
++	if (!probe_only)
++		m_ps5_palette_sample = -1.0f;
++
  	for (auto t : m_dst[RenderTarget])
  	{
-@@ -7312,7 +7532,7 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
+ 		if (!t->m_used)
+@@ -7312,7 +7600,7 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
  			this_offset.y = 0;
  
  			// If we're using native scaling we can take this opertunity to downscale the target, it should maintain this.
@@ -8571,7 +9911,7 @@ index 6da6498..31c679c 100644
  			{
  				GSTexture* tex = g_gs_device->CreateCompatible(t->m_texture, t->GetUnscaledSize(), false);
  				if (!tex)
-@@ -7327,7 +7547,7 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
+@@ -7327,7 +7615,7 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
  				t->m_downscaled = true;
  			}
  		}
@@ -8580,7 +9920,7 @@ index 6da6498..31c679c 100644
  				 t->m_TEX0.TBP0 < CBP && t->m_end_block >= CBP)
  		{
  			// If it's more than one group of 4 blocks, it's probably going to fail, horribly.
-@@ -7370,6 +7590,14 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
+@@ -7370,10 +7658,21 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
  				continue;
  		}
  
@@ -8595,7 +9935,14 @@ index 6da6498..31c679c 100644
  		GSRendererHW::GetInstance()->m_mem.m_clut.SetGPUTextureDirty(t->m_last_draw, t->m_texture);
  
  		offset = this_offset;
-@@ -7383,15 +7611,86 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
+ 		*scale = t->m_scale;
++		// PS5: the entry's sample among its fragments at scale (PS5GPUPaletteFromTarget); the first fragment otherwise.
++		if (GSConfig.PS5GPUPaletteFromTarget)
++			m_ps5_palette_sample = PS5NativeSample(t);
+ 
+ 		t->UnscaleRTAlpha();
+ 
+@@ -7383,15 +7682,86 @@ GSTexture* GSTextureCache::LookupPaletteSource(u32 CBP, u32 CPSM, u32 CBW, GSVec
  	return nullptr;
  }
  
@@ -8683,7 +10030,7 @@ index 6da6498..31c679c 100644
  
  	const GIFRegTEX0& TEX0 = t->m_TEX0;
  	const bool is_depth = (t->m_type == DepthStencil);
-@@ -7440,7 +7739,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
+@@ -7440,7 +7810,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
  		break;
  
  		default:
@@ -8692,7 +10039,7 @@ index 6da6498..31c679c 100644
  	}
  
  	// Don't overwrite bits which aren't used in the target's format.
-@@ -7449,21 +7748,51 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
+@@ -7449,21 +7819,51 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
  	if (write_mask == 0)
  	{
  		DbgCon.Warning("Not reading back target %x PSM %s due to no write mask", TEX0.TBP0, GSUtil::GetPSMName(TEX0.PSM));
@@ -8749,7 +10096,7 @@ index 6da6498..31c679c 100644
  	}
  	else
  	{
-@@ -7471,46 +7800,139 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
+@@ -7471,46 +7871,290 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
  		if (tmp)
  		{
  			g_gs_device->StretchRect(t->m_texture, src, tmp, GSVector4(drc), ps_shader, Nearest);
@@ -8762,17 +10109,16 @@ index 6da6498..31c679c 100644
  			Console.Error("Failed to allocate temporary %dx%d target for read.", drc.z, drc.w);
 -			return;
 +			return false;
- 		}
- 	}
- 
--	dltex->get()->Flush();
--	if (!dltex->get()->Map(drc))
++		}
++	}
++
 +	pending.dl = dl;
 +	pending.TEX0 = TEX0;
 +	pending.r = r;
 +	pending.drc = drc;
 +	pending.write_mask = write_mask;
 +	pending.cpu_convert_rgb5a1 = cpu_convert_rgb5a1;
++	pending.last_draw = t->m_last_draw;
 +	m_ps5_pending_reads.push_back(std::move(pending));
 +	return true;
 +}
@@ -8800,9 +10146,11 @@ index 6da6498..31c679c 100644
 +			*owned = std::move(*it);
 +			m_ps5_readback_pool.erase(it);
 +			return owned->get();
-+		}
-+	}
-+
+ 		}
+ 	}
+ 
+-	dltex->get()->Flush();
+-	if (!dltex->get()->Map(drc))
 +	*owned = g_gs_device->CreateDownloadTexture(width, height, format);
 +	if (!*owned)
 +	{
@@ -8902,19 +10250,169 @@ index 6da6498..31c679c 100644
 +		}
 +
 +		dl->Unmap();
- 	}
- 
--	dltex->get()->Unmap();
++
++		// From LRPS2 fba4607fd (GPL-3.0-or-later): the pages now hold this target's pixels.
++		if (GSConfig.PS5AgedTargetWriteback)
++			PS5StampPageReadDraws(p.TEX0, r, p.last_draw);
++	}
++
 +	// Texture of their own go back to the pool (bounded).
 +	for (PS5PendingRead& p : reads)
 +	{
 +		if (p.owned && m_ps5_readback_pool.size() < PS5_READ_BATCH_MAX)
 +			m_ps5_readback_pool.push_back(std::move(p.owned));
 +	}
++}
++
++// From LRPS2 fba4607fd (GPL-3.0-or-later)
++// Every page r touches, a page read in part included: an older target then keeps the rest of that page to itself
++// rather than write over the part that is newer.
++void GSTextureCache::PS5StampPageReadDraws(const GIFRegTEX0& TEX0, const GSVector4i& r, u64 draw)
++{
++	if (r.rempty())
++		return;
++
++	const GSVector2i pgs = GSLocalMemory::m_psm[TEX0.PSM].pgs;
++	const u32 tbw = std::max<u32>(TEX0.TBW, 1u);
++	const u64 stamp = draw + 1;
++	for (int py = r.y / pgs.y; py < (r.w + pgs.y - 1) / pgs.y; py++)
++	{
++		for (int px = r.x / pgs.x; px < (r.z + pgs.x - 1) / pgs.x; px++)
++		{
++			const u32 page = ((TEX0.TBP0 >> 5) + static_cast<u32>(py) * tbw + static_cast<u32>(px)) & (GS_MAX_PAGES - 1);
++			if (m_ps5_page_read_draw[page] < stamp)
++				m_ps5_page_read_draw[page] = stamp;
++		}
++	}
++}
++
++// From LRPS2 010e92c7d (GPL-3.0-or-later)
++void GSTextureCache::PS5ParkTarget(Target* t)
++{
++	InvalidateSourcesFromTarget(t);
++	if (!t->m_texture || t->m_drawn_since_read.rintersect(t->m_valid).rempty())
++	{
++		// Nothing of it that local memory lacks: it goes now.
++		delete t;
++		return;
+ 	}
+ 
+-	dltex->get()->Unmap();
++	m_ps5_parked.push_back(t);
++	m_ps5_parked_bytes += t->m_texture->GetMemUsage();
++
++	// Over the cap: the oldest parked go (written back first), as a target budget would take them.
++	if (m_ps5_parked.size() > PS5_PARKED_MAX_COUNT || m_ps5_parked_bytes > PS5_PARKED_MAX_BYTES)
++	{
++		std::vector<Target*> drop;
++		while (!m_ps5_parked.empty() && (m_ps5_parked.size() > PS5_PARKED_MAX_COUNT || m_ps5_parked_bytes > PS5_PARKED_MAX_BYTES))
++		{
++			Target* o = m_ps5_parked.front();
++			m_ps5_parked.erase(m_ps5_parked.begin());
++			m_ps5_parked_bytes -= o->m_texture->GetMemUsage();
++			drop.push_back(o);
++		}
++		PS5DropTargets(drop);
++	}
++}
++
++// From LRPS2 fba4607fd (GPL-3.0-or-later)
++// The targets go to local memory by the aged write-back rule, their reads sharing one GPU wait, and are deleted
++// after. The page table of the pass makes each page the newest of them's alone.
++void GSTextureCache::PS5DropTargets(std::vector<Target*>& targets)
++{
++	if (targets.empty())
++		return;
++
++	{
++		PS5ReadBatch batch(this);
++		std::memset(m_ps5_drop_page_draw, 0, sizeof(m_ps5_drop_page_draw));
++		for (Target* t : targets)
++		{
++			GL_CACHE("TC: Write back parked target (0x%x)", t->m_TEX0.TBP0);
++			PS5WriteBackAgedTarget(t);
++		}
++	}
++
++	for (Target* t : targets)
++		delete t;
++	targets.clear();
++}
++
++// From LRPS2 010e92c7d (GPL-3.0-or-later)
++// The parked targets over [bp, end_bp] go to local memory, then are deleted. A newer parked target holding some of
++// the same pages is not needed with them: a read of those pages reaches it too, and its pixels, newer than any
++// written now, then go over them.
++void GSTextureCache::PS5FlushParked(u32 bp, u32 end_bp)
++{
++	if (m_ps5_parked.empty())
++		return;
++
++	std::vector<Target*> drop;
++	for (size_t i = 0; i < m_ps5_parked.size();)
++	{
++		Target* t = m_ps5_parked[i];
++		if (CheckOverlap(t->m_TEX0.TBP0, t->UnwrappedEndBlock(), bp, end_bp))
++		{
++			m_ps5_parked.erase(m_ps5_parked.begin() + i);
++			m_ps5_parked_bytes -= t->m_texture->GetMemUsage();
++			drop.push_back(t);
++		}
++		else
++		{
++			i++;
++		}
++	}
++
++	PS5DropTargets(drop);
++}
++
++void GSTextureCache::PS5FlushParkedRect(const GSOffset& off, const GSVector4i& r)
++{
++	if (m_ps5_parked.empty() || r.rempty())
++		return;
++
++	PS5FlushParked(GSLocalMemory::GetStartBlockAddress(off.bp(), off.bw(), off.psm(), r),
++		GSLocalMemory::GetUnwrappedEndBlockAddress(off.bp(), off.bw(), off.psm(), r));
++}
++
++// From LRPS2 010e92c7d (GPL-3.0-or-later)
++// A write over parked targets' pages: those pages are the write's now, and a target with nothing left that local
++// memory lacks goes.
++void GSTextureCache::PS5RetireParked(const GSOffset& off, const GSVector4i& r)
++{
++	const u32 bp = off.bp();
++	const u32 bw = off.bw();
++	const u32 psm = off.psm();
++
++	for (size_t i = 0; i < m_ps5_parked.size();)
++	{
++		Target* t = m_ps5_parked[i];
++		if (GSUtil::HasSharedBits(psm, t->m_TEX0.PSM) && t->Overlaps(bp, bw, psm, r))
++		{
++			DirtyRectByPage(bp, psm, bw, t, r);
++			if (FullRectDirty(t))
++			{
++				m_ps5_parked.erase(m_ps5_parked.begin() + i);
++				m_ps5_parked_bytes -= t->m_texture->GetMemUsage();
++				delete t;
++				continue;
++			}
++		}
++		i++;
++	}
++}
++
++void GSTextureCache::PS5DeleteParked()
++{
++	for (Target* t : m_ps5_parked)
++		delete t;
++	m_ps5_parked.clear();
++	m_ps5_parked_bytes = 0;
  }
  
  void GSTextureCache::Read(Source* t, const GSVector4i& r)
-@@ -7736,14 +8158,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
+@@ -7736,14 +8380,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
  	if (m_target) // Yeah keep dreaming
  		return;
  
@@ -8950,7 +10448,19 @@ index 6da6498..31c679c 100644
  	Update(rect, layer);
  
  	m_TEX0 = old_TEX0;
-@@ -8078,9 +8521,6 @@ void GSTextureCache::Target::Update(bool cannot_scale)
+@@ -8066,6 +8731,11 @@ void GSTextureCache::Target::Update(bool cannot_scale)
+ 		return;
+ 	}
+ 
++	// From LRPS2 010e92c7d (GPL-3.0-or-later): the dirty area loads from local memory, which parked targets' pixels
++	// go to first.
++	if (g_texture_cache->PS5HasParked())
++		g_texture_cache->PS5FlushParked(m_TEX0.TBP0, UnwrappedEndBlock());
++
+ 	const GSVector4i t_offset(total_rect.xyxy());
+ 	const GSVector4i t_size(total_rect - t_offset);
+ 	const GSVector4 t_sizef(t_size.zwzw());
+@@ -8078,9 +8748,6 @@ void GSTextureCache::Target::Update(bool cannot_scale)
  		return;
  	}
  
@@ -8960,7 +10470,7 @@ index 6da6498..31c679c 100644
  	GIFRegTEXA TEXA = {};
  	TEXA.AEM = 0;
  	TEXA.TA0 = 0;
-@@ -8120,37 +8560,20 @@ void GSTextureCache::Target::Update(bool cannot_scale)
+@@ -8120,37 +8787,20 @@ void GSTextureCache::Target::Update(bool cannot_scale)
  
  		const GSVector4i read_r = m_dirty.GetDirtyRect(i, m_TEX0, total_rect, true);
  		const GSVector4i t_r(read_r - t_offset);
@@ -9007,7 +10517,7 @@ index 6da6498..31c679c 100644
  		GSDevice::MultiStretchRect& drect = drects[ndrects++];
  		drect.src = t;
  		drect.src_rect = GSVector4(update_r - t_offset) / t_sizef;
-@@ -8171,9 +8594,6 @@ void GSTextureCache::Target::Update(bool cannot_scale)
+@@ -8171,9 +8821,6 @@ void GSTextureCache::Target::Update(bool cannot_scale)
  		}
  	}
  
@@ -9017,7 +10527,7 @@ index 6da6498..31c679c 100644
  	if (ndrects > 0)
  	{
  		if (m_type == RenderTarget && transferring_alpha && bpp >= 16)
-@@ -8477,6 +8897,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8477,6 +9124,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  	}
  
  	m_surfaces.clear();
@@ -9027,7 +10537,7 @@ index 6da6498..31c679c 100644
  
  	for (FastList<Source*>& item : m_map)
  	{
-@@ -8487,6 +8910,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8487,6 +9137,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  void GSTextureCache::SourceMap::RemoveAt(Source* s)
  {
  	m_surfaces.erase(s);
@@ -9037,7 +10547,7 @@ index 6da6498..31c679c 100644
  
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
-@@ -9129,16 +9555,17 @@ GSTextureCache::SourceRegion GSTextureCache::SourceRegion::Create(GIFRegTEX0 TEX
+@@ -9129,16 +9782,17 @@ GSTextureCache::SourceRegion GSTextureCache::SourceRegion::Create(GIFRegTEX0 TEX
  	return region;
  }
  
@@ -9059,7 +10569,7 @@ index 6da6498..31c679c 100644
  
  __fi static void BlockHashAccumulate(BlockHashState& st, const u8* bp, u32 size)
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.h b/pcsx2/GS/Renderers/HW/GSTextureCache.h
-index a4d9256..adff5b4 100644
+index a4d9256..2c21ae4 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.h
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.h
 @@ -7,6 +7,7 @@
@@ -9106,7 +10616,7 @@ index a4d9256..adff5b4 100644
  
  	struct TargetHeightElem
  	{
-@@ -461,6 +478,44 @@ protected:
+@@ -461,6 +478,68 @@ protected:
  	std::unique_ptr<GSDownloadTexture> m_uint16_download_texture;
  	std::unique_ptr<GSDownloadTexture> m_uint32_download_texture;
  
@@ -9123,6 +10633,7 @@ index a4d9256..adff5b4 100644
 +		GSVector4i drc;
 +		u32 write_mask;
 +		bool cpu_convert_rgb5a1;
++		u64 last_draw; // the target's last draw, stamped on the pages the read puts in memory (PS5StampPageReadDraws)
 +	};
 +	std::vector<PS5PendingRead> m_ps5_pending_reads;
 +	std::vector<std::unique_ptr<GSDownloadTexture>> m_ps5_readback_pool;
@@ -9132,6 +10643,29 @@ index a4d9256..adff5b4 100644
 +	bool ReadQueue(Target* t, const GSVector4i& r);
 +	void PS5WriteBackAgedTarget(Target* t);
 +	void ReadStore();
++
++	// From LRPS2 fba4607fd/010e92c7d (GPL-3.0-or-later), adapted to Crux2's PS5ReadBatch (PS5AgedTargetWriteback)
++	// Targets dropped by age, out of the lists but keeping their textures: what they drew goes to local memory, by
++	// the aged write-back rule, only when something reads that memory (an EE readback, a CLUT load, a local copy,
++	// a source or a target's dirty area loading from memory, a primitive drawn on the CPU), when the parked set
++	// grows past its cap (Crux2 has no target budget: the oldest go first), or when the cache is read back whole.
++	// A write over their pages retires those pages instead, and one left with nothing memory lacks is deleted.
++	static constexpr u32 PS5_PARKED_MAX_COUNT = 32;
++	static constexpr u64 PS5_PARKED_MAX_BYTES = 64 * 1024 * 1024;
++	std::vector<Target*> m_ps5_parked;
++	u64 m_ps5_parked_bytes = 0;
++	float m_ps5_palette_sample = -1.0f; // PS5PaletteSourceSample
++	// Per page of local memory, 1 + the last draw of the newest target pixels a read put there (0: none): what a
++	// target dropped later, holding older pixels of the page, must not write over.
++	u64 m_ps5_page_read_draw[GS_MAX_PAGES] = {};
++	// While a drop pass writes targets back: per page, 1 + the last draw of the newest dropped target whose pixels
++	// go there (0: none), so the pass writes each page from the newest of them only.
++	u64 m_ps5_drop_page_draw[GS_MAX_PAGES] = {};
++	void PS5StampPageReadDraws(const GIFRegTEX0& TEX0, const GSVector4i& r, u64 draw);
++	void PS5ParkTarget(Target* t);
++	void PS5DropTargets(std::vector<Target*>& targets);
++	void PS5RetireParked(const GSOffset& off, const GSVector4i& r);
++	void PS5DeleteParked();
 +	GSDownloadTexture* AcquireBatchDownloadTexture(std::unique_ptr<GSDownloadTexture>* member, u32 width, u32 height,
 +		GSTexture::Format format, std::unique_ptr<GSDownloadTexture>* owned);
 +
@@ -9151,7 +10685,7 @@ index a4d9256..adff5b4 100644
  	Source* CreateSource(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA, const GIFRegCLAMP& CLAMP, Target* t, int x_offset, int y_offset, const GSVector2i* lod, const GSVector4i* src_range, GSTexture* gpu_clut, SourceRegion region, bool force_temporary = false);
  
  	bool PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, const GSVector2i& valid_size, bool is_frame,
-@@ -525,7 +580,14 @@ public:
+@@ -525,7 +604,22 @@ public:
  	GSVector4i TranslateAlignedRectByPage(Target* t, u32 sbp, u32 spsm, u32 sbw, GSVector4i src_r, bool is_invalidation = false);
  	void DirtyRectByPage(u32 sbp, u32 spsm, u32 sbw, Target* t, GSVector4i src_r);
  	void DirtyRectByPageOld(u32 sbp, u32 spsm, u32 sbw, Target* t, GSVector4i src_r);
@@ -9161,22 +10695,48 @@ index a4d9256..adff5b4 100644
 +	/// PS5: the GPU target CLUT mode in effect: with PS5GPUPaletteFromTarget on, Disabled acts as InsideTarget.
 +	static GSGPUTargetCLUTMode GetEffectiveGPUTargetCLUTMode();
 +
++	/// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent (PS5GPUPaletteFromTarget)
++	/// Where a native pixel's sample sits among the fragments the target's scale draws for it, in texels from the
++	/// block's origin: its middle (at native, the one fragment's centre).
++	static float PS5NativeSample(const Target* t);
++	/// The sample position for the target the last LookupPaletteSource returned, or < 0 for the first-fragment
++	/// fetch (the setting off, or no target).
++	__fi float PS5PaletteSourceSample() const { return m_ps5_palette_sample; }
++
 +	/// PS5: call for a CLUT load (instead of skipping the readback): reads back the target holding the palette
 +	/// when the GPU palette path will not take it. No-op unless PS5GPUPaletteFromTarget is on.
 +	void PS5ReadbackForCLUTLoad(const GIFRegTEX0& TEX0, const GIFRegTEXCLUT& TEXCLUT);
  	std::shared_ptr<Palette> LookupPaletteObject(const u32* clut, u16 pal, bool need_gs_texture);
  
  	Source* LookupSource(const bool is_color, const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA, const GIFRegCLAMP& CLAMP, const GSVector4i& r, const GSVector2i* lod, const bool possible_shuffle, const bool linear, const GIFRegFRAME& frame, bool req_color = true, bool req_alpha = true);
-@@ -565,7 +627,8 @@ public:
+@@ -557,6 +651,10 @@ public:
+ 	Target* FindOverlappingTarget(GSTextureCache::Target* target) const;
+ 	Target* FindOverlappingTarget(u32 BP, u32 end_bp) const;
+ 	Target* FindOverlappingTarget(u32 BP, u32 BW, u32 PSM, GSVector4i rc) const;
++	/// From LRPS2 8dfb24941 (GPL-3.0-or-later) (PS5AgedTargetWriteback)
++	/// The colour target holding memory a depth write lands in, when one does and it was drawn after every depth
++	/// buffer over that memory.
++	Target* PS5FindColourUnderDepthWrite(u32 zbp, u32 bw, u32 zpsm, const GSVector4i& r);
+ 
+ 	GSVector2i GetTargetSize(u32 bp, u32 fbw, u32 psm, s32 min_width, s32 min_height, bool can_expand = true);
+ 	bool HasTargetInHeightCache(u32 bp, u32 fbw, u32 psm, u32 max_age = std::numeric_limits<u32>::max(), bool move_front = true);
+@@ -565,8 +663,15 @@ public:
  	void InvalidateContainedTargets(u32 start_bp, u32 end_bp, u32 write_psm = PSMCT32, u32 write_bw = 1, u32 fb_mask = 0x00000000, bool ignore_exact = false);
  	void InvalidateVideoMemType(int type, u32 bp, u32 write_psm = PSMCT32, u32 write_fbmsk = 0, bool dirty_only = false);
  	void InvalidateVideoMemSubTarget(GSTextureCache::Target* rt);
 -	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true);
 +	// PS5: write_mask = the bits of each 32-bit destination word the write changes (all ones: every bit).
-+	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true, u32 write_mask = 0xFFFFFFFFu);
++	// keep: a target the caller has brought up to date itself (From LRPS2 fecb2c91d), left alone.
++	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true, u32 write_mask = 0xFFFFFFFFu, const Target* keep = nullptr);
  	void InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush = false);
++	/// PS5 (PS5AgedTargetWriteback): before local memory in [bp, end_bp] is read, what parked targets drew there is
++	/// written to it and they are freed. No-op with the setting off or nothing parked.
++	void PS5FlushParked(u32 bp, u32 end_bp);
++	void PS5FlushParkedRect(const GSOffset& off, const GSVector4i& r);
++	__fi bool PS5HasParked() const { return !m_ps5_parked.empty(); }
  
  	/// Removes any sources which point to the specified target.
+ 	void InvalidateSourcesFromTarget(const Target* t);
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 index 77a28df..0b3229c 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
@@ -9212,7 +10772,7 @@ index 77a28df..0b3229c 100644
  	FileSystem::FindResultsArray files;
  
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index 20c80b8..7a69cd6 100644
+index 20c80b8..8f9707e 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -28,6 +28,9 @@
@@ -9471,7 +11031,7 @@ index 20c80b8..7a69cd6 100644
  			vkCmdClearAttachments(GetCurrentCommandBuffer(), 1, &ca, 1, &cr);
  
  			return;
-@@ -3360,6 +3470,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
+@@ -3360,15 +3470,28 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
  	vkCmdBlitImage(GetCurrentCommandBuffer(), sTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
  		dTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ib,
  		filter == Biln ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
@@ -9481,7 +11041,43 @@ index 20c80b8..7a69cd6 100644
  }
  
  void GSDeviceVK::UpdateCLUTTexture(
-@@ -3764,6 +3877,9 @@ void GSDeviceVK::OMSetRenderTargets(
+ 	GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize)
++{
++	PS5UpdateCLUTTextureSampled(sTex, sScale, -1.0f, offsetX, offsetY, dTex, dOffset, dSize);
++}
++
++// From LRPS2 cc7705415 (GPL-3.0-or-later), by intent: sSample < 0 keeps the first-fragment texelFetch the shader
++// always did (byte-identical to the plain UpdateCLUTTexture); otherwise the shader reads each entry's native pixel
++// sSample texels into its block of fragments, with a linear fetch (PS5GPUPaletteFromTarget).
++void GSDeviceVK::PS5UpdateCLUTTextureSampled(
++	GSTexture* sTex, float sScale, float sSample, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize)
+ {
+ 	// Super annoying, but apparently NVIDIA doesn't like floats/ints packed together in the same vec4?
+ 	struct alignas(16) Uniforms
+ 	{
+-		u32 offsetX, offsetY, dOffset, pad1;
++		u32 offsetX, offsetY, dOffset;
++		float sample_at; // < 0: the first fragment of the block, texelFetch'd (the shader's old path)
+ 		float scale;
+ 		float pad2[3];
+ 	};
+@@ -3377,13 +3500,14 @@ void GSDeviceVK::UpdateCLUTTexture(
+ 	uniforms.offsetX = offsetX;
+ 	uniforms.offsetY = offsetY;
+ 	uniforms.dOffset = dOffset;
++	uniforms.sample_at = sSample;
+ 	uniforms.scale = sScale;
+ 	SetUtilityPushConstants(&uniforms, sizeof(uniforms));
+ 
+ 	const GSVector4 dRect(0, 0, dSize, 1);
+ 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
+ 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
+-		GetConvertPipeline(shader), Nearest, true);
++		GetConvertPipeline(shader), (sSample >= 0.0f) ? Biln : Nearest, true);
+ }
+ 
+ void GSDeviceVK::ConvertToIndexedTexture(
+@@ -3764,6 +3888,9 @@ void GSDeviceVK::OMSetRenderTargets(
  				cr.rect.extent.width  = size.x;
  				cr.rect.extent.height = size.y;
  				cr.layerCount = 1u;
@@ -9491,7 +11087,7 @@ index 20c80b8..7a69cd6 100644
  				vkCmdClearAttachments(GetCurrentCommandBuffer(), num_ca, cas.data(), 1, &cr);
  			}
  		}
-@@ -3797,6 +3913,17 @@ void GSDeviceVK::OMSetRenderTargets(
+@@ -3797,6 +3924,17 @@ void GSDeviceVK::OMSetRenderTargets(
  			{
  				vkRt->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
  			}
@@ -9509,7 +11105,7 @@ index 20c80b8..7a69cd6 100644
  		}
  		if (vkDs)
  		{
-@@ -4048,6 +4175,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4048,6 +4186,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -9519,7 +11115,7 @@ index 20c80b8..7a69cd6 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4785,6 +4915,9 @@ void GSDeviceVK::RenderImGui()
+@@ -4785,6 +4926,9 @@ void GSDeviceVK::RenderImGui()
  
  			if (ApplyUtilityState())
  			{
@@ -9529,7 +11125,7 @@ index 20c80b8..7a69cd6 100644
  				vkCmdDrawIndexed(GetCurrentCommandBuffer(), pcmd->ElemCount, 1, m_index.start + pcmd->IdxOffset,
  					vertex_offset + pcmd->VtxOffset, 0);
  			}
-@@ -4819,6 +4952,262 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4819,6 +4963,262 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -9792,7 +11388,7 @@ index 20c80b8..7a69cd6 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4850,6 +5239,7 @@ void GSDeviceVK::DestroyResources()
+@@ -4850,6 +5250,7 @@ void GSDeviceVK::DestroyResources()
  	if (m_tfx_ubo_descriptor_set != VK_NULL_HANDLE)
  		FreePersistentDescriptorSet(m_tfx_ubo_descriptor_set);
  
@@ -9800,7 +11396,7 @@ index 20c80b8..7a69cd6 100644
  	for (auto& it : m_tfx_pipelines)
  		vkDestroyPipeline(m_device, it.second, nullptr);
  	for (auto& it : m_tfx_fragment_shaders)
-@@ -4904,6 +5294,26 @@ void GSDeviceVK::DestroyResources()
+@@ -4904,6 +5305,26 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -9827,7 +11423,7 @@ index 20c80b8..7a69cd6 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -4963,6 +5373,9 @@ void GSDeviceVK::DestroyResources()
+@@ -4963,6 +5384,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -9837,7 +11433,7 @@ index 20c80b8..7a69cd6 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5086,7 +5499,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5086,7 +5510,46 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -9884,7 +11480,7 @@ index 20c80b8..7a69cd6 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5095,38 +5547,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5095,38 +5558,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -9924,7 +11520,7 @@ index 20c80b8..7a69cd6 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5165,6 +5597,14 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5165,6 +5608,14 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  			VK_STENCIL_OP_KEEP, VK_COMPARE_OP_EQUAL, 1u, 1u, 1u};
  		gpb.SetStencilState(true, sos, sos);
  	}
@@ -9939,7 +11535,7 @@ index 20c80b8..7a69cd6 100644
  
  	// Blending
  	if (IsDATEModePrimIDInit(p.ps.date))
-@@ -5210,6 +5650,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5210,6 +5661,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	
  	if (p.IsTestingAndSamplingDepth() && UseFeedbackLoopLayout())
  		gpb.AddFlags(VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT);
@@ -9948,7 +11544,7 @@ index 20c80b8..7a69cd6 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5223,12 +5665,39 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5223,12 +5676,39 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  
  VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  {
@@ -9988,7 +11584,7 @@ index 20c80b8..7a69cd6 100644
  	return pipeline;
  }
  
-@@ -5239,6 +5708,14 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
+@@ -5239,6 +5719,14 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
  		return false;
  
  	SetPipeline(pipeline);
@@ -10003,7 +11599,7 @@ index 20c80b8..7a69cd6 100644
  
  	return ApplyTFXState();
  }
-@@ -5247,6 +5724,10 @@ void GSDeviceVK::InitializeState()
+@@ -5247,6 +5735,10 @@ void GSDeviceVK::InitializeState()
  {
  	m_current_framebuffer = VK_NULL_HANDLE;
  	m_current_render_pass = VK_NULL_HANDLE;
@@ -10014,7 +11610,7 @@ index 20c80b8..7a69cd6 100644
  
  	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
  		m_tfx_textures[i] = m_null_texture.get();
-@@ -5332,10 +5813,19 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartRenderPass(bool wait_for_completi
+@@ -5332,10 +5824,19 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartRenderPass(bool wait_for_completi
  	GSTexture* const current_rt = m_current_render_target;
  	GSTexture* const current_ds = m_current_depth_target;
  	const FeedbackLoopFlag current_feedback_loop = m_current_framebuffer_feedback_loop;
@@ -10034,7 +11630,7 @@ index 20c80b8..7a69cd6 100644
  	if (render_pass != VK_NULL_HANDLE)
  	{
  		// rebind framebuffer
-@@ -5370,11 +5860,24 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
+@@ -5370,11 +5871,24 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
  	rp.framebuffer = fb;
  	rp.renderArea.extent.width  = swap_chain_texture->GetWidth();
  	rp.renderArea.extent.height = swap_chain_texture->GetHeight();
@@ -10059,7 +11655,7 @@ index 20c80b8..7a69cd6 100644
  	ExecuteCommandBuffer(true);
  	if (m_spinning_supported && GSConfig.HWSpinGPUForReadbacks)
  	{
-@@ -5547,6 +6050,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
+@@ -5547,6 +6061,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
  
  			vkTex->CommitClear();
  
@@ -10076,7 +11672,7 @@ index 20c80b8..7a69cd6 100644
  			if (vkTex->GetLayout() != layout)
  			{
  				update_layout = true;
-@@ -5585,9 +6098,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
+@@ -5585,9 +6109,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
  void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  {
  	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
@@ -10095,7 +11691,7 @@ index 20c80b8..7a69cd6 100644
  		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
  		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
  	}
-@@ -5596,7 +6118,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
+@@ -5596,7 +6129,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  		vkTex = m_null_texture.get();
  	}
  
@@ -10108,7 +11704,7 @@ index 20c80b8..7a69cd6 100644
  		return;
  
  	m_utility_texture = vkTex;
-@@ -5646,6 +6172,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5646,6 +6183,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -10118,7 +11714,7 @@ index 20c80b8..7a69cd6 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass  = m_current_render_pass;
-@@ -5654,6 +6183,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5654,6 +6194,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -10128,7 +11724,7 @@ index 20c80b8..7a69cd6 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5666,6 +6198,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5666,6 +6209,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -10138,7 +11734,7 @@ index 20c80b8..7a69cd6 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass  = m_current_render_pass;
-@@ -5676,6 +6211,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5676,6 +6222,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -10149,7 +11745,7 @@ index 20c80b8..7a69cd6 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5715,6 +6254,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5715,6 +6265,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -10160,7 +11756,7 @@ index 20c80b8..7a69cd6 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5729,13 +6272,23 @@ void GSDeviceVK::EndRenderPass()
+@@ -5729,13 +6283,23 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -10184,7 +11780,7 @@ index 20c80b8..7a69cd6 100644
  
  	m_is_presenting = false;
  }
-@@ -5760,6 +6313,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
+@@ -5760,6 +6324,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
  
  void GSDeviceVK::SetPipeline(VkPipeline pipeline)
  {
@@ -10195,7 +11791,7 @@ index 20c80b8..7a69cd6 100644
  	if (m_current_pipeline == pipeline)
  		return;
  
-@@ -5965,6 +6522,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -5965,6 +6533,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -10208,7 +11804,7 @@ index 20c80b8..7a69cd6 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -5998,6 +6561,239 @@ void GSDeviceVK::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
+@@ -5998,6 +6572,239 @@ void GSDeviceVK::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
  	}
  }
  
@@ -10448,7 +12044,7 @@ index 20c80b8..7a69cd6 100644
  void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
-@@ -6030,6 +6826,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+@@ -6030,6 +6837,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
  GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -10456,7 +12052,7 @@ index 20c80b8..7a69cd6 100644
  
  	// How this is done:
  	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-@@ -6128,6 +6925,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6128,6 +6936,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  	}
  
  	g_perfmon.Put(GSPerfMon::Barriers, 1);
@@ -10464,7 +12060,7 @@ index 20c80b8..7a69cd6 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6151,7 +6949,44 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6151,7 +6960,44 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -10509,7 +12105,7 @@ index 20c80b8..7a69cd6 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6170,6 +7005,12 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6170,6 +7016,12 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		}
  	}
  	
@@ -10522,7 +12118,7 @@ index 20c80b8..7a69cd6 100644
  	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
  	GSTextureVK* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTextureVK*>(config.rt);
  	GSTextureVK* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds);
-@@ -6384,6 +7225,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6384,6 +7236,62 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  				(FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth));
  	}
  
@@ -10585,7 +12181,7 @@ index 20c80b8..7a69cd6 100644
  	if (draw_rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6402,7 +7299,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6402,7 +7310,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  				                       config.samplearea.width() * config.samplearea.height();
  
  				// Do an individual copy if the union is larger than the sum of individual areas.
@@ -10596,7 +12192,7 @@ index 20c80b8..7a69cd6 100644
  				{
  					const GSVector4i snapped_drawarea = ProcessCopyArea(GSVector4i(0, 0, rtsize.x, rtsize.y), config.drawarea);
  					const GSVector4i snapped_samplearea = ProcessCopyArea(GSVector4i(0, 0, rtsize.x, rtsize.y), config.samplearea);
-@@ -6520,6 +7419,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6520,6 +7430,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
@@ -10606,7 +12202,7 @@ index 20c80b8..7a69cd6 100644
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6542,6 +7444,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6542,6 +7455,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -10620,7 +12216,7 @@ index 20c80b8..7a69cd6 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-@@ -6670,6 +7579,8 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
+@@ -6670,6 +7590,8 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
  		pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
  	}
  
@@ -10629,7 +12225,7 @@ index 20c80b8..7a69cd6 100644
  	// enable point size in the vertex shader if we're rendering points regardless of upscaling.
  	pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
  }
-@@ -6754,9 +7665,219 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6754,9 +7676,219 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -10849,7 +12445,7 @@ index 20c80b8..7a69cd6 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6767,7 +7888,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6767,7 +7899,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -10858,7 +12454,7 @@ index 20c80b8..7a69cd6 100644
  
  	if (full_barrier)
  	{
-@@ -6777,11 +7898,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6777,11 +7909,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -10879,7 +12475,7 @@ index 20c80b8..7a69cd6 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6793,8 +7923,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6793,8 +7934,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -10893,7 +12489,7 @@ index 20c80b8..7a69cd6 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index 4230238..e54f794 100644
+index 4230238..1387c7a 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -48,6 +48,8 @@ public:
@@ -11065,7 +12661,16 @@ index 4230238..e54f794 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -642,12 +738,68 @@ public:
+@@ -615,6 +711,8 @@ public:
+ 
+ 	void UpdateCLUTTexture(
+ 		GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize) override;
++	void PS5UpdateCLUTTextureSampled(GSTexture* sTex, float sScale, float sSample, u32 offsetX, u32 offsetY,
++		GSTexture* dTex, u32 dOffset, u32 dSize) override;
+ 	void ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, u32 SBW, u32 SPSM,
+ 		GSTexture* dTex, u32 DBW, u32 DPSM) override;
+ 	void FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect) override;
+@@ -642,12 +740,68 @@ public:
  	void RenderHW(GSHWDrawConfig& config) override;
  	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe);
  	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
@@ -11134,7 +12739,7 @@ index 4230238..e54f794 100644
  
  	//////////////////////////////////////////////////////////////////////////
  	// Vulkan State
-@@ -774,6 +926,9 @@ private:
+@@ -774,6 +928,9 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -17078,7 +18683,7 @@ index 51c34b9..44c85e7 100644
  
  const char* Pcsx2Config::DebugAnalysisOptions::RunConditionNames[] = {
 diff --git a/pcsx2/R5900.cpp b/pcsx2/R5900.cpp
-index 0835fc2..12b4584 100644
+index 0835fc2..cd42c85 100644
 --- a/pcsx2/R5900.cpp
 +++ b/pcsx2/R5900.cpp
 @@ -369,9 +369,17 @@ __fi void _cpuEventTest_Shared()
@@ -17119,6 +18724,52 @@ index 0835fc2..12b4584 100644
  
  	// ---- Schedule Next Event Test --------------
  	const float mutiplier = static_cast<float>(PS2CLK) / static_cast<float>(PSXCLK);
+@@ -495,6 +509,33 @@ __fi void cpuTestDMACInts()
+ 	}
+ }
+ 
++// From ARMSX2 8330ebc02 (GPL-3.0-or-later): after a write to COP0 Status (MTC0, EI, ERET) the EE
++// used to ask for an event test 4 cycles on, unconditionally. That test can act only on an INTC or
++// DMAC cause that is pending now and that the new Status lets through, so ask for it only then.
++// The same pending-cause tests as the inline gate in _cpuEventTest_Shared() and the raise paths
++// cpuTestINTCInts()/cpuTestDMACInts() above; with the IOP on this thread the INTC/DMAC registers
++// are current, so there is no cross-thread state to consult (ARMSX2 asks its IopThread). One
++// exception: a pending, unmasked SBUS cause (INTC_STAT bit 1) still gets the test whatever Status
++// says, because intcInterrupt() latches the counter HOLD registers whether or not the interrupt is
++// then taken, and that latch keeps its old timing. Everything else the test would run (IOP slice,
++// counters, DMA events, VU sync) is scheduled by its own cpuSetNextEvent() and loses nothing.
++// Off unless EmuCore.Cpu.MeasuredEECycles is set: the old unconditional +4 stands otherwise.
++__fi void cpuTestIntsAfterStatusChange()
++{
++	if (!EmuConfig.Cpu.MeasuredEECycles)
++	{
++		cpuSetNextEventDelta(4);
++		return;
++	}
++
++	const u32 intc_pending = psHu32(INTC_STAT) & psHu32(INTC_MASK);
++	const bool dmac_pending = ((psHu16(DMAC_STAT + 2) & psHu16(DMAC_STAT)) | (psHu16(DMAC_STAT) & 0x8000)) != 0;
++
++	if ((intc_pending && (cpuIntsEnabled(0x400) || (intc_pending & 0x2))) ||
++		(dmac_pending && cpuIntsEnabled(0x800)))
++		cpuSetNextEventDelta(4);
++}
++
+ __fi void cpuTestTIMRInts()
+ {
+ 	if ((cpuRegs.CP0.n.Status.val & 0x10007) == 0x10001)
+diff --git a/pcsx2/R5900.h b/pcsx2/R5900.h
+index f0e40f7..c4b3aa1 100644
+--- a/pcsx2/R5900.h
++++ b/pcsx2/R5900.h
+@@ -416,6 +416,7 @@ extern void _cpuEventTest_Shared();		// for internal use by the Dynarecs and Int
+ extern void cpuTestINTCInts();
+ extern void cpuTestDMACInts();
+ extern void cpuTestTIMRInts();
++extern void cpuTestIntsAfterStatusChange(); // From ARMSX2 8330ebc02 (GPL-3.0-or-later)
+ 
+ // breakpoint code shared between interpreter and recompiler
+ int isMemcheckNeeded(u32 pc);
 diff --git a/pcsx2/R5900OpcodeImpl.cpp b/pcsx2/R5900OpcodeImpl.cpp
 index 8141d7b..6dd30a1 100644
 --- a/pcsx2/R5900OpcodeImpl.cpp
@@ -20652,10 +22303,10 @@ index 51af0b4..9843612 100644
  			mmap_ClearCpuBlock(offset);
 diff --git a/pcsx2/x86/SoftFloatEmitter.h b/pcsx2/x86/SoftFloatEmitter.h
 new file mode 100644
-index 0000000..d53a1f4
+index 0000000..a53473c
 --- /dev/null
 +++ b/pcsx2/x86/SoftFloatEmitter.h
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,314 @@
 +// SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 +// SPDX-License-Identifier: GPL-3.0+
 +
@@ -20824,9 +22475,154 @@ index 0000000..d53a1f4
 +		sqrt_quotient_selected_nonnegative.SetTarget();
 +		sqrt_quotient_selected.SetTarget();
 +	}
++
++	// PS5: the EE SQRT.S kernel, factored out of iFPU.cpp's GenerateSoftFloatKernels so that
++	// ps5/tests/softfloat/softfloat_kernel_test.cpp can emit and run it on the PC against PS2Float.
++	// The emitted code is Reliquary's, unchanged; only the mask and MXCSR operands are parameters.
++	// Its integer-square-root shortcut mirrors PS2Float::Sqrt's (PS2Float.cpp SqrtSignificand): the
++	// chop-mode SQRTSS root is floor(sqrt(X)), and X <= R^2 + 2R - 2^23 is 2R + 1 - (X - R^2) > 2^23.
++	// abs_mask: 16 aligned bytes {0x7fffffff, ~0, ~0, ~0}. chop_mxcsr: an MXCSR value with chop
++	// rounding, loaded around the SQRTSS, or nullptr when the caller's MXCSR already chops;
++	// restore_mxcsr: the MXCSR to load back after it (unused when chop_mxcsr is nullptr).
++	inline const void* EmitEESqrtKernel(const u32* abs_mask, const u32* chop_mxcsr, const u32* restore_mxcsr)
++	{
++		// Internal ABI: eax = raw radicand. Returns eax = raw square root and
++		// edx = exception flags using the same O/U/D/I bit layout as DIV. The
++		// normal path returns the chop-mode host floor only when an exact
++		// residual cap proves that it equals the existing SRT result.
++		constexpr sptr sqrt_raw = 0;
++		constexpr int sqrt_result_flags = sqrt_raw + 4;
++		constexpr int sqrt_saved_rbp = sqrt_result_flags + 8;
++		constexpr int sqrt_saved_rsi = sqrt_saved_rbp + 8;
++		constexpr int sqrt_saved_rdi = sqrt_saved_rsi + 8;
++		constexpr int sqrt_saved_xmm0 = sqrt_saved_rdi + 8;
++		constexpr int sqrt_stack_size = sqrt_saved_xmm0 + 16;
++		constexpr int sqrt_invalid = 8;
++
++		const void* const entry = xGetAlignedCallTarget();
++		xSUB(rsp, sqrt_stack_size);
++		xMOV(ptr32[rsp + sqrt_raw], eax);
++		xMOV(ptr32[rsp + sqrt_result_flags], 0);
++		xMOV(ptr64[rsp + sqrt_saved_rbp], rbp);
++		xMOV(ptr64[rsp + sqrt_saved_rsi], rsi);
++		xMOV(ptr64[rsp + sqrt_saved_rdi], rdi);
++		xTEST(eax, 0x80000000);
++		xForwardJZ8 sqrt_input_nonnegative;
++		xMOV(ptr32[rsp + sqrt_result_flags], sqrt_invalid);
++		sqrt_input_nonnegative.SetTarget();
++		xTEST(eax, 0x7f800000);
++		xForwardJNZ32 sqrt_input_normal;
++		xXOR(eax, eax);
++		xForwardJump32 sqrt_result_ready_from_zero;
++
++		sqrt_input_normal.SetTarget();
++		xMOV(edx, ptr32[rsp + sqrt_raw]);
++		xAND(edx, 0x7f800000);
++		xCMP(edx, 0x7f800000);
++		xForwardJZ32 sqrt_cap_extended_input;
++
++		// Preserve xmm0 because it may hold a live EE mapping at the call site.
++		xMOVUPS(ptr[rsp + sqrt_saved_xmm0], xmm0);
++		xMOVDZX(xmm0, ptr32[rsp + sqrt_raw]);
++		xMOV64(r10, reinterpret_cast<uptr>(abs_mask));
++		xPAND(xmm0, ptr128[r10]);
++		if (chop_mxcsr)
++			xLDMXCSR(ptr32[chop_mxcsr]);
++		xSQRT.SS(xmm0, xmm0);
++		if (chop_mxcsr)
++			xLDMXCSR(ptr32[restore_mxcsr]);
++		xMOVD(r9d, xmm0);
++		xMOVUPS(xmm0, ptr[rsp + sqrt_saved_xmm0]);
++
++		xMOV(eax, r9d);
++		xAND(eax, 0x7fffff);
++		xOR(eax, 0x800000);
++		xMOV(r8d, eax);
++		xUMUL(r8);
++		// (R + 1)^2 - X > 2^23 iff X <= R^2 + 2R - 2^23.
++		xLEA(rax, ptr[r8 * 2 + rax - (1 << 23)]);
++		xMOV(r10d, ptr32[rsp + sqrt_raw]);
++		xAND(r10d, 0x7fffff);
++		xOR(r10d, 0x800000);
++		xSHL(r10, 23);
++		xTEST(ptr32[rsp + sqrt_raw], 0x800000);
++		xForwardJNZ8 sqrt_cap_radicand_ready;
++		xADD(r10, r10);
++		sqrt_cap_radicand_ready.SetTarget();
++		xCMP(r10, rax);
++		xForwardJA32 sqrt_cap_unsafe;
++		xMOV(eax, r9d);
++		xForwardJump32 sqrt_cap_result_ready;
++
++		sqrt_cap_extended_input.SetTarget();
++		sqrt_cap_unsafe.SetTarget();
++		xMOV(eax, ptr32[rsp + sqrt_raw]);
++		xAND(eax, 0x7fffff);
++		xOR(eax, 0x800000);
++		xSHL(eax, 1);
++		xTEST(ptr32[rsp + sqrt_raw], 0x800000);
++		xForwardJNZ8 sqrt_mantissa_ready;
++		xSHL(eax, 1);
++		sqrt_mantissa_ready.SetTarget();
++		xMOV(r9d, eax);
++		xXOR(r10d, r10d);
++		xXOR(ebp, ebp);
++		xMOV(r8d, 1);
++
++		xXOR(esi, esi);
++		u8* const sqrt_quotient_loop = xGetPtr();
++		xMOV(ecx, 24);
++		xSUB(ecx, esi);
++		xMOV(eax, r8d);
++		xSHL(eax, cl);
++		xADD(eax, ebp);
++		xMOV(edi, eax);
++		xMOV(ecx, 25);
++		xSUB(ecx, esi);
++		xMOV(eax, r8d);
++		xSHL(eax, cl);
++		xADD(ebp, eax);
++		X86SoftFloatEmitter::EmitSqrtCarrySaveStep();
++		xINC(esi);
++		xCMP(esi, 23);
++		xJcc32(Jcc_Less,
++			static_cast<s32>(reinterpret_cast<sptr>(sqrt_quotient_loop) -
++							 (reinterpret_cast<sptr>(xGetPtr()) + 6)));
++
++		xMOV(eax, r8d);
++		xSHL(eax, 1);
++		xADD(eax, ebp);
++		xMOV(edi, eax);
++		xMOV(eax, r8d);
++		xSHL(eax, 2);
++		xADD(ebp, eax);
++		X86SoftFloatEmitter::EmitSqrtCarrySaveStep();
++		xMOV(eax, r8d);
++		xSHL(eax, 1);
++		xADD(eax, ebp);
++		xSHR(eax, 2);
++		xAND(eax, 0x7fffff);
++		xMOV(edx, ptr32[rsp + sqrt_raw]);
++		xSHR(edx, 23);
++		xAND(edx, 0xff);
++		xADD(edx, 127);
++		xSHR(edx, 1);
++		xSHL(edx, 23);
++		xOR(eax, edx);
++
++		sqrt_cap_result_ready.SetTarget();
++		sqrt_result_ready_from_zero.SetTarget();
++		xMOV(edx, ptr32[rsp + sqrt_result_flags]);
++		xMOV(rbp, ptr64[rsp + sqrt_saved_rbp]);
++		xMOV(rsi, ptr64[rsp + sqrt_saved_rsi]);
++		xMOV(rdi, ptr64[rsp + sqrt_saved_rdi]);
++		xADD(rsp, sqrt_stack_size);
++		xRET();
++		return entry;
++	}
 +} // namespace X86SoftFloatEmitter
 diff --git a/pcsx2/x86/iFPU.cpp b/pcsx2/x86/iFPU.cpp
-index 02a2c07..7026aab 100644
+index 02a2c07..8bc9479 100644
 --- a/pcsx2/x86/iFPU.cpp
 +++ b/pcsx2/x86/iFPU.cpp
 @@ -4,6 +4,8 @@
@@ -20838,7 +22634,7 @@ index 02a2c07..7026aab 100644
  
  using namespace x86Emitter;
  
-@@ -83,6 +85,989 @@ alignas(16) static const u32 s_pos[4] = {0x7fffffff, 0xffffffff, 0xffffffff, 0xf
+@@ -83,6 +85,858 @@ alignas(16) static const u32 s_pos[4] = {0x7fffffff, 0xffffffff, 0xffffffff, 0xf
  		iFlushCall(FLUSH_INTERPRETER); \
  		xFastCall((void*)(uptr)R5900::Interpreter::OpcodeImpl::COP1::f); \
  	}
@@ -21579,149 +23375,18 @@ index 02a2c07..7026aab 100644
 +		s_fpuSoftDivExact = generate_div_kernel(false);
 +		s_fpuSoftDivCapExact = generate_div_kernel(true);
 +
-+		auto generate_sqrt_kernel = [&]() -> const void* {
-+			// Internal ABI: eax = raw radicand. Returns eax = raw square root and
-+			// edx = exception flags using the same O/U/D/I bit layout as DIV. The
-+			// normal path returns the chop-mode host floor only when an exact
-+			// residual cap proves that it equals the existing SRT result.
-+			constexpr sptr sqrt_raw = 0;
-+			constexpr int sqrt_result_flags = sqrt_raw + 4;
-+			constexpr int sqrt_saved_rbp = sqrt_result_flags + 8;
-+			constexpr int sqrt_saved_rsi = sqrt_saved_rbp + 8;
-+			constexpr int sqrt_saved_rdi = sqrt_saved_rsi + 8;
-+			constexpr int sqrt_saved_xmm0 = sqrt_saved_rdi + 8;
-+			constexpr int sqrt_stack_size = sqrt_saved_xmm0 + 16;
-+			constexpr int sqrt_invalid = 8;
-+
-+			const void* const entry = xGetAlignedCallTarget();
-+			xSUB(rsp, sqrt_stack_size);
-+			xMOV(ptr32[rsp + sqrt_raw], eax);
-+			xMOV(ptr32[rsp + sqrt_result_flags], 0);
-+			xMOV(ptr64[rsp + sqrt_saved_rbp], rbp);
-+			xMOV(ptr64[rsp + sqrt_saved_rsi], rsi);
-+			xMOV(ptr64[rsp + sqrt_saved_rdi], rdi);
-+			xTEST(eax, 0x80000000);
-+			xForwardJZ8 sqrt_input_nonnegative;
-+			xMOV(ptr32[rsp + sqrt_result_flags], sqrt_invalid);
-+			sqrt_input_nonnegative.SetTarget();
-+			xTEST(eax, 0x7f800000);
-+			xForwardJNZ32 sqrt_input_normal;
-+			xXOR(eax, eax);
-+			xForwardJump32 sqrt_result_ready_from_zero;
-+
-+			sqrt_input_normal.SetTarget();
-+			xMOV(edx, ptr32[rsp + sqrt_raw]);
-+			xAND(edx, 0x7f800000);
-+			xCMP(edx, 0x7f800000);
-+			xForwardJZ32 sqrt_cap_extended_input;
-+
-+			// Preserve xmm0 because it may hold a live EE mapping at the call site.
-+			xMOVUPS(ptr[rsp + sqrt_saved_xmm0], xmm0);
-+			xMOVDZX(xmm0, ptr32[rsp + sqrt_raw]);
-+			xMOV64(r10, reinterpret_cast<uptr>(&s_pos[0]));
-+			xPAND(xmm0, ptr128[r10]);
++		{
++			// PS5: the kernel itself is X86SoftFloatEmitter::EmitEESqrtKernel (host-tested).
 +			const bool switch_mxcsr =
 +				EmuConfig.Cpu.FPUFPCR.GetRoundMode() != FPRoundMode::ChopZero;
 +			if (switch_mxcsr)
 +			{
 +				s_fpuSoftSqrtChopMode = EmuConfig.Cpu.FPUFPCR;
 +				s_fpuSoftSqrtChopMode.SetRoundMode(FPRoundMode::ChopZero);
-+				xLDMXCSR(ptr32[&s_fpuSoftSqrtChopMode.bitmask]);
 +			}
-+			xSQRT.SS(xmm0, xmm0);
-+			if (switch_mxcsr)
-+				xLDMXCSR(ptr32[&EmuConfig.Cpu.FPUFPCR.bitmask]);
-+			xMOVD(r9d, xmm0);
-+			xMOVUPS(xmm0, ptr[rsp + sqrt_saved_xmm0]);
-+
-+			xMOV(eax, r9d);
-+			xAND(eax, 0x7fffff);
-+			xOR(eax, 0x800000);
-+			xMOV(r8d, eax);
-+			xUMUL(r8);
-+			// (R + 1)^2 - X > 2^23 iff X <= R^2 + 2R - 2^23.
-+			xLEA(rax, ptr[r8 * 2 + rax - (1 << 23)]);
-+			xMOV(r10d, ptr32[rsp + sqrt_raw]);
-+			xAND(r10d, 0x7fffff);
-+			xOR(r10d, 0x800000);
-+			xSHL(r10, 23);
-+			xTEST(ptr32[rsp + sqrt_raw], 0x800000);
-+			xForwardJNZ8 sqrt_cap_radicand_ready;
-+			xADD(r10, r10);
-+			sqrt_cap_radicand_ready.SetTarget();
-+			xCMP(r10, rax);
-+			xForwardJA32 sqrt_cap_unsafe;
-+			xMOV(eax, r9d);
-+			xForwardJump32 sqrt_cap_result_ready;
-+
-+			sqrt_cap_extended_input.SetTarget();
-+			sqrt_cap_unsafe.SetTarget();
-+			xMOV(eax, ptr32[rsp + sqrt_raw]);
-+			xAND(eax, 0x7fffff);
-+			xOR(eax, 0x800000);
-+			xSHL(eax, 1);
-+			xTEST(ptr32[rsp + sqrt_raw], 0x800000);
-+			xForwardJNZ8 sqrt_mantissa_ready;
-+			xSHL(eax, 1);
-+			sqrt_mantissa_ready.SetTarget();
-+			xMOV(r9d, eax);
-+			xXOR(r10d, r10d);
-+			xXOR(ebp, ebp);
-+			xMOV(r8d, 1);
-+
-+			xXOR(esi, esi);
-+			u8* const sqrt_quotient_loop = xGetPtr();
-+			xMOV(ecx, 24);
-+			xSUB(ecx, esi);
-+			xMOV(eax, r8d);
-+			xSHL(eax, cl);
-+			xADD(eax, ebp);
-+			xMOV(edi, eax);
-+			xMOV(ecx, 25);
-+			xSUB(ecx, esi);
-+			xMOV(eax, r8d);
-+			xSHL(eax, cl);
-+			xADD(ebp, eax);
-+			X86SoftFloatEmitter::EmitSqrtCarrySaveStep();
-+			xINC(esi);
-+			xCMP(esi, 23);
-+			xJcc32(Jcc_Less,
-+				static_cast<s32>(reinterpret_cast<sptr>(sqrt_quotient_loop) -
-+								 (reinterpret_cast<sptr>(xGetPtr()) + 6)));
-+
-+			xMOV(eax, r8d);
-+			xSHL(eax, 1);
-+			xADD(eax, ebp);
-+			xMOV(edi, eax);
-+			xMOV(eax, r8d);
-+			xSHL(eax, 2);
-+			xADD(ebp, eax);
-+			X86SoftFloatEmitter::EmitSqrtCarrySaveStep();
-+			xMOV(eax, r8d);
-+			xSHL(eax, 1);
-+			xADD(eax, ebp);
-+			xSHR(eax, 2);
-+			xAND(eax, 0x7fffff);
-+			xMOV(edx, ptr32[rsp + sqrt_raw]);
-+			xSHR(edx, 23);
-+			xAND(edx, 0xff);
-+			xADD(edx, 127);
-+			xSHR(edx, 1);
-+			xSHL(edx, 23);
-+			xOR(eax, edx);
-+
-+			sqrt_cap_result_ready.SetTarget();
-+			sqrt_result_ready_from_zero.SetTarget();
-+			xMOV(edx, ptr32[rsp + sqrt_result_flags]);
-+			xMOV(rbp, ptr64[rsp + sqrt_saved_rbp]);
-+			xMOV(rsi, ptr64[rsp + sqrt_saved_rsi]);
-+			xMOV(rdi, ptr64[rsp + sqrt_saved_rdi]);
-+			xADD(rsp, sqrt_stack_size);
-+			xRET();
-+			return entry;
-+		};
-+
-+		s_fpuSoftSqrtExact = generate_sqrt_kernel();
++			s_fpuSoftSqrtExact = X86SoftFloatEmitter::EmitEESqrtKernel(&s_pos[0],
++				switch_mxcsr ? &s_fpuSoftSqrtChopMode.bitmask : nullptr, &EmuConfig.Cpu.FPUFPCR.bitmask);
++		}
 +
 +		{
 +			// Internal ABI: eax = numerator Fs, edx = radicand Ft. Returns eax = raw
@@ -21828,7 +23493,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  //------------------------------------------------------------------
-@@ -642,6 +1627,208 @@ int recCommutativeOp(int info, int regd, int op)
+@@ -642,6 +1496,208 @@ int recCommutativeOp(int info, int regd, int op)
  //------------------------------------------------------------------
  // ADD XMM
  //------------------------------------------------------------------
@@ -22037,7 +23702,7 @@ index 02a2c07..7026aab 100644
  void recADD_S_xmm(int info)
  {
  	EE::Profiler.EmitOp(eeOpcode::ADD_F);
-@@ -650,7 +1837,8 @@ void recADD_S_xmm(int info)
+@@ -650,7 +1706,8 @@ void recADD_S_xmm(int info)
  	//REC_FPUOP(ADD_S);
  }
  
@@ -22047,7 +23712,7 @@ index 02a2c07..7026aab 100644
  
  void recADDA_S_xmm(int info)
  {
-@@ -659,7 +1847,8 @@ void recADDA_S_xmm(int info)
+@@ -659,7 +1716,8 @@ void recADDA_S_xmm(int info)
  	ClampValues(recCommutativeOp(info, EEREC_ACC, 0));
  }
  
@@ -22057,7 +23722,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  //------------------------------------------------------------------
-@@ -717,6 +1906,43 @@ void recBC1TL()
+@@ -717,6 +1775,43 @@ void recBC1TL()
  //------------------------------------------------------------------
  // C.x.S XMM
  //------------------------------------------------------------------
@@ -22101,7 +23766,7 @@ index 02a2c07..7026aab 100644
  void recC_EQ_xmm(int info)
  {
  	EE::Profiler.EmitOp(eeOpcode::CEQ_F);
-@@ -794,7 +2020,8 @@ void recC_EQ_xmm(int info)
+@@ -794,7 +1889,8 @@ void recC_EQ_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -22111,7 +23776,7 @@ index 02a2c07..7026aab 100644
  //REC_FPUFUNC(C_EQ);
  
  void recC_F()
-@@ -881,7 +2108,8 @@ void recC_LE_xmm(int info)
+@@ -881,7 +1977,8 @@ void recC_LE_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -22121,7 +23786,7 @@ index 02a2c07..7026aab 100644
  //REC_FPUFUNC(C_LE);
  
  void recC_LT_xmm(int info)
-@@ -961,7 +2189,8 @@ void recC_LT_xmm(int info)
+@@ -961,7 +2058,8 @@ void recC_LT_xmm(int info)
  	x86SetJ8(j8Ptr[1]);
  }
  
@@ -22131,7 +23796,7 @@ index 02a2c07..7026aab 100644
  //REC_FPUFUNC(C_LT);
  //------------------------------------------------------------------
  
-@@ -1165,7 +2394,7 @@ void recDIV_S_xmm(int info)
+@@ -1165,7 +2263,7 @@ void recDIV_S_xmm(int info)
  	_freeXMMreg(t0reg);
  }
  
@@ -22140,7 +23805,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1370,7 +2599,9 @@ void recMADD_S_xmm(int info)
+@@ -1370,7 +2468,9 @@ void recMADD_S_xmm(int info)
  	recMADDtemp(info, EEREC_D);
  }
  
@@ -22151,7 +23816,7 @@ index 02a2c07..7026aab 100644
  
  void recMADDA_S_xmm(int info)
  {
-@@ -1379,7 +2610,9 @@ void recMADDA_S_xmm(int info)
+@@ -1379,7 +2479,9 @@ void recMADDA_S_xmm(int info)
  	recMADDtemp(info, EEREC_ACC);
  }
  
@@ -22162,7 +23827,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1590,7 +2823,9 @@ void recMSUB_S_xmm(int info)
+@@ -1590,7 +2692,9 @@ void recMSUB_S_xmm(int info)
  	recMSUBtemp(info, EEREC_D);
  }
  
@@ -22173,7 +23838,7 @@ index 02a2c07..7026aab 100644
  
  void recMSUBA_S_xmm(int info)
  {
-@@ -1599,7 +2834,9 @@ void recMSUBA_S_xmm(int info)
+@@ -1599,7 +2703,9 @@ void recMSUBA_S_xmm(int info)
  	recMSUBtemp(info, EEREC_ACC);
  }
  
@@ -22184,7 +23849,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1613,7 +2850,8 @@ void recMUL_S_xmm(int info)
+@@ -1613,7 +2719,8 @@ void recMUL_S_xmm(int info)
  	ClampValues(recCommutativeOp(info, EEREC_D, 1));
  }
  
@@ -22194,7 +23859,7 @@ index 02a2c07..7026aab 100644
  
  void recMULA_S_xmm(int info)
  {
-@@ -1622,7 +2860,8 @@ void recMULA_S_xmm(int info)
+@@ -1622,7 +2729,8 @@ void recMULA_S_xmm(int info)
  	ClampValues(recCommutativeOp(info, EEREC_ACC, 1));
  }
  
@@ -22204,7 +23869,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1719,7 +2958,8 @@ void recSUB_S_xmm(int info)
+@@ -1719,7 +2827,8 @@ void recSUB_S_xmm(int info)
  	recSUBop(info, EEREC_D);
  }
  
@@ -22214,7 +23879,7 @@ index 02a2c07..7026aab 100644
  
  
  void recSUBA_S_xmm(int info)
-@@ -1728,7 +2968,8 @@ void recSUBA_S_xmm(int info)
+@@ -1728,7 +2837,8 @@ void recSUBA_S_xmm(int info)
  	recSUBop(info, EEREC_ACC);
  }
  
@@ -22224,7 +23889,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1781,7 +3022,7 @@ void recSQRT_S_xmm(int info)
+@@ -1781,7 +2891,7 @@ void recSQRT_S_xmm(int info)
  		xLDMXCSR(ptr32[&EmuConfig.Cpu.FPUFPCR.bitmask]);
  }
  
@@ -22233,7 +23898,7 @@ index 02a2c07..7026aab 100644
  //------------------------------------------------------------------
  
  
-@@ -1907,7 +3148,7 @@ void recRSQRT_S_xmm(int info)
+@@ -1907,7 +3017,7 @@ void recRSQRT_S_xmm(int info)
  	_freeXMMreg(t0reg);
  }
  

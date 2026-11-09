@@ -11,8 +11,13 @@
 - Added (Expert settings, all off): measured EE cycles, aged-target write-back, auto-flush all,
   shadow-volume stencil counter, GPU palette from target. They change behaviour and are untested on
   the console: turn one on to try it.
-- Not done: parking of aged targets, scale-aware CLUT sampling, auto-flush runs, the +4 event test
-  after MTC0/EI/ERET, the integer square-root shortcut in the soft recompilers, constant-Z fills.
+- Added (Expert settings, off; second round): parking of aged targets and constant-Z fills (under
+  aged-target write-back), scale-aware CLUT sampling (under GPU palette from target), auto-flush
+  runs (under auto-flush all), and the +4 event test after MTC0/EI/ERET only when it could act
+  (under measured EE cycles). Not ported: target widening for a constant Z, LRPS2's native taps for
+  an indexed read of a scaled target.
+- Added: a host test of the EE soft-float square-root kernel the recompiler emits, against the
+  interpreter (604 million inputs). The kernel already had the integer square-root shortcut.
 - Note: the RSQRT.S negative-zero change that was proposed was not made: a console capture showed
   the existing behaviour was right.
 - Changed: the Mesa/RADV patch follows Mesa main at 586fd4de6e1 (2026-11-09).
