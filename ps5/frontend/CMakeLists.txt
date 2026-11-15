@@ -32,6 +32,7 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_extras.cpp
 	ps5_host.cpp
 	ps5_input_source.cpp
+	ps5_move_source.cpp
 	ps5_jobs.cpp
 	ps5_libc.c
 	ps5_clock.c
@@ -39,6 +40,10 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_logs.cpp
 	ps5_net.cpp
 	ps5_online.cpp
+	ps5_fixes_fetch.cpp
+	ps5_notify.cpp
+	ps5_recommend.cpp
+	ps5_shots.cpp
 	ps5_pacing.cpp
 	ps5_boot_step.cpp
 	ps5_pgs.cpp
@@ -57,6 +62,7 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_keyboard.cpp
 	ps5_usbpad.cpp
 	ps5_usbpad_console.cpp
+	ps5_ugen.cpp
 	ps5_osd.cpp
 	third_party/qrcodegen/qrcodegen.c
 	ps5_platform.cpp
@@ -66,6 +72,8 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_ui_audio.cpp
 	ps5_ui_audio_decoders.cpp
 	ps5_ui_audio_dsp.cpp
+	# The startup video's player (libvpx's VP9 decoder: tools/build-deps.sh, linked by tools/link-title.sh)
+	ps5_intro.cpp
 	# The interface: the screens (no PCSX2 in them; ps5/tests/bigpicture builds them for the PC)
 	# and their Backend over PCSX2, which is also PCSX2's FullscreenUI on the console.
 	bigpicture/bp_draw.cpp

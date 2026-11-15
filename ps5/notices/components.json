@@ -139,8 +139,8 @@
 			"id": "radv",
 			"name": "RADV, ACO, NIR and Mesa's runtime, with the PS5 winsys and VideoOut WSI (PS5_Mesa)",
 			"licence": "MIT and other permissive licences (Mesa's notices)",
-			"copyright": "the Mesa authors; Mihawk for the PS5 parts",
-			"modifications": "ps5/patches/mesa/0001-diagnostic-breadcrumbs.patch: log lines at device start-up, into the title's boot log; 0002-threaded-recording-queues-push-descriptors.patch: threaded recording (off unless a test run asks for it) queues vkCmdPushDescriptorSet instead of waiting for its thread, and tells the title when that thread starts; 0003-videoout-120hz-settle.patch: a television switching to 119.88 Hz is measured again for up to 1.5 s, its shortest vblank interval taken, before 59.94 Hz is restored; 0004-ps5-timed-waits-on-the-condvar-clock.patch: the VideoOut WSI's and the PS5 winsys's timed waits are given deadlines on the clock their condition variable keeps (found once), where a monotonic deadline came back at once and the wait spun",
+			"copyright": "the Mesa authors; Mihawk for the PS5 parts; Press5elect for Crux2's patches and OGBox's HDR10 patch (ps5/patches/mesa-27/0020); ZiZc3 (VLC for PS5, GPL-3.0) for 0020's way of switching the framebuffers to HDR10",
+			"modifications": "ps5/patches/mesa-27/0020-wsi-videoout-HDR10-framebuffers-on-request.patch (OGBox's, after VLC for PS5's patches/mesa/0001-videoout-hdr10.patch): the framebuffers retyped as HDR10 on the title's request, and the output's dynamic range read; ps5/patches/mesa/0001-diagnostic-breadcrumbs.patch: log lines at device start-up, into the title's boot log; 0002-threaded-recording-queues-push-descriptors.patch: threaded recording (off unless a test run asks for it) queues vkCmdPushDescriptorSet instead of waiting for its thread, and tells the title when that thread starts; 0003-videoout-120hz-settle.patch: a television switching to 119.88 Hz is measured again for up to 1.5 s, its shortest vblank interval taken, before 59.94 Hz is restored; 0004-ps5-timed-waits-on-the-condvar-clock.patch: the VideoOut WSI's and the PS5 winsys's timed waits are given deadlines on the clock their condition variable keeps (found once), where a monotonic deadline came back at once and the wait spun",
 			"texts": {
 				"Mesa-license.rst": "../PS5_Mesa/docs/license.rst"
 			},
@@ -947,40 +947,6 @@
 			}
 		},
 		{
-			"id": "smaa",
-			"name": "SMAA, Enhanced Subpixel Morphological Anti-Aliasing (resources/shaders/slang/anti-aliasing/shaders/smaa/)",
-			"licence": "MIT (SMAA.hlsl and the lookup pictures); Unlicense (the three pass files)",
-			"copyright": "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez",
-			"modifications": "none: copied unchanged from libretro's slang-shaders; the preset that runs them (crux2/smaa.slangp) is Crux2's own",
-			"texts": {
-				"SMAA-LICENSE.txt": "ps5/licenses/SMAA-LICENSE.txt"
-			},
-			"artifacts": [
-				"resources/shaders/slang/anti-aliasing/"
-			],
-			"source": {
-				"url": "https://github.com/libretro/slang-shaders (anti-aliasing/shaders/smaa); original: https://github.com/iryoku/smaa",
-				"revision": "3685eda59ffd2ebe1b12cc4640581dc23552ce88"
-			}
-		},
-		{
-			"id": "noto-sans-cjk-subset",
-			"name": "Noto Sans CJK JP Regular, a subset (the letters of Japanese, Chinese and Korean game names)",
-			"licence": "SIL OFL 1.1",
-			"copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/)",
-			"modifications": "a subset: the letters Shift-JIS, GB 2312, Big5 and KS X 1001 can write, kana and CJK punctuation, made by ps5/tools/make-cjk-font.py from the fonts-noto-cjk package's NotoSansCJK-Regular.ttc (face 0); no outline changed, the Latin letters and the rest left out",
-			"texts": {
-				"OFL-1.1.txt": "ps5/licenses/OFL-1.1.txt"
-			},
-			"artifacts": [
-				"resources/fonts/NotoSansCJK-Subset.otf"
-			],
-			"source": {
-				"url": "https://github.com/notofonts/noto-cjk",
-				"revision": "Version 2.004"
-			}
-		},
-		{
 			"id": "saira-extrabold",
 			"name": "Saira ExtraBold (the letters of the title's name)",
 			"licence": "SIL OFL 1.1",
@@ -1010,6 +976,39 @@
 			"source": {
 				"url": "the source archive that comes with this package (ps5/package/resources/sounds)",
 				"revision": "@identity"
+			}
+		},
+		{
+			"id": "startup-video",
+			"name": "The startup video and its sound (resources/intro): the title's mark put together from its bars, then its name, letter by letter (the name set in Saira ExtraBold, as the title's art is)",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Press5elect",
+			"modifications": "-",
+			"texts": {},
+			"artifacts": [
+				"resources/intro/intro.ivf",
+				"resources/intro/intro.ogg"
+			],
+			"source": {
+				"url": "the source archive that comes with this package (ps5/art/intro: the scene, the renderer, the sound's synthesis, and how they are made)",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "libvpx",
+			"name": "libvpx (the startup video's VP9 decoder)",
+			"licence": "BSD-3-Clause",
+			"copyright": "The WebM Project authors (Google Inc.)",
+			"modifications": "none",
+			"texts": {
+				"libvpx-copyright.txt": "/usr/share/doc/libvpx9/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console: libvpx 1.14.1)",
+				"revision": "v0.40.2"
 			}
 		},
 		{
@@ -1145,6 +1144,67 @@
 			"source": {
 				"url": "https://github.com/nayuki/QR-Code-generator",
 				"revision": "3c6d0b3cefb4e049dc337e82237c9644399716a8"
+			}
+		},
+		{
+			"id": "move-management",
+			"name": "Move Management for PS5 (formerly Move Studio): its loopback input protocol (MVB1), the checks of its reference client (integrations/move_management_client.hpp) and of its saved screen geometry (integrations/aim_screen_profile.hpp), for aiming the GunCon 2 with a PlayStation Move (ps5/frontend/ps5_move_logic.h, ps5_move_source.cpp). Move Management itself is a separate payload and is not in the package",
+			"licence": "GPL-3.0 (its reference client and profile reader GPL-3.0-or-later)",
+			"copyright": "REXCRAFT88 and the Move Management contributors (its docs/CREDITS.md: AnyPad PS5 by sinfiltros / elmonomalvad0, S-Mohammad-A, Project Porpoise)",
+			"modifications": "written anew in Crux2's style by Press5elect (Copyright (C) 2026) after the protocol document and the reference client: the same refusals, a 50 ms allowance for the title's clock, the stream's generations, the light gun's mapping",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/REXCRAFT88/Move-Management-PS5",
+				"revision": "4d8851b6809756906a9c029ba11baaecda7ceb49"
+			}
+		},
+		{
+			"id": "porpoise-aim",
+			"name": "Project Porpoise's aim and controller code: src/porpoise_aim.cpp (the motion fusion, the pointer's geometry, the grips and their levelling, the edge easing and the pointer's smoothing) and its use in src/porpoise_pad.cpp (centring, the grip read when centring, the screen measured from two corners), for aiming the GunCon 2 with a DualSense or a PlayStation Move (ps5/frontend/ps5_aim_logic.h, ps5_move_logic.h); the adaptive trigger's weapon effect (porpoise_pad.cpp) and the stick sensitivity curve (porpoise_core.cpp), in ps5/frontend/ps5_input_source_logic.h; FreeBSD's ugen USB ioctls as spelt out in src/porpoise_ugen.hpp and the bounded transfer teardown of src/porpoise_usbhid.cpp (its pull requests 36 and 37), in ps5/frontend/ps5_ugen.h",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise)",
+			"modifications": "porpoise_aim.cpp's functions copied unchanged, made inline in a header (ps5/frontend/ps5_aim_logic.h, PorpoiseAim), with their notice; the rest rewritten for a GunCon 2 and PCSX2's USB pads (a light gun's recentring and screen measurement, R2 as the trigger's click, the curve without its dead zone, ugen behind Crux2's USB pad transport)",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "61f38f6079a3011abba88e8f4f1cb0ddc0ed27a8"
+			}
+		},
+		{
+			"id": "porpoise",
+			"name": "Project Porpoise's network code: sockets made non-blocking with FIONBIO and the console's SO_NBIO, with read and write time limits (its e6e0b64), the TCP check of a server's port before connecting (6ee2ad2), the computers found on the network on SMB's and NFS's ports, a server's shares and exports listed and a share's test with the kind of failure (35c039c, bc835d2, src/porpoise_netfs.cpp), a refused UDP port bound lower (73d76c3), and the name server question, its test and public DNS for a name the console's name server answers 0.0.0.0 (src/porpoise_dns.cpp, 901f30a, 18d12f1, 7026d66); in ps5/frontend/vfs/ps5_socket.h, ps5_share_problem.h, ps5_vfs.cpp, ps5_vfs_smb.cpp and ps5_vfs_nfs.cpp, ps5/frontend/ps5_shares.cpp, ps5/frontend/ps5_net.cpp and PCSX2's DEV9/Sessions/UDP_Session/UDP_Common.cpp",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise)",
+			"modifications": "the DNS question and its answer's reading copied with small changes (a port for the tests); the rest rewritten for Crux2's virtual file layer and the prebuilt libsmb2 (its socket hook in place of a patch to libsmb2's socket.c), PCSX2's UDP sessions and Crux2's settings pages",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "7026d66bc6cb962d829bfa2709eac3b87f9d9ec9"
+			}
+		},
+		{
+			"id": "porpoise-system",
+			"name": "Project Porpoise's system code: the console's rich notifications (src/porpoise_notify.cpp, 1679c95) and their relay payload (tools/notify-relay/notify_relay.c), after PS5SX2's design (ps5/coreorbis/orbis-shims/ProsperoNotify.cpp and notify-relay, by Spyros), in ps5/frontend/ps5_notify.cpp and ps5/elevation/notify-relay/notify_relay.c; the launch arguments (src/porpoise_forward.hpp, 839dfda, fcb4fd0) in ps5/frontend/ps5_launch.h; the recommended settings per game, fetched once a day (src/ui_recommend.hpp, 35e1dab, 1880404) in ps5/frontend/ps5_recommend.cpp; screenshots (src/porpoise_shots.cpp) in ps5/frontend/ps5_shots.cpp; a folder's read error taken as a failure (its pull request 38, b6ea998) in ps5/frontend/ps5_backup.cpp; and the payload loader asked again for a few seconds (8452ecb, 69f569f) in ps5/elevation/elevation.cpp",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise); the notification design Spyros (PS5SX2)",
+			"modifications": "the notification JSON, its queue and the relay payload copied with small changes (Crux2's names, its marker, libSceNotification found while the title runs instead of imported, the relay read from the title folder instead of built in); the launch argument parsing copied with small changes; the rest rewritten for PCSX2 (its achievements, its per-game settings, its screenshot hotkey and snapshot) and Crux2's backups and elevation client",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin",
+				"notify-relay.elf"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "61f38f6079a3011abba88e8f4f1cb0ddc0ed27a8"
 			}
 		},
 		{

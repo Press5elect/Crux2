@@ -4,6 +4,7 @@
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 
 #include "ps5_ps2_ftp.h"
+#include "vfs/ps5_socket.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -37,6 +38,7 @@ int ConnectTo(const struct in_addr& address, unsigned port, int seconds)
 	if (fd < 0)
 		return -1;
 	SetTimeouts(fd, seconds);
+	PS5Socket::NoSigPipe(fd); // (a PS2 that closes the connection: EPIPE, not the end of the title)
 	struct sockaddr_in to;
 	std::memset(&to, 0, sizeof(to));
 	to.sin_family = AF_INET;
@@ -336,6 +338,7 @@ int Client::OpenData(const std::string& command, std::string* why)
 			return -1;
 		}
 		SetTimeouts(data, m_timeout);
+		PS5Socket::NoSigPipe(data);
 		return data;
 	}
 	return -1;

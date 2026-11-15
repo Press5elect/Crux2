@@ -19,7 +19,14 @@ version=${1:?version, e.g. v1.1.0}
 ps5=$(cd "$(dirname "$0")/.." && pwd)
 root=$(dirname "$ps5")
 out=${2:-$root/dist}
+# Crux2 Recomp's runner files and patches: a checkout of Press5elect/PS5_Crux2Recomp beside this one
+# (or the folder CRUX2_RECOMP_DIR names).
 recomp_title=${CRUX2_RECOMP_DIR:-$root/../PS5_Crux2Recomp}
+[[ -d $recomp_title/ps5/runner ]] || {
+	echo "make-recomp-kit: no Crux2 Recomp checkout at $recomp_title:" \
+		"git clone https://github.com/Press5elect/PS5_Crux2Recomp $root/../PS5_Crux2Recomp" >&2
+	exit 1
+}
 sdk="$root/.deps/native/ps5-payload-sdk"
 win=${CRUX2_RECOMP_WINDOWS:-$root/.deps/recomp-windows}
 name="Crux2-recomp-kit-$version"

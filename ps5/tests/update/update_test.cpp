@@ -1387,6 +1387,166 @@ static void TestRealZip(const std::string& work, const std::string& app, const s
 	CHECK(!Exists(app + "/.update"));
 }
 
+// A developer build of a version (not made as a release) comes before that version's release.
+static void TestDeveloperBuild(const std::string& work, const std::string& app)
+{
+	std::fprintf(stderr, "developer builds\n");
+	CHECK(VersionLabel("v1.0.18", true) == "v1.0.18");
+	CHECK(VersionLabel("1.0.18", true) == "v1.0.18");
+	CHECK(VersionLabel("v1.0.18", false) == "v1.0.18 - developer build");
+	CHECK(VersionLabel(" V2.1.0 ", false) == "v2.1.0 - developer build");
+	CHECK(VersionLabel("", false).empty() && VersionLabel("v", true).empty());
+
+	OldFolder(app);
+	const std::string zip12 = MakeZip(work, Package("1.2.0"));
+	const std::string zip11 = MakeZip(work, Package("1.1.0"));
+	s_server.Clear();
+	s_server.Serve(API, ReleasesJson({ServeRelease("1.2.0", zip12), ServeRelease("1.1.0", zip11)}));
+	const auto check = [&](const std::string& running, int release) {
+		Setup setup = MakeSetup(app, running);
+		setup.release = release;
+		Init(setup);
+		Check();
+		return Wait();
+	};
+	// A release of 1.2.0, and the PC test's default (-1: a release): up to date.
+	CHECK(check("v1.2.0", 1).state == State::UpToDate);
+	CHECK(check("v1.2.0", -1).state == State::UpToDate);
+	// A developer build of 1.2.0: 1.2.0's release is offered, and only its notes.
+	{
+		const Status status = check("v1.2.0", 0);
+		CHECK(status.state == State::Available);
+		CHECK(status.version == "1.2.0");
+		CHECK(status.newer.size() == 1 && !status.newer.empty() && status.newer[0].version == "1.2.0");
+	}
+	// A developer build of a later version than any release: up to date.
+	CHECK(check("v1.3.0", 0).state == State::UpToDate);
+	// A developer build of 1.1.0: both.
+	{
+		const Status status = check("1.1.0", 0);
+		CHECK(status.state == State::Available && status.newer.size() == 2);
+	}
+	// A developer build with no version it can read: every release, as for any such build.
+	CHECK(check("", 0).state == State::Available);
+	// It downloads and installs as any other.
+	CHECK(check("v1.2.0", 0).state == State::Available);
+	Download();
+	CHECK(Wait().state == State::Ready);
+	CHECK(Install());
+	CHECK(Get(app + "/eboot.bin").compare(0, 12, "EBOOT 1.2.0\n") == 0);
+}
+
+// The files the old version shipped (its resource manifest) and the new one dropped are removed
+// with the install, and put back when it is undone; nothing else is, and with no manifest nothing.
+static void TestStaleFiles(const std::string& work, const std::string& app)
+{
+	std::fprintf(stderr, "files the new version dropped\n");
+	// The decision alone.
+	{
+		const std::vector<std::string> incoming = {"eboot.bin", "resources/GameIndex.yaml", "resources/fonts/Roboto-Bold.ttf",
+			"resources/case.txt"};
+		CHECK(StaleFiles({}, incoming).empty());
+		const std::vector<std::string> stale = StaleFiles({"resources/GameIndex.yaml", "resources/fonts/Dropped.ttf",
+			"resources/old/gone.png", "resources/old/gone.png", "resources/CASE.txt", "resources/patches.zip",
+			"resources/PATCHES.ZIP", "inis/PCSX2.ini", "memcards/Mcd001.ps2", "covers/x.png", "../outside", "/abs",
+			"resources/../inis/PCSX2.ini", "resources/Dup.png", "resources/dup.png", "eboot.bin", "sce_module/extra.prx"},
+			incoming);
+		const std::vector<std::string> expected = {"resources/Dup.png", "resources/fonts/Dropped.ttf", "resources/old/gone.png",
+			"sce_module/extra.prx"};
+		CHECK(stale == expected);
+		CHECK(StaleFiles({"resources/a.png"}, {}) == std::vector<std::string>{"resources/a.png"});
+	}
+
+	std::vector<Item> items = Package("1.2.0");
+	items.push_back({"PPSA99249/resources/case.txt", "case 1.2.0"});
+	const std::string zip = MakeZip(work, items);
+	const std::vector<std::string> shipped = {"resources/GameIndex.yaml", "resources/fonts/Roboto-Bold.ttf",
+		"resources/fonts/Dropped.ttf", "resources/old-only/deeper/gone.png", "resources/CASE.txt", "resources/patches.zip",
+		"resources/not-there.png", "resources/a-folder", "inis/PCSX2.ini", "memcards/Mcd001.ps2"};
+	const auto old_folder = [&](const std::string& dir) {
+		OldFolder(dir);
+		Put(dir + "/resources/fonts/Dropped.ttf", "a font the new version dropped");
+		Put(dir + "/resources/old-only/deeper/gone.png", "a picture the new version dropped");
+		Put(dir + "/resources/CASE.txt", "case old");
+		Put(dir + "/resources/a-folder/mine.txt", "a folder where the manifest had a file");
+	};
+	const auto ready = [&](const std::vector<std::string>& listed) {
+		s_server.Clear();
+		old_folder(app);
+		s_server.Serve(API, ReleasesJson({ServeRelease("1.2.0", zip)}));
+		Setup setup = MakeSetup(app, "1.0.0");
+		setup.shipped = listed;
+		Init(setup);
+		Check();
+		if (Wait().state != State::Available)
+			return false;
+		Download();
+		return Wait().state == State::Ready;
+	};
+	old_folder(work + "/reference");
+	const auto original = Snapshot(work + "/reference");
+
+	// No manifest: nothing is removed.
+	CHECK(ready({}));
+	CHECK(Install());
+	CHECK(Get(app + "/resources/fonts/Dropped.ttf") == "a font the new version dropped");
+	CHECK(Get(app + "/resources/old-only/deeper/gone.png") == "a picture the new version dropped");
+
+	// With it: the dropped files go, and the folders they leave empty.
+	CHECK(ready(shipped));
+	CHECK(Install());
+	CHECK(GetStatus().state == State::Installed);
+	CHECK(!Exists(app + "/.update"));
+	CHECK(!Exists(app + "/resources/fonts/Dropped.ttf"));
+	CHECK(Get(app + "/resources/fonts/Roboto-Bold.ttf") == "font 1.2.0");
+	CHECK(!Exists(app + "/resources/old-only"));
+	CHECK(Exists(app + "/resources/fonts/"));
+	// The release has it under another case: the same file on exFAT, never removed.
+	CHECK(Get(app + "/resources/CASE.txt") == "case old");
+	CHECK(Get(app + "/resources/case.txt") == "case 1.2.0");
+	// The user's, also where the manifest names them, and a folder where it had a file.
+	CHECK(Get(app + "/resources/patches.zip") == "the user's patches");
+	CHECK(Get(app + "/inis/PCSX2.ini") == "[UI]\nmine=1\n");
+	CHECK(Get(app + "/memcards/Mcd001.ps2") == Filler("card", 4096));
+	CHECK(Get(app + "/covers/SLUS-20312.png") == "cover");
+	CHECK(Get(app + "/resources/a-folder/mine.txt") == "a folder where the manifest had a file");
+	// Not in the manifest: left, as before.
+	CHECK(Get(app + "/sce_module/extra.prx") == "a module the new release does not have");
+	CHECK(Get(app + "/licenses/old-only.txt") == "a notice the new release does not have");
+
+	// Interrupted at each rename, the removals' too, or a removal that fails: all put back.
+	CHECK(ready(shipped));
+	int renames = 0;
+	{
+		const std::string plan = Get(app + "/.update/plan");
+		for (size_t start = 0; start < plan.size();)
+		{
+			const size_t end = plan.find('\n', start);
+			renames += 1 + Exists(app + "/" + plan.substr(start, end - start));
+			start = end + 1;
+		}
+		renames += 2; // the two dropped files
+	}
+	for (int k = renames - 4; k <= renames; k++)
+	{
+		CHECK(ready(shipped));
+		Test::stop_after = k;
+		CHECK(!Install());
+		Test::stop_after = -1;
+		CHECK(Recover(app));
+		CHECK(Unchanged(app, original));
+	}
+	for (int k = renames - 2; k < renames; k++)
+	{
+		CHECK(ready(shipped));
+		Test::fail_at = k;
+		CHECK(!Install());
+		Test::fail_at = -1;
+		CHECK(GetStatus().state == State::Failed && Contains(GetStatus().error, "no longer has"));
+		CHECK(Unchanged(app, original));
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc < 2)
@@ -1406,6 +1566,8 @@ int main(int argc, char** argv)
 	TestInterrupted(work, app);
 	TestCancel(work, app);
 	TestFreeSpace(work, app);
+	TestDeveloperBuild(work, app);
+	TestStaleFiles(work, app);
 	if (argc >= 3)
 		TestRealZip(work, app, argv[2]);
 

@@ -13,8 +13,9 @@
 // it does not start. Whether a homebrew title may open a USB device at all had not been tried on
 // a console when this was written (needs proper testing): every step says in the boot log how it
 // went (usb pads: ...), and when one is refused the transport gives up for the session and only
-// the console's own controllers are read. Off by default ([PS5] USBPads; Settings > Controllers
-// > "USB controllers (experimental)").
+// the console's own controllers are read. When libSceUsbd cannot be used, or cannot open a pad, the
+// pads are read through the console's ugen nodes instead (ps5_ugen.h). Off by default ([PS5]
+// USBPads; Settings > Controllers > "USB controllers (experimental)").
 
 #pragma once
 

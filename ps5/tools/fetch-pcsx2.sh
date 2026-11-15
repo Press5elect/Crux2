@@ -18,10 +18,8 @@ ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
 vendor="$root/vendor/pcsx2"
 patch="$ps5/patches/pcsx2/ps5.patch"
-revision=993f6fc3b18e3feb0151ea1fa16b8a0783fe6fca
-# The release tag at that revision: fetched with it, so PCSX2's build names its version (v2.9.158)
-# rather than a bare hash.
-tag=v2.9.158
+# PCSX2 master of 2026-11-14 (0ab00c4, after the v2.9.179 tag 8d08f53; v2.9.150 before).
+revision=0ab00c49b157be667a8a2f0bf4cda83f75a9198e
 url=https://github.com/PCSX2/pcsx2
 
 if [[ ${1:-} == --export ]]; then
@@ -47,8 +45,6 @@ mkdir -p "$vendor"
 git -C "$vendor" init --quiet
 git -C "$vendor" remote add origin "$url"
 git -C "$vendor" fetch --quiet --depth 1 origin "$revision"
-git -C "$vendor" fetch --quiet --depth 1 origin "refs/tags/$tag:refs/tags/$tag" ||
-    echo "fetch-pcsx2: the tag $tag was not fetched: the build names the revision instead" >&2
 git -C "$vendor" checkout --quiet FETCH_HEAD
 git -C "$vendor" apply --whitespace=nowarn "$patch"
 echo "vendor/pcsx2: $revision with the PS5 changes" >&2

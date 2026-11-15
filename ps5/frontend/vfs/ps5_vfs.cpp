@@ -12,6 +12,7 @@
  */
 #include "ps5_vfs.h"
 #include "ps5_vfs_internal.h"
+#include "ps5_socket.h"
 
 #include <algorithm>
 #include <atomic>
@@ -24,6 +25,7 @@
 #include <mutex>
 #include <strings.h>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -44,18 +46,49 @@ void (*s_log)(const char* line) = nullptr;
 std::atomic<uint64_t> s_bytes_read{0};
 std::atomic<uint64_t> s_backend_reads{0};
 
+/* From OGBox 0.0.6: how long the reads under way have gone without one finishing (a share that
+ * stopped answering), for ps5vfs_stalled_seconds: the reads under way, and when one last finished. */
+std::atomic<int> s_reads_under_way{0};
+std::atomic<int64_t> s_read_progress_ms{0};
+
+int64_t NowMs()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+struct ReadUnderWay
+{
+  ReadUnderWay()
+  {
+    if (s_reads_under_way.fetch_add(1) == 0)
+      s_read_progress_ms.store(NowMs());
+  }
+  ~ReadUnderWay()
+  {
+    s_read_progress_ms.store(NowMs());
+    s_reads_under_way.fetch_sub(1);
+  }
+};
+
 struct MountPoint
 {
   std::string point; /* "/smb/nas": absolute, normalised, no trailing slash */
   std::unique_ptr<Backend> backend;
 };
 
-/* Mounts are added at start-up (and, v1.0.19, from the settings), and a removed one's backend is
- * kept (s_retired, never freed), so a Backend pointer taken under the lock stays valid for the
+/* Mounts are added at start-up (and from the settings), and a removed one's backend is kept
+ * (s_retired, never freed), so a Backend pointer taken under the lock stays valid for the
  * process's lifetime. */
 std::mutex s_mounts_mutex;
 std::vector<MountPoint> s_mounts;
 std::vector<std::unique_ptr<Backend>> s_retired;
+/* network.cfg as ps5vfs_load_network_config read it: its path, and each path line's mount. */
+std::string s_config_path;
+std::vector<std::string> s_config_mounts;
+/* A share's test (ps5vfs_test_share): what the layer writes down on this thread meanwhile. */
+thread_local std::string* s_capture = nullptr;
 std::atomic<unsigned> s_mount_count{0};
 std::atomic<const char*> s_shadow_path{PS5VFS_SHADOW_PATH};
 
@@ -231,6 +264,7 @@ Block* GetBlock(VFile* file, int64_t offset)
   uint32_t have = 0;
   while (have < wanted)
   {
+    ReadUnderWay under_way; // a read that takes long is said on the screen (ps5vfs_stalled_seconds)
     const int64_t got = file->file->Read(victim->data.get() + have, wanted - have, block_offset + have);
     s_backend_reads.fetch_add(1, std::memory_order_relaxed);
     if (got < 0)
@@ -371,14 +405,17 @@ std::string Trim(const std::string& text)
 
 void Log(const char* format, ...)
 {
-  if (!s_log)
+  if (!s_log && !s_capture)
     return;
   char line[512];
   va_list args;
   va_start(args, format);
   std::vsnprintf(line, sizeof(line), format, args);
   va_end(args);
-  s_log(line);
+  if (s_capture)
+    *s_capture += std::string(s_capture->empty() ? "" : "\n") + line;
+  if (s_log)
+    s_log(line);
 }
 
 double MonotonicSeconds()
@@ -793,6 +830,12 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
   /* The path lines in their order (each with whether it is NFS), so two shares with the same last
    * folder are named in the order the file gives them. */
   std::vector<std::pair<bool, std::string>> paths;
+  /* Each path line's name from a "#@ name = ..." line just above it ("" none). */
+  std::vector<std::string> names;
+  std::string pending_name;
+  /* SIGPIPE is ignored from the start: a write to a share that closed its connection must not end
+   * the title (Porpoise's libsmb2 socket.c sets SO_NOSIGPIPE for the same reason). */
+  PS5Socket::IgnoreSigPipe();
   std::string user = "guest";
   std::string password;
   std::string uid, gid; /* for NFS; empty: the backend's default */
@@ -802,11 +845,22 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
     std::string text = Trim(line);
     if (text.compare(0, 3, "\xef\xbb\xbf") == 0)
       text = Trim(text.substr(3));
+    if (text.compare(0, 2, "#@") == 0)
+    {
+      const size_t at = text.find('=');
+      std::string key = at == std::string::npos ? std::string() : Trim(text.substr(2, at - 2));
+      for (char& c : key)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (key == "name")
+        pending_name = Trim(text.substr(at + 1));
+      continue;
+    }
     if (text.empty() || text[0] == '#' || text[0] == ';' || text[0] == '[')
       continue;
     const size_t equals = text.find('=');
     if (equals == std::string::npos)
     {
+      pending_name.clear();
       Log("vfs: %s: no '=' in \"%s\"", config_path, text.c_str());
       continue;
     }
@@ -818,6 +872,7 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
     {
       /* An NFS address is taken as written: its own options follow a '?'. */
       paths.emplace_back(true, std::move(value));
+      names.push_back(pending_name);
     }
     else if (key == "path")
     {
@@ -829,7 +884,10 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
       while (!value.empty() && value[0] == '/')
         value.erase(0, 1);
       if (!value.empty())
+      {
         paths.emplace_back(false, std::move(value));
+        names.push_back(pending_name);
+      }
     }
     else if (key == "user")
     {
@@ -854,12 +912,19 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
     {
       Log("vfs: %s: \"%s\" is not a setting (path, user, password, uid, gid)", config_path, key.c_str());
     }
+    pending_name.clear();
   }
   fclose(fp);
 
   int mounted = 0;
-  for (const auto& [nfs, path] : paths)
+  std::vector<std::string> mounts;
+  for (size_t index = 0; index < paths.size(); index++)
   {
+    const bool nfs = paths[index].first;
+    const std::string& path = paths[index].second;
+    /* A share named in the file is mounted by its name (a '/' in it is not a folder). */
+    std::string named = names[index];
+    std::replace(named.begin(), named.end(), '/', '_');
     if (nfs)
     {
       /* The file's uid and gid go into the address unless it names its own. */
@@ -874,9 +939,10 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
       /* Shown as its last folder, as an SMB share is: the address without nfs:// and its options. */
       const size_t question = path.find('?');
       const std::string where = path.substr(6, question == std::string::npos ? std::string::npos : question - 6);
-      const std::string name = MountNameFor(where);
-      if (ps5vfs_mount_nfs(name.c_str(), url.c_str()) == 0)
-        mounted++;
+      const std::string name = MountNameFor(named.empty() ? where : named);
+      const bool ok = ps5vfs_mount_nfs(name.c_str(), url.c_str()) == 0;
+      mounted += ok ? 1 : 0;
+      mounts.push_back(ok ? "/smb/" + name : std::string());
       continue;
     }
 
@@ -893,14 +959,33 @@ extern "C" int ps5vfs_load_network_config(const char* config_path)
     }
     url += path;
 
-    const std::string name = MountNameFor(path);
-    if (ps5vfs_mount_smb(name.c_str(), url.c_str()) == 0)
-      mounted++;
+    const std::string name = MountNameFor(named.empty() ? path : named);
+    const bool ok = ps5vfs_mount_smb(name.c_str(), url.c_str()) == 0;
+    mounted += ok ? 1 : 0;
+    mounts.push_back(ok ? "/smb/" + name : std::string());
+  }
+  {
+    std::lock_guard lock(s_mounts_mutex);
+    s_config_path = config_path;
+    s_config_mounts = std::move(mounts);
   }
   return mounted;
 }
 
-/* v1.0.19 (from OGBox 0.0.3): a mount point taken away, its backend kept (a read under way ends). */
+std::string ps5vfs_network_config_path()
+{
+  std::lock_guard lock(s_mounts_mutex);
+  return s_config_path;
+}
+
+std::vector<std::string> ps5vfs_network_config_mounts()
+{
+  std::lock_guard lock(s_mounts_mutex);
+  return s_config_mounts;
+}
+
+/* Crux2 v1.0.19 (from OGBox 0.0.3): a mount point taken away, its backend kept (a read under way
+ * ends). */
 extern "C" int ps5vfs_unmount(const char* mount_point)
 {
   if (!mount_point)
@@ -915,6 +1000,58 @@ extern "C" int ps5vfs_unmount(const char* mount_point)
   s_mounts.erase(at);
   s_mount_count.store(static_cast<unsigned>(s_mounts.size()), std::memory_order_release);
   return 0;
+}
+
+/* From Porpoise bc835d2 (GPL-3.0-or-later): its netfs test(), over this layer's own backends. */
+PS5SharesProblem::Problem ps5vfs_test_share(const std::string& url, std::string* detail, size_t* entries)
+{
+  using PS5SharesProblem::Problem;
+  if (entries)
+    *entries = 0;
+  std::string said;
+  std::string* const outer = s_capture;
+  s_capture = &said;
+  const bool nfs = url.size() >= 6 && strncasecmp(url.c_str(), "nfs://", 6) == 0;
+  std::string error;
+  std::unique_ptr<Backend> backend = nfs ? CreateNFSBackend(url.c_str(), &error) : CreateSMBBackend(url.c_str(), &error);
+  Problem problem = Problem::None;
+  if (!backend)
+  {
+    said += std::string(said.empty() ? "" : "\n") + error;
+    problem = Problem::Other;
+  }
+  else
+  {
+    std::vector<Entry> listed;
+    if (backend->List("", &listed))
+    {
+      if (entries)
+        *entries = listed.size();
+    }
+    else
+    {
+      if (said.empty())
+        said = std::strerror(errno);
+      problem = PS5SharesProblem::Classify(said);
+      /* Connected, but the folder inside is not there (the server's answer, no connection words). */
+      if (problem == Problem::Other && errno == ENOENT)
+        problem = Problem::NoFolder;
+    }
+  }
+  backend.reset();
+  s_capture = outer;
+  /* (The address without its account: no password in the log.) */
+  std::string shown = url;
+  const size_t scheme = shown.find("://");
+  const size_t at = shown.find('@', scheme == std::string::npos ? 0 : scheme + 3);
+  const size_t slash = shown.find('/', scheme == std::string::npos ? 0 : scheme + 3);
+  if (scheme != std::string::npos && at != std::string::npos && (slash == std::string::npos || at < slash))
+    shown.erase(scheme + 3, at - scheme - 2);
+  Log("vfs: test of %s: %s%s", shown.c_str(), problem == Problem::None ? "it works" : "failed: ",
+      problem == Problem::None ? "" : said.c_str());
+  if (detail)
+    *detail = said;
+  return problem;
 }
 
 extern "C" const char* ps5vfs_mount_point(unsigned index)
@@ -1443,4 +1580,97 @@ extern "C" void ps5vfs_stats(unsigned* open_files, uint64_t* bytes_read, uint64_
     *bytes_read = s_bytes_read.load(std::memory_order_relaxed);
   if (backend_reads)
     *backend_reads = s_backend_reads.load(std::memory_order_relaxed);
+}
+
+extern "C" double ps5vfs_stalled_seconds(void)
+{
+  if (s_reads_under_way.load() <= 0)
+    return 0.0;
+  return static_cast<double>(NowMs() - s_read_progress_ms.load()) / 1000.0;
+}
+
+/* From OGBox 0.0.9: a file of at least 8 MB (a disc image) within `depth` folders below; "" for none. */
+static std::string FirstLargeFile(const std::string& folder, int depth)
+{
+  ps5vfs_dir* const dir = ps5vfs_opendir(folder.c_str());
+  if (!dir)
+    return std::string();
+  std::vector<std::string> subs;
+  std::string found;
+  struct ps5vfs_dirent e;
+  for (unsigned n = 0; found.empty() && n < 400 && ps5vfs_readdir(dir, &e) == 1; n++)
+  {
+    if (!e.name || e.name[0] == '.')
+      continue;
+    if (e.is_directory)
+      subs.push_back(folder + "/" + e.name);
+    else if (e.size >= (8 << 20))
+      found = folder + "/" + e.name;
+  }
+  ps5vfs_closedir(dir);
+  for (size_t i = 0; found.empty() && depth > 0 && i < subs.size() && i < 16; i++)
+    found = FirstLargeFile(subs[i], depth - 1);
+  return found;
+}
+
+std::string ps5vfs_wake_file(const std::string& mount_point, const std::vector<std::string>& preferred)
+{
+  for (const std::string& path : preferred)
+  {
+    if (path.size() > mount_point.size() + 1 && path.compare(0, mount_point.size() + 1, mount_point + "/") == 0)
+      return path;
+  }
+  return FirstLargeFile(mount_point, 2);
+}
+
+size_t ps5vfs_wake_one(const std::string& mount_point, const std::vector<std::string>& preferred, std::string* file)
+{
+  *file = ps5vfs_wake_file(mount_point, preferred);
+  if (file->empty())
+    return 0;
+  size_t got = 0;
+  if (FILE* const fp = ps5vfs_fopen(file->c_str(), "rb"))
+  {
+    std::vector<char> buffer(64 * 1024);
+    got = ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    /* And somewhere inside: what the server keeps in its memory doesn't wake its disks. */
+    struct stat st;
+    if (ps5vfs_fstat(fp, &st) == 1 && st.st_size > static_cast<off_t>(4 * buffer.size()))
+    {
+      uint64_t mix = static_cast<uint64_t>(NowMs()) * 0x9E3779B97F4A7C15ull;
+      mix ^= mix >> 29;
+      const off_t at = static_cast<off_t>(mix % static_cast<uint64_t>(st.st_size - static_cast<off_t>(buffer.size())));
+      if (ps5vfs_fseeko(fp, at & ~static_cast<off_t>(4095), SEEK_SET) == 0)
+        got += ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    }
+    ps5vfs_fclose(fp);
+  }
+  return got;
+}
+
+void ps5vfs_wake_mounts(std::vector<std::string> preferred)
+{
+  std::vector<std::string> mounts;
+  for (unsigned i = 0;; i++)
+  {
+    const char* const point = ps5vfs_mount_point(i);
+    if (!point)
+      break;
+    mounts.emplace_back(point);
+  }
+  if (mounts.empty())
+    return;
+  std::thread([mounts = std::move(mounts), preferred = std::move(preferred)]() {
+    for (const std::string& m : mounts)
+    {
+      const int64_t t0 = NowMs();
+      std::string file;
+      const size_t got = ps5vfs_wake_one(m, preferred, &file);
+      if (file.empty())
+        Log("vfs: share %s: no large file on it to read (to wake its disks)", m.c_str());
+      else
+        Log("vfs: share %s woken: %zu KiB of %s read in %.1f s", m.c_str(), got / 1024, file.c_str(),
+            static_cast<double>(NowMs() - t0) / 1000.0);
+    }
+  }).detach();
 }

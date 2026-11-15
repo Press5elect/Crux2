@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 
+#include "ps5_aim_logic.h"
 #include "ps5_input_source_logic.h"
 #include "ps5_usbpad_logic.h"
 
@@ -67,12 +68,18 @@ public:
 	/// How far a leave-the-game hold is (0 to 1; 0 with none running), for an on-screen ring.
 	static float LeaveGameHoldProgress();
 
-	/// Writes the bindings of a GunCon 2 in a USB port (0 or 1) for player 1's controller, aimed
-	/// with its motion sensor: R2 the trigger, R1 a shot off the screen, Cross/Circle/Triangle
-	/// the gun's A/B/C, Square the calibration shot, the touch pad's halves Select and Start, the
-	/// d-pad the gun's d-pad. Bindings the user already has are kept. R3 puts the aim back in the
-	/// middle (not a binding: the input source does it while motion aim is on).
+	/// Writes the bindings of a GunCon 2 in a USB port (0 or 1), aimed with a controller's motion
+	/// sensor: R2 the trigger, R1 a shot off the screen, Cross/Circle/Triangle the gun's A/B/C,
+	/// Square the calibration shot, the touch pad's halves Select and Start, the d-pad the gun's
+	/// d-pad. Port 1's are player 2's controller (SDL-1) when port 0 has a GunCon too, player 1's
+	/// otherwise (a game that wants its one gun in the second port). Bindings the user already has
+	/// are kept. R3 centres the aim (not a binding: the input source does it while aiming).
 	static void SetGunCon2Defaults(SettingsInterface& si, u32 usb_port);
+
+	/// Measure the screen for the steady aim: the next time player 1 aims a GunCon, they are asked
+	/// to point at the screen's top-left and bottom-right corners (as holding R3 for two seconds
+	/// does). The settings' "Measure the screen".
+	static void RequestScreenMeasure();
 
 private:
 	struct Pad
@@ -92,6 +99,14 @@ private:
 		PS5InputLogic::DoubleBuzz buzz;
 		u64 last_timestamp_us = 0; // of the last sample, for the motion sensor
 		bool motion_on = false; // the motion sensor was switched on for this pad
+
+		PS5AimLogic::SteadyAim steady; // the steady aim ([PS5] MotionAimMode "Steady")
+		bool steady_fed = false; // a reading reached it since the last poll
+		bool aim_active = false; // this pad aims a GunCon now
+		bool gun_trigger_down = false; // R2 as the click, while the trigger effect is on
+		int trigger_feel_sent = 0; // what the adaptive trigger was last told (0 off)
+		bool trigger_click = false; // the controller took the click: R2 is given as the click
+		bool shell_has_it = false; // the reading being applied is the shell's (PAD_INTERCEPTED)
 	};
 
 	struct UsbPad
@@ -138,6 +153,19 @@ private:
 	PS5InputLogic::GyroAim m_aim;
 	PS5InputLogic::GyroAimSettings m_aim_settings;
 	bool m_aim_moved = false;
+	// The steady aim (Porpoise's; ps5_aim_logic.h) or the one like a mouse ([PS5] MotionAimMode).
+	void UpdateSteadyAim(u32 index, bool active, bool running);
+	void SaveMeasuredScreen(float half_x, float half_y);
+	bool m_aim_steady = true;
+	PS5AimLogic::SteadySettings m_steady_settings;
+	std::array<bool, 2> m_guncon_port = {}; // a GunCon 2 in USB port 1, port 2
+
+	// R2's click while a GunCon is the game's ([PS5] GunConTriggerFeel).
+	void UpdateTriggerEffect(Pad& pad, u32 index, bool want);
+	int m_trigger_feel = 2;
+
+	// The sticks' response curves ([PS5] StickCurveLeft, StickCurveRight), per game.
+	std::array<int, 2> m_stick_curve = {};
 
 	// USB pads ([PS5] USBPads).
 	void PollUsbPads();

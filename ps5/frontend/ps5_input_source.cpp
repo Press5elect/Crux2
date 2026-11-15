@@ -30,12 +30,14 @@
 //    as intensities, sent here as they come.
 //  * The keyboard (ps5_keyboard.cpp) is read here, on the polling thread, so its key events reach
 //    InputManager with the controllers'.
-//  * Holding a combination asks to leave the game; pressure from R2; aiming a GunCon 2 with the
-//    motion sensor. Each is described where it happens below.
+//  * Holding a combination asks to leave the game; pressure from R2; the sticks' response curves;
+//    aiming a GunCon 2 with the motion sensor (one player or two) and R2's click for it. Each is
+//    described where it happens below.
 
 #include "ps5_input_source.h"
 
 #include "ps5_keyboard.h"
+#include "ps5_move_source.h"
 #include "ps5_usbpad.h"
 
 #include "Config.h"
@@ -43,6 +45,7 @@
 #include "ImGui/ImGuiManager.h"
 #include "Input/InputManager.h"
 #include "USB/USB.h"
+#include "USB/usb-lightgun/guncon2.h"
 #include "VMManager.h"
 
 #include "common/Assertions.h"
@@ -341,6 +344,32 @@ namespace
 	std::function<void(u32)> s_leave_handler;
 	std::atomic<float> s_leave_progress{0.0f};
 
+	// ------------------------------------------------------------------ quick taps
+
+	// Each controller's minimum hold (PS5InputLogic::TapHold), and the pressure R2 last set, for
+	// a hold that ends on a poll with no new readings. Kept here and not in Pad: one source.
+	std::array<PS5InputLogic::TapHold, PS5InputSource::MAX_PADS> s_tap_hold;
+	std::array<float, PS5InputSource::MAX_PADS> s_tap_pressure = {1.0f, 1.0f, 1.0f, 1.0f};
+
+	// Gives InputManager the buttons the game gets, where they changed from what it was last
+	// given (values: the pad's button_values).
+	void InvokeButtons(u32 index, u32 game_buttons, float pressure_value, std::array<float, 21>& values)
+	{
+		// Player 1's PlayStation Move and Nav (ps5_move_source.cpp) hold buttons alongside the controller's.
+		if (index == 0)
+			game_buttons |= PS5Move::GameButtons();
+		for (u32 button = 0; button < BUTTON_COUNT; button++)
+		{
+			const bool down = (game_buttons & (1u << button)) != 0;
+			const float value = !down ? 0.0f : ((PRESSURE_BUTTONS & (1u << button)) ? pressure_value : 1.0f);
+			if (value == values[button])
+				continue;
+			values[button] = value;
+			InputManager::InvokeEvents(InputSource::MakeGenericControllerButtonKey(InputSourceType::SDL, index, button), value,
+				s_button_info[button].generic_binding);
+		}
+	}
+
 	// ------------------------------------------------------------------ optional pad functions
 
 	// scePadSetMotionSensorState is in libScePad's stub, but it is not imported: a title that
@@ -359,6 +388,31 @@ namespace
 			ps5px_log("pads: scePadSetMotionSensorState %s", fn ? "found" : "not found: the motion sensor may report nothing");
 		}
 		return fn;
+	}
+
+	// scePadSetTriggerEffect (the DualSense's adaptive triggers) the same way: the title has never
+	// imported it, and a console whose module did not export it would not start the title.
+	using SetTriggerEffectFn = int (*)(s32 handle, const PS5InputLogic::TriggerEffectParam* param);
+	SetTriggerEffectFn ResolveSetTriggerEffect()
+	{
+		static bool looked = false;
+		static SetTriggerEffectFn fn = nullptr;
+		if (!looked)
+		{
+			looked = true;
+			fn = reinterpret_cast<SetTriggerEffectFn>(
+				PS5SystemModules::FindFunction("libScePad", "scePadSetTriggerEffect", "2JgFB2n9oUM"));
+			ps5px_log("pads: scePadSetTriggerEffect %s", fn ? "found" : "not found: no click on R2 for the light gun");
+		}
+		return fn;
+	}
+
+	// "Measure the screen" from the settings (PS5InputSource::RequestScreenMeasure).
+	std::atomic<bool> s_measure_requested{false};
+
+	PS5AimLogic::Grip GripFromName(std::string_view name)
+	{
+		return name == "TwoHands" ? PS5AimLogic::Grip::TwoHands : name == "Upright" ? PS5AimLogic::Grip::Upright : PS5AimLogic::Grip::Auto;
 	}
 } // namespace
 
@@ -398,7 +452,23 @@ void PS5InputSource::ReadSettings(SettingsInterface& si)
 	m_aim_settings.dead_zone_dps = std::clamp(si.GetFloatValue("PS5", "MotionAimDeadzone", 1.0f), 0.0f, 10.0f);
 	m_aim_settings.invert_x = si.GetBoolValue("PS5", "MotionAimInvertX", false);
 	m_aim_settings.invert_y = si.GetBoolValue("PS5", "MotionAimInvertY", false);
-	m_guncon_plugged = (USB::GetConfigDevice(si, 0) == "guncon2" || USB::GetConfigDevice(si, 1) == "guncon2");
+	m_guncon_port = {USB::GetConfigDevice(si, 0) == "guncon2", USB::GetConfigDevice(si, 1) == "guncon2"};
+	m_guncon_plugged = m_guncon_port[0] || m_guncon_port[1];
+
+	// The steady aim (Porpoise's) is the default; "Mouse" is the aim of before, which adds up the
+	// controller's turns as a mouse's movements.
+	m_aim_steady = si.GetStringValue("PS5", "MotionAimMode", "Steady") != "Mouse";
+	constexpr float DEG = 57.2957795131f;
+	m_steady_settings.speed = std::clamp(si.GetIntValue("PS5", "MotionAimSpeed", 5), 0, 10);
+	m_steady_settings.measured_x = std::clamp(si.GetFloatValue("PS5", "MotionAimScreenX", 0.0f), 0.0f, 75.0f) / DEG;
+	m_steady_settings.measured_y = std::clamp(si.GetFloatValue("PS5", "MotionAimScreenY", 0.0f), 0.0f, 60.0f) / DEG;
+	m_steady_settings.smoothing = std::clamp(si.GetIntValue("PS5", "MotionAimSmoothing", 1), 0, 3);
+	m_steady_settings.grip = GripFromName(si.GetStringValue("PS5", "MotionAimGrip", "Auto"));
+	m_steady_settings.invert_x = m_aim_settings.invert_x;
+	m_steady_settings.invert_y = m_aim_settings.invert_y;
+	m_trigger_feel = PS5InputLogic::TriggerFeelFromName(si.GetStringValue("PS5", "GunConTriggerFeel", "Firm"));
+	m_stick_curve = {PS5InputLogic::StickCurveFromName(si.GetStringValue("PS5", "StickCurveLeft", "Linear")),
+		PS5InputLogic::StickCurveFromName(si.GetStringValue("PS5", "StickCurveRight", "Linear"))};
 
 	PS5Keyboard::SetEnabled(si.GetBoolValue("PS5", "USBKeyboard", true));
 	m_usb_pads_setting = si.GetBoolValue("PS5", "USBPads", false);
@@ -493,7 +563,10 @@ void PS5InputSource::Shutdown()
 			pad.buzz = {};
 			SendRumble(pad);
 			SetMotionSensor(pad, false);
+			UpdateTriggerEffect(pad, i, false);
 		}
+		pad.aim_active = false;
+		pad.steady.Reset();
 		SetConnected(i, false);
 		// The handles stay open: the pad service keeps one per user for the life of the title, and a
 		// second scePadOpen for the same user fails.
@@ -506,6 +579,7 @@ void PS5InputSource::Shutdown()
 		m_usb.reset();
 	}
 	m_motion_active = false;
+	usb_lightgun::SetPortPointer(1, false);
 	s_leave_progress.store(0.0f, std::memory_order_relaxed);
 	m_initialized = false;
 }
@@ -635,6 +709,11 @@ void PS5InputSource::SetConnected(u32 index, bool connected)
 		pad.button_values = {};
 		pad.axes = {128, 128, 128, 128, 0, 0};
 		pad.touch_is_back = false;
+		pad.gun_trigger_down = false;
+		pad.trigger_feel_sent = 0; // a controller that comes back has forgotten its trigger effect
+		pad.trigger_click = false;
+		pad.steady.Reset();
+		s_tap_hold[index].Reset();
 		pad.leave_combo.Cancel();
 		pad.last_timestamp_us = 0;
 		InputManager::OnInputDeviceDisconnected(MakeDeviceKey(index), fmt::format("SDL-{}", index));
@@ -679,28 +758,51 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 	const bool pressure = m_pressure_from_r2 && running;
 	const float pressure_value = pressure ? PS5InputLogic::TriggerPressure(sample.r2) : 1.0f;
 
-	for (u32 button = 0; button < BUTTON_COUNT; button++)
-	{
-		const bool down = (buttons & (1u << button)) != 0;
-		const float value = !down ? 0.0f : ((PRESSURE_BUTTONS & (1u << button)) ? pressure_value : 1.0f);
-		if (value == pad.button_values[button])
-			continue;
-		pad.button_values[button] = value;
-		InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::SDL, index, button), value,
-			s_button_info[button].generic_binding);
-	}
+	// Every reading since the last poll comes through here, in order, but the game reads the
+	// pad's state once in its frame: a tap that went down and up between two of its reads is held
+	// down for it for at least 50 ms (PS5InputLogic::TapHold; PollEvents lets it go when the hold
+	// ends). Only while a game runs; the interface gets the buttons as they are. The sticks and
+	// triggers, the leave-the-game hold and R3's recentring read the reading itself.
+	const u64 now_us = NowMicroseconds();
+	const u32 game_buttons = s_tap_hold[index].Update(buttons, now_us, running ? PS5InputLogic::TapHold::MIN_HOLD_US : 0);
+	s_tap_pressure[index] = pressure_value;
+	InvokeButtons(index, game_buttons, pressure_value, pad.button_values);
 
+	// R2 with the light gun's click on (UpdateTriggerEffect): given as the click itself, so the shot
+	// comes when the resistance gives way.
+	u8 r2 = pressure ? u8{0} : sample.r2;
+	if (pad.trigger_click && running && !pressure)
+	{
+		pad.gun_trigger_down = PS5InputLogic::GunTriggerDown(pad.gun_trigger_down, sample.r2);
+		r2 = pad.gun_trigger_down ? 255 : 0;
+	}
 	const std::array<u8, AXIS_COUNT> axes = {
-		sample.left_x, sample.left_y, sample.right_x, sample.right_y, sample.l2, pressure ? u8{0} : sample.r2};
+		sample.left_x, sample.left_y, sample.right_x, sample.right_y, sample.l2,
+		std::max<u8>(r2, index == 0 ? PS5Move::Trigger() : u8{0})}; // and the Move's T
+	std::array<bool, AXIS_COUNT> changed = {};
 	for (u32 axis = 0; axis < AXIS_COUNT; axis++)
 	{
-		if (axes[axis] == pad.axes[axis])
-			continue;
+		changed[axis] = axes[axis] != pad.axes[axis];
 		pad.axes[axis] = axes[axis];
-
-		const bool trigger = (axis >= AXIS_LEFT_TRIGGER);
-		const float value = trigger ? (static_cast<float>(axes[axis]) / 255.0f) : NormalizeStick(axes[axis]);
-		InputManager::InvokeEvents(MakeGenericControllerAxisKey(InputSourceType::SDL, index, static_cast<s32>(axis)), value,
+	}
+	// A stick with a response curve ([PS5] StickCurveLeft/Right): its two axes are curved together,
+	// so both are given whenever either moved. Linear gives each axis as it is.
+	std::array<float, AXIS_COUNT> values;
+	for (u32 axis = 0; axis < AXIS_COUNT; axis++)
+		values[axis] = (axis >= AXIS_LEFT_TRIGGER) ? (static_cast<float>(axes[axis]) / 255.0f) : NormalizeStick(axes[axis]);
+	for (u32 stick = 0; stick < 2; stick++)
+	{
+		const u32 ax = stick * 2;
+		if (m_stick_curve[stick] == 0 || !(changed[ax] || changed[ax + 1]))
+			continue;
+		PS5InputLogic::CurveStick(values[ax], values[ax + 1], m_stick_curve[stick]);
+		changed[ax] = changed[ax + 1] = true;
+	}
+	for (u32 axis = 0; axis < AXIS_COUNT; axis++)
+	{
+		if (!changed[axis])
+			continue;
+		InputManager::InvokeEvents(MakeGenericControllerAxisKey(InputSourceType::SDL, index, static_cast<s32>(axis)), values[axis],
 			GenericInputBinding::Unknown, s_axis_info[axis].generic_binding_negative, s_axis_info[axis].generic_binding_positive);
 	}
 
@@ -710,7 +812,6 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 	// click of both sticks in play does nothing. Once taken, a double buzz says so and the
 	// handler the host gave (SetLeaveGameHandler) does what the quick menu's "Leave the game"
 	// does. The buttons still reach the game while held.
-	const u64 now_us = NowMicroseconds();
 	pad.leave_combo.Configure(m_leave_mask, m_leave_hold_us);
 	if (!running)
 	{
@@ -730,8 +831,16 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 			handler(index);
 	}
 
-	// Motion aim: R3 puts the pointer back in the middle (player 1, while aiming).
-	if (index == 0 && m_motion_active)
+	// The steady aim: every reading, in order, into the controller's orientation (UpdateSteadyAim
+	// says where it points, once a poll). Not the shell's readings.
+	if (pad.aim_active && m_aim_steady && !pad.shell_has_it)
+	{
+		pad.steady.Feed(sample.angular_velocity, sample.acceleration, sample.timestamp_us);
+		pad.steady_fed = true;
+	}
+
+	// The aim like a mouse: R3 puts the pointer back in the middle (player 1, while aiming).
+	if (index == 0 && m_motion_active && !m_aim_steady)
 	{
 		if (pressed & (1u << BUTTON_RIGHT_STICK))
 		{
@@ -760,37 +869,89 @@ void PS5InputSource::SetMotionSensor(Pad& pad, bool on)
 // Aiming a light gun with the motion sensor. PCSX2's GunCon 2 (USB/usb-lightgun) aims where the
 // host's pointer is: InputManager's pointer 0, in window pixels, which GSTranslateWindowToDisplay-
 // Coordinates maps onto the game's picture (outside it is off the screen). With [PS5] MotionAim on,
-// or a GunCon 2 in either USB port, player 1's controller turns its angular velocity into that
-// pointer while a game runs (PS5InputLogic::GyroAim: [PS5] MotionAimSensitivity is the turn from
-// the middle to the side of the screen, in degrees, 20 by default; MotionAimSmoothingMs, 20;
-// MotionAimDeadzone, 1 degree a second; MotionAimInvertX/Y for a controller whose axes run the
-// other way than assumed). The aim is relative, as a mouse's: point at the middle of the screen
-// and press R3 to put the pointer there (it starts there too). The GunCon's buttons are ordinary
-// bindings (SetGunCon2Defaults). A GunCon set up with "Relative" bindings reads those instead of
-// the pointer, as on a PC.
+// or a GunCon 2 in either USB port, player 1's controller aims with its motion sensor while a game
+// runs. With a GunCon in both ports, player 2's controller (SDL-1) aims the second: its pointer is
+// handed to that port's GunCon alone (usb_lightgun::SetPortPointer), since InputManager has one.
+// The GunCon's buttons are ordinary bindings (SetGunCon2Defaults). A GunCon set up with "Relative"
+// bindings reads those instead of the pointer, as on a PC.
+//
+// [PS5] MotionAimMode picks how the aim is made:
+//  * "Steady" (the default): Porpoise's aim (ps5_aim_logic.h, SteadyAim). The gyroscope and the
+//    accelerometer are fused into where the controller points, so the same pointing is always the
+//    same place on the screen, and nothing drifts away as turns are added up. It centres by itself
+//    once the controller has settled; R3 held a moment while the controller is fairly still centres
+//    it again (point at the middle of the screen first). R3 held for two seconds measures the screen:
+//    point at its top-left corner and press R3, then at its bottom-right corner and press R3; the
+//    measurement is kept ([PS5] MotionAimScreenX/Y, degrees, with MotionAimSpeed 0). Otherwise
+//    MotionAimSpeed 1 to 10 are Porpoise's speeds (30 to 7 degrees from the middle to the side; 5,
+//    15.5 degrees, by default). MotionAimSmoothing 0 to 3 (1), MotionAimGrip Auto, TwoHands or
+//    Upright (stood on a grip in one hand, the index finger on R2), MotionAimInvertX/Y.
+//  * "Mouse": the aim of before (PS5InputLogic::GyroAim). The angular velocity moves the pointer as a
+//    mouse would: [PS5] MotionAimSensitivity is the turn from the middle to the side of the screen,
+//    in degrees, 20 by default; MotionAimSmoothingMs, 20; MotionAimDeadzone, 1 degree a second. It
+//    stops at the edges, and R3 puts it back in the middle (point there first). Player 1 only.
 void PS5InputSource::UpdateMotionAim(u64 now_us)
 {
-	// Whether a GunCon is plugged in is read again once a second while a game runs: a game's own
-	// settings can plug one in, and they are not this source's settings.
+	// Whether a GunCon is plugged in, and the settings a game can have of its own, are read again
+	// once a second while a game runs: a game's own settings are not this source's settings.
 	const bool running = VMManager::GetState() == VMState::Running;
 	if (running && now_us - m_last_guncon_check >= 1000000)
 	{
 		m_last_guncon_check = now_us;
-		m_guncon_plugged = Host::GetStringSettingValue("USB1", "Type", "None") == "guncon2" ||
-						   Host::GetStringSettingValue("USB2", "Type", "None") == "guncon2";
+		m_guncon_port = {Host::GetStringSettingValue("USB1", "Type", "None") == "guncon2",
+			Host::GetStringSettingValue("USB2", "Type", "None") == "guncon2"};
+		m_guncon_plugged = m_guncon_port[0] || m_guncon_port[1];
+		m_motion_aim_setting = Host::GetBoolSettingValue("PS5", "MotionAim", false);
+		m_aim_steady = Host::GetStringSettingValue("PS5", "MotionAimMode", "Steady") != "Mouse";
+		m_trigger_feel = PS5InputLogic::TriggerFeelFromName(Host::GetStringSettingValue("PS5", "GunConTriggerFeel", "Firm"));
+		m_stick_curve = {PS5InputLogic::StickCurveFromName(Host::GetStringSettingValue("PS5", "StickCurveLeft", "Linear")),
+			PS5InputLogic::StickCurveFromName(Host::GetStringSettingValue("PS5", "StickCurveRight", "Linear"))};
 	}
+
+	// R2's click: player 1's controller while a GunCon is in either port, player 2's while both have
+	// one; off outside a game, in the menus and with the game paused.
+	UpdateTriggerEffect(m_pads[0], 0, running && m_pads[0].connected && m_guncon_plugged);
+	UpdateTriggerEffect(m_pads[1], 1, running && m_pads[1].connected && m_guncon_port[0] && m_guncon_port[1]);
+
+	// The steady aim keeps the controller's orientation while the game is paused (the quick menu), so
+	// it still points where it did when the game goes on; the pointer is left alone meanwhile.
+	const bool in_game = running || VMManager::GetState() == VMState::Paused;
+
+	// Player 2's GunCon, in the second port while the first has player 1's.
+	UpdateSteadyAim(1, in_game && m_aim_steady && m_pads[1].connected && m_guncon_port[0] && m_guncon_port[1], running);
+
+	// A PlayStation Move ([PS5] MoveAim, ps5_move_source.cpp) that is aiming has the pointer: the
+	// controller's motion aim is left alone for player 1, never added to it.
+	if (PS5Move::Update(running))
+		return;
 
 	Pad& pad = m_pads[0];
 	const bool active = running && pad.connected && (m_motion_aim_setting || m_guncon_plugged);
+	if (m_aim_steady)
+	{
+		if (m_motion_active)
+		{
+			m_motion_active = false; // the mouse-like aim was in use: the steady one takes over
+			pad.aim_active = false;
+			SetMotionSensor(pad, false);
+		}
+		UpdateSteadyAim(0, in_game && pad.connected && (m_motion_aim_setting || m_guncon_plugged), running);
+		return;
+	}
+	if (pad.aim_active && !m_motion_active)
+		UpdateSteadyAim(0, false, false); // the steady aim was in use: the mouse-like one takes over
+
 	if (active != m_motion_active)
 	{
 		m_motion_active = active;
+		pad.aim_active = active;
 		SetMotionSensor(pad, active);
 		if (active)
 		{
 			m_aim.Recenter();
 			m_aim_moved = true;
-			ps5px_log("pads: aiming with player 1's motion sensor (%s)", m_guncon_plugged ? "a GunCon 2 is plugged in" : "MotionAim");
+			ps5px_log("pads: aiming like a mouse with player 1's motion sensor (%s)",
+				m_guncon_plugged ? "a GunCon 2 is plugged in" : "MotionAim");
 		}
 	}
 	if (!active || !m_aim_moved)
@@ -808,6 +969,131 @@ void PS5InputSource::UpdateMotionAim(u64 now_us)
 	settings.aspect = height / width;
 	m_aim.SetSettings(settings);
 	InputManager::UpdatePointerAbsolutePosition(0, (m_aim.X() * 0.5f + 0.5f) * width, (m_aim.Y() * 0.5f + 0.5f) * height);
+}
+
+void PS5InputSource::UpdateSteadyAim(u32 index, bool active, bool running)
+{
+	Pad& pad = m_pads[index];
+	if (active != pad.aim_active)
+	{
+		pad.aim_active = active;
+		pad.steady.Reset();
+		pad.steady_fed = false;
+		SetMotionSensor(pad, active);
+		if (index == 0 && !active)
+			Host::RemoveKeyedOSDMessage("PS5AimMeasure");
+		ps5px_log("pads: player %u: %s", index + 1,
+			active ? (index == 0 ? "steady aim for the GunCon 2 (the first port's, or the only one)" : "steady aim for the second port's GunCon 2") :
+					 "steady aim off");
+	}
+	if (!active)
+	{
+		if (index == 1)
+			usb_lightgun::SetPortPointer(1, false); // the second port's GunCon reads pointer 0 again
+		return;
+	}
+
+	pad.steady.SetSettings(m_steady_settings);
+	if (index == 0 && running && s_measure_requested.load(std::memory_order_relaxed) && pad.steady.Centred())
+	{
+		s_measure_requested.store(false, std::memory_order_relaxed);
+		if (pad.steady.StartMeasure())
+			Host::AddKeyedOSDMessage("PS5AimMeasure", "Measuring the screen: point at its top-left corner and press R3.", 30.0f);
+	}
+	if (!pad.steady_fed)
+		return; // no reading since the last poll: the pointer stays where it is
+	pad.steady_fed = false;
+
+	// R3 is the interface's while the game is paused: no centring or measuring then.
+	const bool r3 = running && (pad.buttons & (1u << BUTTON_RIGHT_STICK)) != 0;
+	const u32 events = pad.steady.Tick(r3);
+	using Aim = PS5AimLogic::SteadyAim;
+	if (events)
+	{
+		const std::string who = index == 0 ? std::string() : std::string("Player 2: ");
+		const char* key = index == 0 ? "PS5AimMeasure" : "PS5AimMeasure2";
+		if (events & Aim::CENTRED)
+			Host::AddKeyedOSDMessage(key, who + "Aim centred.", 1.5f);
+		if (events & Aim::MEASURE_TOP_LEFT)
+			Host::AddKeyedOSDMessage(key, who + "Measuring the screen: point at its top-left corner and press R3.", 30.0f);
+		if (events & Aim::MEASURE_BOTTOM_RIGHT)
+			Host::AddKeyedOSDMessage(key, who + "Now point at the screen's bottom-right corner and press R3.", 30.0f);
+		if (events & Aim::HOLD_STILL)
+			Host::AddKeyedOSDMessage(key, who + "Hold the controller still, then press R3.", 30.0f);
+		if (events & Aim::MEASURE_FAILED)
+		{
+			Host::AddKeyedOSDMessage(key,
+				who + "That did not look like a screen: the aim is as it was. Hold R3 for two seconds to try again.", 5.0f);
+		}
+		if (events & Aim::MEASURED)
+		{
+			Host::AddKeyedOSDMessage(key, who + "The screen is measured: the aim now reaches its edges.", 3.0f);
+			SaveMeasuredScreen(pad.steady.MeasuredX(), pad.steady.MeasuredY());
+		}
+		if (events & (Aim::AUTO_CENTRED | Aim::REGRIPPED | Aim::MEASURED | Aim::MEASURE_FAILED))
+		{
+			const PS5AimLogic::PorpoiseAim::Scale scale = pad.steady.CurrentScale();
+			ps5px_log("pads: player %u: steady aim %s, grip %d, %.1f by %.1f degrees to the edges", index + 1,
+				(events & Aim::MEASURED) ? "measured the screen" : (events & Aim::MEASURE_FAILED) ? "measuring refused" :
+				(events & Aim::REGRIPPED) ? "centred for a new grip" : "centred by itself",
+				pad.steady.GripInUse(), scale.half_x * 57.29578f, scale.half_y * 57.29578f);
+		}
+	}
+	if (!pad.steady.Centred() || !running)
+		return;
+
+	float width = ImGuiManager::GetWindowWidth();
+	float height = ImGuiManager::GetWindowHeight();
+	if (!(width > 0.0f) || !(height > 0.0f))
+	{
+		width = 1920.0f;
+		height = 1080.0f;
+	}
+	const float x = (pad.steady.X() * 0.5f + 0.5f) * width, y = (pad.steady.Y() * 0.5f + 0.5f) * height;
+	if (index == 0)
+		InputManager::UpdatePointerAbsolutePosition(0, x, y);
+	else
+		usb_lightgun::SetPortPointer(1, true, x, y);
+}
+
+void PS5InputSource::SaveMeasuredScreen(float half_x, float half_y)
+{
+	// Kept for all games: the screen and where one sits do not change with the game.
+	constexpr float DEG = 57.2957795131f;
+	m_steady_settings.speed = 0;
+	m_steady_settings.measured_x = half_x;
+	m_steady_settings.measured_y = half_y;
+	Host::SetBaseIntSettingValue("PS5", "MotionAimSpeed", 0);
+	Host::SetBaseFloatSettingValue("PS5", "MotionAimScreenX", half_x * DEG);
+	Host::SetBaseFloatSettingValue("PS5", "MotionAimScreenY", half_y * DEG);
+	Host::CommitBaseSettingChanges();
+}
+
+void PS5InputSource::RequestScreenMeasure()
+{
+	s_measure_requested.store(true, std::memory_order_relaxed);
+}
+
+// The DualSense's R2 as a light gun's trigger: a click, the "weapon" effect of scePadSetTriggerEffect
+// (resistance that gives way), Light or Firm ([PS5] GunConTriggerFeel, Firm by default, Off). Set
+// while a GunCon 2 is the game's device for this controller; let go when the game stops, is paused or
+// the menus are open (the effect off), and told again when the controller comes back.
+void PS5InputSource::UpdateTriggerEffect(Pad& pad, u32 index, bool want)
+{
+	const int feel = want ? m_trigger_feel : 0;
+	if (pad.handle < 0 || feel == pad.trigger_feel_sent)
+		return;
+	const SetTriggerEffectFn fn = ResolveSetTriggerEffect();
+	if (!fn)
+		return; // R2 stays as it is
+	pad.trigger_feel_sent = feel;
+	pad.gun_trigger_down = false;
+	const PS5InputLogic::TriggerEffectParam param = PS5InputLogic::GunTriggerEffect(feel);
+	const int rc = fn(pad.handle, &param);
+	// Only a click the controller took makes R2 the click (ApplySample).
+	pad.trigger_click = feel > 0 && rc == 0;
+	ps5px_log("pads: player %u: R2's click %s: 0x%x", index + 1, feel == 0 ? "off" : feel == 1 ? "light" : "firm",
+		static_cast<u32>(rc));
 }
 
 void PS5InputSource::PollEvents()
@@ -858,8 +1144,10 @@ void PS5InputSource::PollEvents()
 				sample.l2 = sample.r2 = 0;
 				sample.touch_count = 0;
 				sample.angular_velocity[0] = sample.angular_velocity[1] = sample.angular_velocity[2] = 0.0f;
+				pad.shell_has_it = true;
 				if (pad.connected)
 					ApplySample(i, &sample);
+				pad.shell_has_it = false;
 				continue;
 			}
 
@@ -883,6 +1171,14 @@ void PS5InputSource::PollEvents()
 			}
 			if (connected)
 				ApplySample(i, &sample);
+		}
+
+		// A quick tap's hold that has ended, with no reading since to let it go.
+		if (pad.connected)
+		{
+			const bool running = VMManager::GetState() == VMState::Running;
+			const u32 game_buttons = s_tap_hold[i].Tick(NowMicroseconds(), running ? PS5InputLogic::TapHold::MIN_HOLD_US : 0);
+			InvokeButtons(i, game_buttons, s_tap_pressure[i], pad.button_values);
 		}
 
 		// The confirming double buzz plays over the game's rumble, and ends by giving it back.
@@ -1393,26 +1689,29 @@ void PS5InputSource::SetGunCon2Defaults(SettingsInterface& si, u32 usb_port)
 	if (usb_port >= 2)
 		return;
 	const std::string section = USB::GetConfigSection(static_cast<int>(usb_port));
+	// The second port's GunCon is player 2's while the first port has one too (UpdateSteadyAim aims
+	// it with player 2's controller); alone, it is player 1's.
+	const u32 player = (usb_port == 1 && USB::GetConfigDevice(si, 0) == "guncon2") ? 1 : 0;
 	// clang-format off
 	static constexpr std::pair<const char*, const char*> bindings[] = {
-		{"Trigger", "SDL-0/+RightTrigger"},
-		{"ShootOffscreen", "SDL-0/RightShoulder"},
-		{"Recalibrate", "SDL-0/FaceWest"},
-		{"A", "SDL-0/FaceSouth"},
-		{"B", "SDL-0/FaceEast"},
-		{"C", "SDL-0/FaceNorth"},
-		{"Select", "SDL-0/Back"},
-		{"Start", "SDL-0/Touchpad"},
-		{"Up", "SDL-0/DPadUp"},
-		{"Down", "SDL-0/DPadDown"},
-		{"Left", "SDL-0/DPadLeft"},
-		{"Right", "SDL-0/DPadRight"},
+		{"Trigger", "+RightTrigger"},
+		{"ShootOffscreen", "RightShoulder"},
+		{"Recalibrate", "FaceWest"},
+		{"A", "FaceSouth"},
+		{"B", "FaceEast"},
+		{"C", "FaceNorth"},
+		{"Select", "Back"},
+		{"Start", "Touchpad"},
+		{"Up", "DPadUp"},
+		{"Down", "DPadDown"},
+		{"Left", "DPadLeft"},
+		{"Right", "DPadRight"},
 	};
 	// clang-format on
 	for (const auto& [name, binding] : bindings)
 	{
 		const std::string key = USB::GetConfigSubKey("guncon2", name);
 		if (!si.ContainsValue(section.c_str(), key.c_str()))
-			si.SetStringValue(section.c_str(), key.c_str(), binding);
+			si.SetStringValue(section.c_str(), key.c_str(), fmt::format("SDL-{}/{}", player, binding).c_str());
 	}
 }

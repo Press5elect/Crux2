@@ -20,7 +20,6 @@ paths and `../` work as they do in RetroArch; Crux2's own presets are in `crux2/
 | `crux2/composite.slangp` | 2 | a television's composite input: colour cut to a narrow band and late, rainbow on fine detail, crawling dots on colour edges | about 0.1 ms |
 | `crux2/s-video.slangp` | 2 | a television's S-Video input: colour cut to a band and a little late, brightness a little soft | about 0.1 ms |
 | `crux2/film-grain.slangp` | 1 | film grain, new every frame, strongest in the middle tones | about 0.5 ms |
-| `crux2/smaa.slangp` | 4 | SMAA (anti-aliasing: edges found, their shape measured, the blend made); run by Settings > Picture > Post-processing > SMAA, before a look, not chosen as a look | not measured yet |
 | `crux2/colour.slangp` | 1 | colour temperature, vibrance, saturation, brightness, contrast, gamma | about 0.1 ms |
 
 The estimates are from the PC tests (`ps5/tests/slang/run-slang-tests.sh`): each pass's texture
@@ -66,19 +65,6 @@ That is GPL-2.0-or-later; Crux2 (GPL-3.0-or-later) uses them under GPL-3.0.
 | `crt/shaders/guest/fast/pre-shaders.slang` | 2019-2025 guest(r) and Dr. Venom |
 | `crt/shaders/guest/fast/pre-shadersf.slang` | 2019-2025 guest(r) and Dr. Venom |
 
-### From libretro slang-shaders, revision 3685eda59ffd2ebe1b12cc4640581dc23552ce88 (2026-11-06)
-
-Unchanged copies of SMAA (Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez;
-http://www.iryoku.com/smaa/). `SMAA.hlsl` is under the MIT licence its header states (2013, the five
-authors); the three pass files state the Unlicense (public domain), and `AreaTex.png`, `SearchTex.png` are
-SMAA's own lookup pictures, under SMAA's licence.
-
-| File | Copyright (as the file states) |
-| --- | --- |
-| `anti-aliasing/shaders/smaa/SMAA.hlsl` | 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez (MIT) |
-| `anti-aliasing/shaders/smaa/smaa-pass0.slang`, `smaa-pass1.slang`, `smaa-pass2.slang` | the Unlicense (SPDX line of each file) |
-| `anti-aliasing/shaders/smaa/AreaTex.png`, `SearchTex.png` | SMAA's lookup pictures (MIT) |
-
 ### Crux2's own (GPL-3.0-or-later)
 
 | File | What, and why it is Crux2's |
@@ -86,7 +72,6 @@ SMAA's own lookup pictures, under SMAA's licence.
 | `crt/crt-guest-advanced.slangp`, `crt/crt-guest-advanced-fast.slangp`, `crt/crt-guest-advanced-fastest.slangp` | the same passes, scales and pictures as libretro's presets of those names at the revision above (libretro's .slangp files state no licence, so these are written out anew) |
 | `crt/shaders/guest/advanced/stock.slang`, `crt/shaders/guest/fast/stock.slang` | the picture passed through, as libretro's `stock.slang` does (which states no licence) |
 | `crt/shaders/guest/advanced/lut/*.png` | the four colour lookup pictures guest's "LUT Colors" parameter chooses (Trinitron, inverse Trinitron, NEC MultiSync-like, NTSC 1953), made by `ps5/tests/slang/tools/make-crt-luts.py` from published phosphor primaries; libretro's own state no licence |
-| `crux2/smaa.slangp` | the passes, scales and pictures of libretro's `anti-aliasing/smaa.slangp` at the revision above (which states no licence), written out anew, with Crux2's `stock.slang` as its first pass |
 | `crux2/*.slangp`, `crux2/shaders/composite.slang`, `s-video.slang`, `signal.inc`, `film-grain.slang`, `colour.slang` | Crux2's looks |
 | `crux2/shaders/scale.slang` | sharp bilinear to the screen's size, adapted from PSSwanStation's `look_scale.frag` (GPL-3.0-or-later, the same author) |
 

@@ -22,10 +22,22 @@
 //
 // Each was a mock-up first (a page drawn frame by frame, approved as a video); the numbers here
 // are that page's. The screen is 1920 by 1080 units, as everywhere in the interface.
+//
+// On the console, the startup video (../ps5_intro.h, ps5/art/intro) plays in the animation's place
+// when it can: Settings > Interface > Startup video ([PS5] StartupVideo, on by default), "All"
+// motion, and its file in the title folder. Its frames go to the screen through a texture of
+// ImGui's own (the renderer uploads it), its sound through the interface's sound in the start-up
+// sound's place; any button skips it, and its end hands over to the library as the animations do,
+// the name already in the top bar. Without it, the start is as it was.
 
 #include "bp_internal.h"
 
 #include <cmath>
+
+#ifdef __PROSPERO__
+#include "../ps5_intro.h"
+#define BP_STARTUP_VIDEO 1
+#endif
 
 namespace bp
 {
@@ -414,10 +426,158 @@ bool slash(ImDrawList* dl, float t)
 	// (The top bar draws the name itself from the wipe's first frame: it is behind the band.)
 	return wipe > 0;
 }
+
+// ---------------------------------------------------------------- the startup video
+#ifdef BP_STARTUP_VIDEO
+constexpr float VIDEO_LEAVE = 0.6f;   // its end (black) fades from over the library
+constexpr float VIDEO_GIVE_UP = 5.f;  // no frame decoded by then: the library
+
+struct StartupVideo
+{
+	PS5Intro::Player player;
+	bool tried = false;    // once a run
+	bool on = false;       // it plays, or played, this start
+	bool over = false;     // its end was shown, or it was cut short: the library's turn
+	float endAt = 0;       // the splash's time when it was over
+	ImTextureData* tex = nullptr;
+	bool retiring = false; // the texture is being given back to the renderer
+	std::uint64_t serial = ~0ull;
+};
+StartupVideo& video()
+{
+	static StartupVideo* const v = new StartupVideo(); // (never destroyed: no thread is joined at exit)
+	return *v;
+}
+
+// The texture goes: asked for on one frame, given back by the renderer on the next, freed here
+// after that. (Called each frame while the splash still draws; one left over is a few megabytes.)
+void videoRetire()
+{
+	StartupVideo& v = video();
+	if (v.tex == nullptr)
+		return;
+	if (!v.retiring)
+	{
+		v.retiring = true;
+		v.tex->WantDestroyNextFrame = true;
+		return;
+	}
+	if (v.tex->Status == ImTextureStatus_Destroyed)
+	{
+		ImGui::UnregisterUserTexture(v.tex);
+		IM_DELETE(v.tex);
+		v.tex = nullptr;
+	}
+}
+
+bool videoDrawable()
+{
+	const StartupVideo& v = video();
+	return v.tex != nullptr && !v.retiring && v.serial != ~0ull && v.tex->Status != ImTextureStatus_WantDestroy &&
+		v.tex->Status != ImTextureStatus_Destroyed;
+}
+
+// Whether it plays this start (asked once, when the splash begins).
+bool videoBegin(int kind)
+{
+	StartupVideo& v = video();
+	if (v.tried)
+		return false;
+	v.tried = true;
+	if (kind == SplashState::Still || be == nullptr || !be->getBool(Shared, "PS5", "StartupVideo").value_or(true))
+		return false;
+	v.on = v.player.open(PS5Intro::Folder());
+	return v.on;
+}
+
+void videoEnd(float t)
+{
+	StartupVideo& v = video();
+	v.over = true;
+	v.endAt = t;
+	v.player.close();
+}
+
+// A frame of it while the splash shows; when it is over, the splash leaves for the library.
+void videoShow(ImDrawList* dl, float t)
+{
+	StartupVideo& v = video();
+	rect(dl, 0, 0, W, H, IM_COL32(0, 0, 0, 255));
+	if (!v.player.started())
+	{
+		// Its clock starts once a few frames are decoded ahead.
+		if (v.player.ready())
+			v.player.start();
+		else if (t > VIDEO_GIVE_UP)
+			v.player.skip();
+	}
+	std::uint32_t w = 0, h = 0;
+	std::uint64_t serial = 0;
+	const std::uint8_t* pixels = v.player.started() ? v.player.frame(&w, &h, &serial) : nullptr;
+	if (pixels != nullptr && serial != v.serial)
+	{
+		if (v.tex == nullptr)
+		{
+			v.tex = IM_NEW(ImTextureData)();
+			v.tex->Create(ImTextureFormat_RGBA32, static_cast<int>(w), static_cast<int>(h));
+			ImGui::RegisterUserTexture(v.tex);
+		}
+		if (v.tex->Width == static_cast<int>(w) && v.tex->Height == static_cast<int>(h) && v.tex->Status != ImTextureStatus_WantDestroy &&
+			v.tex->Status != ImTextureStatus_Destroyed)
+		{
+			std::memcpy(v.tex->Pixels, pixels, static_cast<std::size_t>(w) * h * 4);
+			if (v.tex->Status != ImTextureStatus_WantCreate)
+				ImTextureDataQueueUpload(v.tex, 0, 0, static_cast<int>(w), static_cast<int>(h));
+			v.serial = serial;
+		}
+	}
+	if (videoDrawable())
+		dl->AddImage(v.tex->GetTexRef(), V(0, 0), V(W, H));
+	if (v.player.finished())
+	{
+		videoEnd(t);
+		splash.leaveAt = t;
+		splash.leaveFor = VIDEO_LEAVE;
+	}
+}
+
+// Over the library while the splash leaves: the video's last frame (black) fades.
+void videoLeave(ImDrawList* dl, float t)
+{
+	const StartupVideo& v = video();
+	videoRetire();
+	const float a = 1 - outCubic(span(t, v.endAt, v.endAt + VIDEO_LEAVE));
+	if (a > 0.004f)
+		rect(dl, 0, 0, W, H, IM_COL32(0, 0, 0, static_cast<int>(255 * a)));
+}
+
+// A button cut it short: the frame there fades with the ground (`a` of it), the sound with it.
+void videoSkipped(ImDrawList* dl, float a)
+{
+	StartupVideo& v = video();
+	if (!v.over)
+	{
+		v.player.skip();
+		videoEnd(0);
+	}
+	if (a > 0.25f && videoDrawable())
+	{
+		dl->AddImage(v.tex->GetTexRef(), V(0, 0), V(W, H), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, static_cast<int>(255 * a)));
+		return;
+	}
+	videoRetire();
+	if (a > 0.004f)
+		rect(dl, 0, 0, W, H, IM_COL32(0, 0, 0, static_cast<int>(255 * a)));
+}
+#endif
 } // namespace
 
 bool splashDelivered(int kind, float t)
 {
+#ifdef BP_STARTUP_VIDEO
+	if (video().on)
+		return video().over; // (the video has no name to bring: the top bar has it from its end)
+#endif
 	switch (kind)
 	{
 		case SplashState::Strike:
@@ -435,16 +595,32 @@ bool splashDelivered(int kind, float t)
 
 void drawStartupGround(ImDrawList* dl, float a)
 {
+#ifdef BP_STARTUP_VIDEO
+	if (video().on)
+	{
+		videoSkipped(dl, a);
+		return;
+	}
+#endif
 	ground(dl, a);
 }
 
 float splashLeaveAt(int kind)
 {
+#ifdef BP_STARTUP_VIDEO
+	// (Asked once, when the splash begins: the video, when it plays, says itself when it is over.)
+	if (videoBegin(kind))
+		return 3600.f;
+#endif
 	return kind == SplashState::Unfold ? 3.9f : kind == SplashState::Still ? 1.0f : 4.1f;
 }
 
 float splashLeaveFor(int kind)
 {
+#ifdef BP_STARTUP_VIDEO
+	if (video().on)
+		return VIDEO_LEAVE;
+#endif
 	switch (kind)
 	{
 		case SplashState::Strike:
@@ -462,6 +638,16 @@ float splashLeaveFor(int kind)
 
 bool drawStartup(ImDrawList* dl, int kind, float t)
 {
+#ifdef BP_STARTUP_VIDEO
+	if (video().on)
+	{
+		if (video().over)
+			videoLeave(dl, t);
+		else
+			videoShow(dl, t);
+		return video().over;
+	}
+#endif
 	switch (kind)
 	{
 		case SplashState::Strike:

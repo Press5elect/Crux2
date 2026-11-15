@@ -954,6 +954,10 @@ Page graphicsPage(int layer, bool forGame)
 		o.enabled = [](int) { return !be->texturePackDoing().empty(); };
 		rows.push_back(std::move(o));
 	}
+	rows.push_back(range("Download connections",
+		"How many connections a texture pack is downloaded over at once, each bringing a piece of it. More is faster while the "
+		"Internet Archive slows each connection down; 1 is one stream, as before. Takes effect with the next download.",
+		"PS5", "TexturePackConnections", 10, 1, 16, 1, "", Option::OneGame | Option::Front));
 	rows.push_back(hw(toggle("Dump textures", "Dumps replaceable textures to disk. Will reduce performance.", GS,
 		"DumpReplaceableTextures", false, ADV)));
 	rows.push_back(when(toggle("Dump mipmaps", "Includes mipmaps when dumping textures.", GS, "DumpReplaceableMipmaps", false, ADV), GS, "DumpReplaceableTextures", false));
@@ -961,8 +965,7 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games. For supersampling (SSAA), raise the internal resolution, or use paraLLEl-GS with 4 or more samples.", GS, "fxaa", false));
-	rows.push_back(toggle("SMAA", "Applies SMAA anti-aliasing: sharper edges than FXAA for a little more GPU time. It runs before a Look, so the two can be used together.", GS, "SMAA", false));
+	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.", GS, "fxaa", false));
 	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",
@@ -996,6 +999,10 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(fg(toggle("No frame generation during videos", "Turns frame generation off while the game plays a video.", GS, "FrameGenerationSkipVideos", true)));
+	rows.push_back(fg(toggle("Steady 30",
+		"Takes the game's pictures two vsyncs apart at the most, so a game that goes between 30 and 60 a second is shown at an even 30 "
+		"that frame generation makes 60 (120 at 120 Hz). For games that cannot hold 60.",
+		GS, "FrameGenerationSteady30", false)));
 	{
 		Option o = toggle("Show the movement",
 			"For checking frame generation, not for playing: the made frames show what AMD FSR 3 optical flow decided for "
@@ -1246,9 +1253,8 @@ Page advancedPage(int layer)
 		"Creates a backup copy of a save state if it already exists when the save is created. The backup copy has a "
 			".backup suffix", CORE, "BackupSavestate", true, A));
 	rows.push_back(listOf("Save a state by itself",
-		"Automatically saves the game's state to the console's drive at this interval. Load it from the quick menu with "
-			"\"Load the auto-save\". The game may pause briefly while saving. (Sleep-safe saving keeps its own five-minute "
-			"state in memory.)",
+		"Automatically saves the game's state at this interval. Load it from the quick menu with \"Load the "
+			"auto-save\". The game may pause briefly while saving.",
 		"PS5", "AutoSaveMinutes", 0, {"Off", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes", "Every 15 minutes"}, {0, 2, 5, 10, 15}, A));
 	rows.push_back(toggle("Undo for a loaded state",
 		"Keeps the game's current state before you load a save state, so you can undo the load from the quick menu.", "PS5",

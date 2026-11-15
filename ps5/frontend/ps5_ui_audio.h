@@ -373,6 +373,14 @@ void Stop();
 /// The start-up animation's time 0.
 void PlayStartup();
 void SkipStartup();
+/// The startup video (ps5_intro.cpp) plays in the start-up sound's place, at the start-up sound's
+/// volume and switch. IntroComing(): from now on PlayStartup() does nothing and the start-up sound
+/// read from the files is not played. SetIntroSound(): the video's sound, 16-bit stereo at 48 kHz
+/// (it may come after PlayIntro: it then joins the video where its clock is). PlayIntro(): the
+/// video's clock starts, its sound from its beginning. SkipStartup() fades it out.
+void IntroComing();
+void SetIntroSound(std::shared_ptr<const std::vector<s16>> stereo);
+void PlayIntro();
 void StartBackground();
 /// 0..1 each. The background's is the music's.
 void SetVolume(float startup, float background);

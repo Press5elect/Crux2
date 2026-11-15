@@ -300,6 +300,8 @@ public:
 	/// Records a GS dump of the running game's next 5 seconds (300 vsyncs) into the snaps folder, with the GS renderer
 	/// that draws it (paraLLEl-GS's own, or PCSX2's); the on-screen display says when it starts and when it is saved.
 	virtual void recordGsDump() = 0;
+	/// Writes the session's log out now (it is kept in memory otherwise): false when it was written as it went already.
+	virtual bool saveLog() = 0;
 	/// Whether a memory card is being written to right now (closing the game would spoil it).
 	virtual bool memoryCardBusy() = 0;
 	/// Whether the running game can be put back to where it was before a state was last loaded
@@ -411,6 +413,17 @@ public:
 	virtual void findTexturePacks() {}
 	virtual std::string texturePackDoing() { return {}; }
 	virtual void stopTexturePack() {}
+	/// The texture pack being downloaded, for the bar drawn over the menus: `title` empty when none.
+	/// Once a frame.
+	struct DownloadBar
+	{
+		std::string title;
+		uint64_t got = 0, total = 0;  // bytes; total 0 when not known
+		double speed = 0;             // bytes a second, over the last few seconds
+		int connections = 0;          // in a transfer now
+		double secondsLeft = -1;      // below 0: not known
+	};
+	virtual DownloadBar texturePackBar() { return {}; }
 	/// An interface sound (Cue below). Returns at once.
 	virtual void cue(int which) {}
 	/// What was typed on a keyboard (a USB one, or the phone's) since the last call: the text, and

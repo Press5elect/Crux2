@@ -16,6 +16,9 @@
 #include "ps5_pgo.h"
 #include "ps5_keyboard.h"
 #include "ps5_services.h"
+#include "ps5_fixes_fetch.h"
+#include "ps5_launch.h"
+#include "vfs/ps5_socket.h"
 #include "ps5_pacing.h"
 #include "ps5_boot_step.h"
 #include "ps5_pgs.h"
@@ -204,6 +207,9 @@ namespace PS5Host
 
 			std::atomic_bool settings_dirty{false};
 			Common::Timer::Value settings_dirty_time = 0;
+			// (From OGBox 0.0.7) While the settings or the quick menu are open, changes are kept in
+			// memory and written when they close (ps5px_settings_hold, ps5px_settings_flush).
+			std::atomic_bool settings_held{false};
 
 			// The game list scan: started, replaced and joined by the emulation thread alone (requests
 			// from other threads are queued to it), so none of this needs a lock. A request made
@@ -220,7 +226,6 @@ namespace PS5Host
 			// The font files, which ImGui reads from for as long as it has the fonts.
 			std::vector<u8> font_latin;
 			std::vector<u8> font_emoji;
-			std::vector<u8> font_cjk;
 		};
 
 		/// A test run (ps5/tools/run.sh): the launch found test-run.txt in the title folder. Read by
@@ -389,6 +394,7 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "FastPipelines", true);
 	b("PS5", "ThreadedRecording", true);
 	b("PS5", "UpdateAtStart", true);
+	b("PS5", "FixesAtStart", true);
 	// Care for the screen (the interface's own section).
 	i("PS5UI", "IdleDim", 3);
 	b("PS5UI", "ScreenSaver", true);
@@ -458,10 +464,14 @@ void PS5Host::SaveSettingsIfDue(bool force)
 {
 	if (!s_state.settings_dirty.load(std::memory_order_acquire))
 		return;
+	if (!force && s_state.settings_held.load(std::memory_order_acquire))
+		return;
 	if (!force && Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - s_state.settings_dirty_time) < SETTINGS_SAVE_DELAY)
 		return;
 
-	s_state.settings_dirty.store(false, std::memory_order_release);
+	// (Claimed: the interface's thread and the emulation thread may both flush.)
+	if (!s_state.settings_dirty.exchange(false, std::memory_order_acq_rel))
+		return;
 
 	Error error;
 	const auto lock = Host::GetSettingsLock();
@@ -469,6 +479,31 @@ void PS5Host::SaveSettingsIfDue(bool force)
 		ps5px_log("settings: cannot save %s: %s", s_state.base_settings->GetFileName().c_str(), error.GetDescription().c_str());
 	else
 		PS5Platform::MakePublic(s_state.base_settings->GetFileName().c_str(), false);
+}
+
+// The settings or the quick menu open (1) or closed (0): while they are open a change is not
+// written by itself a second later; their closing writes it (ps5px_settings_flush).
+extern "C" void ps5px_settings_hold(int held)
+{
+	PS5Host::s_state.settings_held.store(held != 0, std::memory_order_release);
+}
+
+// What was changed and not yet written, written now, on the calling thread: the menus closing, a
+// game starting, Crux2 closing.
+extern "C" void ps5px_settings_flush(void)
+{
+	PS5Host::SaveSettingsIfDue(true);
+}
+
+// A crash: what was changed and not yet written, written by the crash report (ps5_crash.cpp), after
+// the report and the log are out. Without the settings' lock (the crashed thread may hold it) and
+// once; returns 1 when something was written.
+extern "C" int ps5px_settings_flush_at_crash(void)
+{
+	static std::atomic_bool s_done{false};
+	if (s_done.exchange(true) || !PS5Host::s_state.base_settings || !PS5Host::s_state.settings_dirty.exchange(false))
+		return 0;
+	return PS5Host::s_state.base_settings->Save(nullptr) ? 1 : 0;
 }
 
 bool PS5Host::LoadFonts()
@@ -495,18 +530,6 @@ bool PS5Host::LoadFonts()
 	latin.exclude_ranges = {};
 	latin.face_name = nullptr;
 	latin.is_emoji_font = false;
-
-	// The letters of Japanese, Chinese and Korean game names (a subset of Noto Sans CJK, SIL OFL; made
-	// by tools/make-cjk-font.py): without them such a name is drawn as "?". Behind Roboto, so the
-	// Latin letters stay Roboto's. The interface does without them if the file is gone.
-	if (read("NotoSansCJK-Subset.otf", &s_state.font_cjk))
-	{
-		ImGuiManager::FontInfo& cjk = fonts.emplace_back();
-		cjk.data = s_state.font_cjk;
-		cjk.exclude_ranges = {};
-		cjk.face_name = nullptr;
-		cjk.is_emoji_font = false;
-	}
 
 	// The emoji of game titles and messages; the interface does without them if the file is gone.
 	if (read("Twemoji.Mozilla.ttf", &s_state.font_emoji))
@@ -775,6 +798,34 @@ extern "C" int ps5_title_videoout_vrr_unpeg(int32_t handle)
 	return unpeg ? unpeg(handle) : -1;
 }
 
+// HDR output (PS5_Mesa patch 0020, as OGBox's): the driver retypes the framebuffers through
+// sceVideoOutSubmitChangeBufferAttribute2 and reads the output's dynamic range through sceVideoOutGetOutputStatus,
+// both looked up here by their NIDs as the variable refresh one is. -1 when the console has no such function:
+// HDR is then refused, and the output reads as unknown.
+extern "C" int ps5_title_videoout_change_attribute(int32_t handle, int32_t set, const void* attribute)
+{
+	using ChangeFn = int (*)(int32_t, int32_t, const void*, const void*);
+	static const ChangeFn change = [] {
+		const ChangeFn found = reinterpret_cast<ChangeFn>(
+			PS5SystemModules::FindFunction("libSceVideoOut", "sceVideoOutSubmitChangeBufferAttribute2", "HuViW4HnrOw"));
+		ps5px_log("display: sceVideoOutSubmitChangeBufferAttribute2 %s", found ? "found" : "not on this console: no HDR output");
+		return found;
+	}();
+	return change ? change(handle, set, attribute, nullptr) : -1;
+}
+
+extern "C" int ps5_title_videoout_output_status(int32_t handle, void* status)
+{
+	using StatusFn = int (*)(int32_t, void*);
+	static const StatusFn get = [] {
+		const StatusFn found =
+			reinterpret_cast<StatusFn>(PS5SystemModules::FindFunction("libSceVideoOut", "sceVideoOutGetOutputStatus", "utPrVdxio-8"));
+		ps5px_log("display: sceVideoOutGetOutputStatus %s", found ? "found" : "not on this console: the output's range unknown");
+		return found;
+	}();
+	return get ? get(handle, status) : -1;
+}
+
 // Crux2: settings the emulation thread uses but must not read itself (it can be waited for by a thread
 // that holds the settings lock), handed over where settings are applied, with the lock released.
 static void PS5HandOverEmulationSettings()
@@ -950,6 +1001,7 @@ void PS5Host::CPUThreadEntryPoint()
 	// The updater: what to ask GitHub, and how (ps5_update.cpp). It asks once now, unless [PS5]
 	// UpdateAtStart is off; nothing is downloaded until the user says so.
 	PS5Services::StartUpdater();
+	PS5Fixes::Start();
 
 	// The interface's sound, before the interface: its files are read on a thread of their own
 	// while the first frames are drawn.
@@ -1013,7 +1065,6 @@ void PS5Host::CPUThreadEntryPoint()
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - exit_started).count(), sound_and_disc, machine, graphics,
 		settings, files, emulator);
 	ps5px_log("shut down");
-	ps5px_log_flush();
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1395,7 +1446,6 @@ void Host::OnVMDestroyed()
 	}
 	// (For the notice after a crash: what the log says from here on is not while a game was loaded.)
 	ps5px_log("game: closed");
-	ps5px_log_checkpoint();
 	// The memory cards are whole on the disk again: backed up, when that is asked for and they changed.
 	PS5Jobs::GameClosed();
 	// Closed in the title: sleep-safe saving's note goes (nothing to go on with at the next start).
@@ -1428,7 +1478,6 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 	if (!disc_path.empty() || !title.empty())
 	{
 		ps5px_log("game: %s [%s, CRC %08X] %s", title.c_str(), disc_serial.c_str(), disc_crc, disc_path.c_str());
-		ps5px_log_checkpoint();
 		// What its picture costs: the settings that decide most of the GPU's work, as this game has them
 		// (its own options and the game database's fixes applied).
 		static constexpr const char* blending[] = {"minimum", "basic", "medium", "high", "full", "maximum"};
@@ -2203,12 +2252,24 @@ int main(int argc, char* argv[])
 	// for USB drives, klog and the boot log.
 	PS5Platform::EarlyInit();
 	CrashHandler::Install();
+	// A socket written to after its far end closed must give an error, not end Crux2 with SIGPIPE
+	// (From Porpoise 4901f3c).
+	PS5Socket::IgnoreSigPipe();
 	ps5px_log("PCSX2 %s", GIT_REV);
 	// Which build this is: a log then says whether the eboot.bin that ran is the one just copied,
 	// and a crash is symbolised against the ELF of the build with this identity, no other.
 	ps5px_log("build: %s", ps5px_build_stamp());
 	ps5px_log("build identity: %s", ps5px_build_identity());
 	ReadTestRun();
+
+	// Launch arguments (ps5_launch.h): --rom <file> starts that game once the interface is up, and
+	// --exit-after-game closes Crux2 when it has been played. Others are left alone.
+	PS5Launch::Given() = PS5Launch::Parse(argc, argv);
+	for (int i = 1; i < argc && argv && argv[i]; i++)
+		ps5px_log("launch argument %d: %s", i, argv[i]);
+	if (!PS5Launch::Given().rom.empty())
+		ps5px_log("launch: the game %s is started straight away%s", PS5Launch::Given().rom.c_str(),
+			PS5Launch::Given().exit_after_game ? ", and Crux2 closes after it" : "");
 
 	// How late the console's sleeps wake, measured on a thread of its own while the rest starts
 	// (PS5Timing.h): the frame limiter's margin. The result is one "timing:" line.

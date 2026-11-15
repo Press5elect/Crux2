@@ -1,63 +1,90 @@
 # Crux2 - what changed
 
-## v1.0.20 (2026-11-06)
+A short entry for each version, newest first. The build copies this file into the title folder,
+where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)` headings and the
+`- Added:` / `- Changed:` / `- Fixed:` bullets (a heading without a version, such as Unreleased, is
+not shown). The full notes of each published release are in
+[`docs/releases/`](docs/releases/README.md).
 
-- Changed: SMAA is a switch beside FXAA (Settings > Picture > Post-processing) instead of an entry of
-  the Look list, and runs before a Look, so the two can be used together.
-- Fixed: every look, and SMAA, left the screen black with no overlay: the look's passes bound their own
-  quad at vertex binding 0, PCSX2 binds its vertex buffer only once per command buffer, so the picture
-  on the screen and the overlay were drawn from the quad's 4 vertices: nothing. It is bound again after
-  the look. The look's check (that its picture is not black) now reads back once every 30 frames at most.
-- Added: a look, or SMAA, that cannot draw on the console is switched off with a message: its first
-  pictures are checked, and one that is black while the game's own is not is switched off.
-- Fixed: accurate floating point on the VUs kept the game's own VU rounding mode after one rare
-  add, instead of the PS2's; in games with a VU rounding fix, later results came out slightly
-  wrong.
-- Fixed: accurate floating point on VU0 ran in the EE's rounding mode for the VU0 instructions
-  the EE runs itself (COP2); in games with an EE rounding fix their results were wrong.
-- Fixed: the EE interpreter compared floats differently from the recompiler when accurate
-  floating point was off (infinities and NaNs).
-- Fixed: accurate floating point's SQRT.S cleared the FPU's overflow and underflow flags; the
-  PS2's only touches invalid and divide.
-- Fixed: under a menu or paused, a picture FSR enlarged long ago could be shown instead of the
-  game's own after FSR had stopped enlarging it.
-- Changed: less work in the EE's recompiled ADDA, MADDA, MSUBA and MULA (a flag nothing read).
-- Changed: accurate floating point keeps more of the EE's registers around its calls, compares
-  without branches, and VU adds take their fast path.
-- Changed: the pipelines a game needed last time are made on the optimiser's thread, not the
-  GS thread: no stalls in a game's first frames.
-- Changed: a picture shown twice (frame generation not making one) gets its look and side
-  picture once. The side picture builds only its own pass, not frame generation's.
-- Changed: smaller fixes: the game's pipeline list is merged without a quadratic search, the
-  pipeline cache's dirty flag is atomic, and draws that leave colour or depth alone no longer
-  invalidate its copies.
-- Changed: the content version in param.json is 01.020.000.
+## v1.0.19 (2026-11-15)
 
-## v1.0.19 (2026-11-06)
+Since v1.0.18. (An earlier v1.0.19 was built but not published; its work and v1.0.20's are not in
+this version: [`docs/history/v1.0.19-v1.0.20-reverted.md`](docs/history/v1.0.19-v1.0.20-reverted.md).)
 
-- Added: SMAA anti-aliasing as a Look (Settings > Picture), beside FXAA; the FXAA row now points to
-  the internal resolution and paraLLEl-GS's samples for supersampling.
-- Added: Settings > Debug > Logs: logs on or off, where they go (the console or a USB drive), and a
-  switch for each (Crux2's boot log, the graphics driver's messages, the emulator's log, the klog copy).
-- Added: network shares in Settings > Folders: added, changed and taken away with the on-screen
-  keyboard, servers found on the network, connected at once; network.cfg is written for you.
-- Changed: games on a network share are read faster (large buffers on the share's connection).
-- Changed: the boot log is written by a thread of its own, so no line waits for the file system;
-  it is synced to the drive only when a game starts or closes and at the end.
-- Changed: the five-minute safety save is kept in memory and written to the drive only if Crux2
-  crashes; the PS5 menu's save is made at most once a minute; automatic states are compressed harder.
-- Changed: PCSX2's own pipeline cache file is no longer written (the graphics driver's cache keeps
-  the same pipelines).
-- Changed: the graphics driver backs a large buffer with several pieces of memory when no single
-  free piece is big enough.
-- Changed: built on PCSX2 v2.9.158 (was v2.9.150): out-of-bounds reads fixed when replacement
-  textures load, a Vulkan feedback-loop fix (a texture is marked changed when it switches layout),
-  a guard against out-of-bounds 4-bit texture reads from bad GS registers, more Japanese serials and corrected titles in the game database, a newer controller database,
-  and LZMA 26.05.
-- Changed: the content version in param.json is 01.019.000.
-- Fixed: the console could go down after Crux2 was closed many times with USB drives on.
-- Fixed: SingStar's microphones heard nothing: the console's microphone library is now imported
-  by the title instead of looked for while it runs, which a title cannot do.
+- Added: HDR10 output (Settings > Graphics, HDR; off), with highlight and white levels and Adjust
+  HDR brightness; it needs the console's HDR setting and a TV that takes HDR.
+- Added: Debanding (Settings > Graphics; off, Low, High).
+- Added: a startup video of Crux2's own in the start-up animation's place (Settings > Interface,
+  Startup video).
+- Added: a PlayStation Move as player 1's GunCon 2, through the Move Management payload (Settings >
+  Controllers; off).
+- Added: game fixes fetched from GitHub at start (game database entries and patches, checked
+  against ps5/game-fixes.txt; Settings > PlayStation 5, on).
+- Added: the boot log is kept in memory and written when something goes wrong (Settings > Log,
+  Boot log: or always written); Save the log in Settings > Log and in the quick menu.
+- Added: the quick menu's entries can be shown, hidden and ordered (Triangle), the game's options
+  are in it, and Apply changes now restarts the game for settings that need it.
+- Added: frame generation's pictures a second on the on-screen display, and a log line every 10 s.
+- Added: test builds say "developer build" and their updater offers the release; the updater
+  removes files a new version no longer ships.
+- Added: a light gun choice (Settings > Controllers > Light gun): one GunCon 2 in USB port 1, or two
+  in ports 1 and 2, with their buttons set up. Before, a GunCon 2 could only be plugged in by
+  editing the settings file.
+- Added: steady motion aim for the GunCon 2 (from Porpoise): the same pointing gives the same place,
+  no drift, R3 held a moment recentres, the screen measured by pointing at two corners, a second
+  gun aimed by player 2's controller. The aim as before is a choice ("Like a mouse").
+- Added: R2 clicks like a trigger for the light gun (Off / Light / Firm), and stick response curves
+  per stick (Linear, as before, by default).
+- Added: USB pads through the console's raw USB devices when its USB library can't be used.
+- Added: network shares set up on the console again (Settings > Folders): servers found on the
+  network (SMB and NFS), a server's shares or exports listed, an address on a number pad, and a
+  test that says what went wrong. SMB checks the server's port before connecting, and the shares'
+  sockets now really don't block on the PS5.
+- Added: a test for the name server set by hand, and public DNS asked when the console's answers
+  0.0.0.0. A UDP port the console refuses a game is bound lower.
+- Added: achievements unlocked as the console's trophy pop-ups, with the trophy sound (on by
+  default; PCSX2's own notice when the console's can't be shown).
+- Added: Crux2's own screenshots with Options + Square (the game's picture, no menus), in snaps/;
+  the first becomes the game's picture of play when it has none.
+- Added: launch arguments `--rom <file>` and `--exit-after-game`.
+- Added: settings tested on a PS5 for a game, downloaded from the repository once a day (none yet),
+  in the game's own options.
+- Added: Steady 30 for frame generation (off), and a colour filter on the game's picture for colour
+  blindness (off).
+- Added: the recomp kit (`Crux2-recomp-kit-<version>.zip`) comes with every release, beside Crux2's
+  ZIP: it makes a game's native modules and Crux2 Recomp's on a PC (Windows or Linux).
+- Changed: covers and pictures are downloaded three at a time; the covers on screen load first.
+- Changed: quick taps are held for the game at least 50 ms.
+- Changed: network shares are woken at start; a game on a share that does not answer waits for it
+  with a count on the screen, and a read stuck for 2 s is said on the screen.
+- Changed: an exit, a restart or a state load waits for the writes still under way, with a bar.
+- Changed: settings are written when the menus close, and at a game's start, quit and crash.
+- Changed: texture packs are held within a memory budget (at most 2 GiB); the least recently used
+  textures are let go and read again when needed.
+- Changed: HD texture packs download over 10 connections at once (a game's options > Graphics,
+  Download connections: 1 to 16; 1 is one stream as before), each piece on a new connection, with a
+  progress bar over the menus (size, percent, speed, connections, time left).
+- Changed: the payload SDK fork is at `3345cde` (was `b5efad5`): built over the SDK's v0.45 release
+  instead of v0.42, so the C++ runtime linked into the title is a newer build; the memory heap grows
+  in 2 MiB steps instead of 16, keeps its pieces apart so emptied ones can be given back, and keeps
+  32 MiB spare before giving any back; more files can stay open at once. Needs a start, a game and a
+  frame-rate check on the console.
+- Changed: PS5_Vulkan is pinned at `7f492b4` (was `f410e67`): its new commits are Wine/Proton
+  graphics work and a driver test; the link recipe, libc.prx, the packaging and its Mesa pin are as
+  they were.
+- Changed: PS2Recomp is at `e563698` (was `eb8688b`) for native modules: GIF packets with the
+  FLG=3 format are taken as image data, as on the PS2; def-jam-vendetta-recomp's patch rebased.
+- Changed: built on PCSX2 v2.9.179 (was v2.9.150; master `0ab00c4`): the PS1 Analog Controller
+  (DualShock 1) as a controller type, depth drawn as a colour target for the Vulkan renderer's
+  depth feedback (not used by default on the PS5: the default depth feedback mode keeps the old
+  path), texture cache and VU cycle fixes, bounds checks in VIF, CDVD and PS1 memory, game database
+  fixes. Save states made before do not load (PCSX2 changed their version).
+- Changed: the graphics driver (RADV) stays on Mesa main of 2026-10-31 (`0618bfe0ffb`, as v1.0.18):
+  the newer Mesa of 2026-11-15 stopped the GPU the first time each game started.
+- Fixed: a backup that could not read a file was written as complete, and with "replace older"
+  the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
+  are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't
+  answer at once.
 
 ## v1.0.18 (2026-10-31)
 
@@ -85,7 +112,7 @@
   show what it decided for each pixel, for checking frame generation.
 - Changed: frame generation works at the game picture's own size when the screen only stretches
   it (no FSR or NIS): less work for each picture it makes.
-- Fixed: What's new (Settings > System) only said whether a newer version was out. It now shows
+- Fixed: What's new (Settings > PlayStation 5) only said whether a newer version was out. It now shows
   what was added, changed and fixed in each version, newest first, and opens by itself once after
   an update with the changes since the version that ran before.
 

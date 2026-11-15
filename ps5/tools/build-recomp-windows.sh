@@ -20,7 +20,15 @@ set -euo pipefail
 ps5=$(cd "$(dirname "$0")/.." && pwd)
 root=$(dirname "$ps5")
 out=${1:-$root/.deps/recomp-windows}
-recomp_title=${CRUX2_RECOMP_DIR:-$root/../PS5_Crux2Recomp}
+# Crux2 Recomp's patches: a PS5_Crux2Recomp checkout beside this one when there is one, else this
+# repository's own crux2recomp/ (which carries the same patches).
+if [[ -n ${CRUX2_RECOMP_DIR:-} ]]; then
+	recomp_title=$CRUX2_RECOMP_DIR
+elif [[ -d $root/../PS5_Crux2Recomp/ps5/runner ]]; then
+	recomp_title=$root/../PS5_Crux2Recomp
+else
+	recomp_title=$root/crux2recomp
+fi
 jobs=$(nproc 2>/dev/null || echo 4)
 
 revision=$(sed -n 's/^PS2RECOMP_REVISION = "\(.*\)"/\1/p' "$ps5/recomp/tools/recomp-game.py")

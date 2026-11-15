@@ -32,12 +32,16 @@
 #include "../ps5_cheats_logic.h"
 #include "../ps5_disc.h"
 #include "../ps5_disc_image.h"
+#include "../ps5_hdr.h"
 #include "../ps5_about.h"
 #include "../vfs/ps5_vfs.h"
 #include "../ps5_shares.h"
 #include "../ps5_extras.h"
 #include "../ps5_input_source.h"
 #include "../ps5_jobs.h"
+#include "../ps5_launch.h"
+#include "../ps5_recommend.h"
+#include "../ps5_shots.h"
 #include "../ps5_net.h"
 #include "../ps5_online.h"
 #include "../ps5_presets.h"
@@ -113,6 +117,11 @@ extern "C" void ps5px_download_covers_now(void);
 bool Crux2WantsSoftFloat(const std::string& serial); // GameDatabase.cpp (ps5.patch)
 extern "C" void ps5px_download_pictures_now(void);
 extern "C" int ps5px_arm_profiled_start(int threaded_recording);
+// (From OGBox 0.0.7) The settings written when the menus close, not a second after each change
+// (ps5_host.cpp); and whether they are open (bp_settings.cpp).
+extern "C" void ps5px_settings_hold(int held);
+extern "C" void ps5px_settings_flush(void);
+namespace bp { bool menusOpen(); }
 // The interface's faces, as the emulator's font atlas has them (ImGui/ImGuiManager.cpp): 0 the
 // text face, 1 the bold one, 2 the one the title's name is lettered in.
 ImFont* ps5px_interface_font(int which);
@@ -1149,6 +1158,13 @@ public:
 	bp::LoadState loadState() override
 	{
 		bp::LoadState out;
+		// (From OGBox 0.0.6) The image's share not answering yet: the seconds counted.
+		if (m_share_wait.active && NowSeconds() - m_share_wait.since >= 1.0)
+		{
+			out.text = fmt::format("Waiting for the network share... {} s", static_cast<int>(NowSeconds() - m_share_wait.since));
+			out.slow = "The game starts as soon as the share answers. Circle goes back to the game list.";
+			return out;
+		}
 		const std::lock_guard lock(s_told_mutex);
 		out.text = s_load_text;
 		out.progress = s_load_text.empty() ? -1.f : s_load_progress;
@@ -1182,31 +1198,36 @@ public:
 
 	void loadStateFile(const bp::StateInfo& state) override
 	{
-		Host::RunOnCPUThread([path = state.path, slot = state.slot, backup = state.backup]() {
-			if (!VMManager::HasValidVM())
-				return;
-			// (A state still being packed into its file, the one saved by itself above all, is
-			// whole before it is read.)
-			VMManager::WaitForSaveStateFlush();
-			Error error;
-			if (!VMManager::LoadState(path.c_str(), &error))
-				FullscreenUI::ReportStateLoadError(error.GetDescription(), slot > 0 ? std::optional<s32>(slot) : std::nullopt, backup);
+		LeaveAfterWrites("loading the state", [path = state.path, slot = state.slot, backup = state.backup]() {
+			Host::RunOnCPUThread([path, slot, backup]() {
+				if (!VMManager::HasValidVM())
+					return;
+				// (A state still being packed into its file, the one saved by itself above all, is
+				// whole before it is read.)
+				VMManager::WaitForSaveStateFlush();
+				Error error;
+				if (!VMManager::LoadState(path.c_str(), &error))
+					FullscreenUI::ReportStateLoadError(error.GetDescription(), slot > 0 ? std::optional<s32>(slot) : std::nullopt, backup);
+			});
 		});
 		m_undo_age.ResetTo(0);
 	}
 
 	void reset() override
 	{
-		Host::RunOnCPUThread([]() {
-			if (VMManager::HasValidVM())
-				VMManager::Reset();
+		LeaveAfterWrites("restarting the game", [] {
+			Host::RunOnCPUThread([]() {
+				if (VMManager::HasValidVM())
+					VMManager::Reset();
+			});
 		});
 	}
 
 	void closeGame(bool saveState) override
 	{
 		m_states_key.clear();
-		Host::RunOnCPUThread([saveState]() { Host::RequestVMShutdown(false, saveState, saveState); });
+		LeaveAfterWrites("going back to the game list",
+			[saveState] { Host::RunOnCPUThread([saveState]() { Host::RequestVMShutdown(false, saveState, saveState); }); });
 	}
 
 	void changeDisc(const std::string& path) override
@@ -1233,6 +1254,8 @@ public:
 				MTGS::ToggleSoftwareRendering();
 		});
 	}
+
+	bool saveLog() override { return ps5px_log_keep("Save the log was chosen in the quick menu") != 0; }
 
 	void recordGsDump() override
 	{
@@ -1292,17 +1315,19 @@ public:
 	{
 		m_undo_can = false;
 		m_undo_age.Reset();
-		Host::RunOnCPUThread([]() {
-			if (!VMManager::HasValidVM())
-				return;
-			const std::string path = VMManager::GetCurrentSpecialSaveStateFileName("undo");
-			if (path.empty())
-				return;
-			// (It may still be on its way into its file.)
-			VMManager::WaitForSaveStateFlush();
-			Error error;
-			if (!VMManager::LoadState(path.c_str(), &error))
-				FullscreenUI::ReportStateLoadError(error.GetDescription(), std::nullopt, false);
+		LeaveAfterWrites("undoing the load", [] {
+			Host::RunOnCPUThread([]() {
+				if (!VMManager::HasValidVM())
+					return;
+				const std::string path = VMManager::GetCurrentSpecialSaveStateFileName("undo");
+				if (path.empty())
+					return;
+				// (It may still be on its way into its file.)
+				VMManager::WaitForSaveStateFlush();
+				Error error;
+				if (!VMManager::LoadState(path.c_str(), &error))
+					FullscreenUI::ReportStateLoadError(error.GetDescription(), std::nullopt, false);
+			});
 		});
 	}
 
@@ -1870,6 +1895,25 @@ public:
 					[player] { TestMicrophone(player); }, bp::Option::AllGames));
 			}
 		}
+		// The light gun: a GunCon 2 plugged into the PS2's USB port 1 (and a second into port 2), its
+		// buttons given their defaults (PS5InputSource::SetGunCon2Defaults), aimed by moving the
+		// controller or with a PlayStation Move (Settings > Controllers' aiming rows).
+		{
+			page.rows.push_back(Heading("LIGHT GUN"));
+			bp::Option gun;
+			gun.kind = bp::Option::IntList;
+			gun.label = "Light gun (GunCon 2)";
+			gun.desc = "Plugs a GunCon 2 into the PS2's USB port 1, or two GunCon 2s into ports 1 and 2 for two players, for "
+				"light-gun games. Choose it for those games only (in their own options): a game that does not expect a light "
+				"gun may not see its controller. Two guns take USB port 2, which the SingStar microphones use too.";
+			gun.section = "PS5";
+			gun.key = "LightGun";
+			gun.defInt = 0;
+			gun.names = {"None", "One: player 1's", "Two: players 1 and 2"};
+			gun.ints = {0, 1, 2};
+			gun.flags = bp::Option::NextStart;
+			page.rows.push_back(std::move(gun));
+		}
 		// Who plays on what: each signed-in user's controller is a player (the one who started the
 		// title is the first), put on the PlayStation 2's ports in one of the three ways games expect.
 		page.rows.push_back(Heading("PLAYERS"));
@@ -1996,8 +2040,9 @@ public:
 		const HotkeyInfo* last = nullptr;
 		for (const HotkeyInfo* hotkey : m_hotkeys)
 		{
-			// Screenshots and video capture are the console's own (the Create button).
-			if (std::strcmp(hotkey->name, "Screenshot") == 0 || std::strcmp(hotkey->name, "ToggleVideoCapture") == 0)
+			// Video capture is the console's own (the Create button). Screenshots are Crux2's too: of the
+			// game's picture, without the menus (ps5_shots.h; Options + Square unless changed here).
+			if (std::strcmp(hotkey->name, "ToggleVideoCapture") == 0)
 				continue;
 			if (last == nullptr || std::strcmp(hotkey->category, last->category) != 0)
 			{
@@ -2552,6 +2597,59 @@ public:
 				page.rows.push_back(std::move(address));
 		}
 
+		if (layer == bp::Shared)
+		{
+			// One question to the name servers set by hand (from Porpoise's DNS test): whether
+			// they answer at all, before a game finds out.
+			page.rows.push_back(Action("Test the name server",
+				"Asks the name servers set above for the service's own website (three tries) and says whether they answer and "
+				"how fast. The console's own name server is tested by the console's Settings.",
+				[this] {
+					std::vector<std::string> servers;
+					for (int i = 1; i <= 2; i++)
+					{
+						if (getString(bp::Shared, "DEV9/Eth", fmt::format("ModeDNS{}", i).c_str()).value_or(std::string("Auto")) != "Manual")
+							continue;
+						const std::string address = getString(bp::Shared, "DEV9/Eth", fmt::format("DNS{}", i).c_str()).value_or(std::string());
+						int numbers[4];
+						if (bp::parseAddress(address, numbers) && address != "0.0.0.0")
+							servers.push_back(address);
+					}
+					if (servers.empty())
+					{
+						bp::message("Test the name server", "No name server is set by hand: games use the console's own.");
+						return;
+					}
+					NetShareAsk<std::string>("Asking the name server (a few seconds)...",
+						[servers] {
+							std::string text;
+							for (const std::string& server : servers)
+							{
+								std::string name = "ps2online.com", which = server;
+								for (const PS5Presets::NameServer& preset : PS5Presets::NAME_SERVERS)
+								{
+									if (server == preset.address)
+										name = preset.site, which = fmt::format("{} ({})", preset.name, server);
+								}
+								const PS5Net::NameServerTest test = PS5Net::TestNameServer(server, name);
+								if (!text.empty())
+									text += "\n\n";
+								if (test.result == 1)
+									text += fmt::format("{} answers: {} is {} ({} ms).", which, name, test.address, test.ms);
+								else if (test.result == 0)
+									text += fmt::format("{} answers, without an address for {} ({}, {} ms). It is there; whether it "
+														"knows a game's servers is the service's to say.", which, name, test.why, test.ms);
+								else
+									text += fmt::format("{} does not answer ({}). Check the address; a router may also block name "
+														"servers other than its own.", which, test.why);
+							}
+							return text;
+						},
+						[](std::string text) { bp::message("Test the name server", text); });
+				},
+				bp::Option::AllGames));
+		}
+
 		page.rows.push_back(Heading("HARD DRIVE"));
 		page.rows.push_back(Toggle("Hard drive", "Enables the internal Hard Disk Drive for expanded storage.",
 			"DEV9/Hdd", "HddEnable", false));
@@ -2773,68 +2871,160 @@ public:
 		ps5px_log("folders: %s now %s", kept.label, kept.now->c_str());
 	}
 
-	// ---- v1.0.19: network shares, added and changed here (from OGBox 0.0.3's share form) ----------
+	// ---- network shares, added and changed here (Crux2 v1.0.19, from OGBox 0.0.3's share form;
+	// back after 883c832, with Porpoise 35c039c and bc835d2's NFS servers found, a server's list
+	// and a test that says what went wrong) ------------------------------------------------------
 
-	static std::string ShareKind(const PS5Shares::Share& s)
+	// What a thread that asked the network hands back, run here on the interface's thread.
+	void NetSharesFrame()
+	{
+		std::vector<std::function<void()>> done;
+		{
+			const std::lock_guard<std::mutex> lock(m_netshare_lock);
+			done.swap(m_netshare_done);
+		}
+		for (std::function<void()>& then : done)
+			then();
+	}
+
+	// work() on a thread of its own, its answer to then() at the next frame; one at a time.
+	template <typename T>
+	void NetShareAsk(const char* busy, std::function<T()> work, std::function<void(T)> then)
+	{
+		if (m_netshare_busy.exchange(true))
+		{
+			bp::toast("Still asking the network...");
+			return;
+		}
+		bp::toast(busy, 4.f);
+		std::thread([this, work = std::move(work), then = std::move(then)] {
+			T answer = work();
+			{
+				const std::lock_guard<std::mutex> lock(m_netshare_lock);
+				m_netshare_done.push_back([then, answer = std::move(answer)] { then(answer); });
+			}
+			m_netshare_busy = false;
+		}).detach();
+	}
+
+	static std::string NetShareKind(const PS5Shares::Share& s)
 	{
 		return s.nfs ? "NFS (a NAS or a Linux PC)" : "SMB (a Windows PC, most NAS)";
 	}
 
-	// The servers a search found, offered once it is done (the search runs on a thread of its own).
-	void SharesFrame()
+	void FindNetShareServers()
 	{
-		std::vector<PS5Shares::FoundServer> found;
-		{
-			const std::lock_guard<std::mutex> lock(m_found_lock);
-			if (!m_found_ready)
-				return;
-			m_found_ready = false;
-			found.swap(m_found);
-		}
-		if (!m_share_draft)
-			return;
-		if (found.empty())
-		{
-			bp::toast("No SMB server answered on this network. Type its address instead.", 6.f);
-			return;
-		}
-		std::vector<std::string> names;
-		for (const PS5Shares::FoundServer& f : found)
-			names.push_back(f.name.empty() ? f.ip : f.name + "  (" + f.ip + ")");
-		bp::pick("The servers on this network", names, -1, [this, found](int i) {
-			if (!m_share_draft || i < 0 || i >= static_cast<int>(found.size()))
-				return;
-			m_share_draft->host = found[static_cast<size_t>(i)].ip;
-			if (m_share_draft->name.empty() && !found[static_cast<size_t>(i)].name.empty() && m_share_draft->path.empty())
-				m_share_draft->name = found[static_cast<size_t>(i)].name;
-			m_pages++;
-		});
+		NetShareAsk<std::vector<PS5Shares::FoundServer>>("Looking for file servers on this network (a few seconds)...",
+			[] {
+				std::vector<PS5Shares::FoundServer> found = PS5Shares::findServers();
+				ps5px_log("network shares: %zu file server(s) answered on the local network", found.size());
+				return found;
+			},
+			[this](std::vector<PS5Shares::FoundServer> found) {
+				if (!m_netshare_draft)
+					return;
+				if (found.empty())
+				{
+					bp::toast("No computer answered on the SMB or NFS port on this network. Type its address instead.", 6.f);
+					return;
+				}
+				std::vector<std::string> names;
+				for (const PS5Shares::FoundServer& f : found)
+				{
+					const char* what = (f.smb && f.nfs) ? "SMB and NFS" : f.nfs ? "NFS" : "SMB";
+					names.push_back(f.name.empty() ? fmt::format("{}  ({})", f.ip, what) : fmt::format("{}  ({}, {})", f.name, f.ip, what));
+				}
+				bp::pick("The file servers on this network", names, -1, [this, found](int i) {
+					if (!m_netshare_draft || i < 0 || i >= static_cast<int>(found.size()))
+						return;
+					const PS5Shares::FoundServer& f = found[static_cast<size_t>(i)];
+					m_netshare_draft->host = f.ip;
+					if (f.smb != f.nfs)
+						m_netshare_draft->nfs = f.nfs;
+					m_pages++;
+				});
+			});
 	}
 
-	void FindServers()
+	// The server's shares (SMB) or exports (NFS), one picked as the share's folder.
+	void PickFromNetShareServer()
 	{
-		if (m_finding.exchange(true))
+		if (!m_netshare_draft || m_netshare_draft->host.empty())
 		{
-			bp::toast("Still looking for servers...");
+			bp::toast("Give the share's server first.");
 			return;
 		}
-		bp::toast("Looking for SMB servers on this network (a few seconds)...", 3.f);
-		std::thread([this] {
-			std::vector<PS5Shares::FoundServer> found = PS5Shares::findServers();
-			ps5px_log("network shares: %zu SMB server(s) answered on the local network", found.size());
-			{
-				const std::lock_guard<std::mutex> lock(m_found_lock);
-				m_found = std::move(found);
-				m_found_ready = true;
-			}
-			m_finding = false;
-		}).detach();
+		const PS5Shares::Share asked = *m_netshare_draft;
+		const PS5Shares::ShareFile file = PS5Shares::Current();
+		using Listed = std::pair<PS5SharesProblem::Problem, std::vector<std::string>>;
+		NetShareAsk<Listed>(asked.nfs ? "Asking the server for its exports..." : "Asking the server for its shares...",
+			[asked, file] {
+				Listed listed;
+				listed.first = PS5Shares::listOnServer(asked, file, listed.second);
+				return listed;
+			},
+			[this, nfs = asked.nfs](Listed listed) {
+				if (!m_netshare_draft)
+					return;
+				if (listed.first != PS5SharesProblem::Problem::None)
+				{
+					bp::message(nfs ? "The server's exports" : "The server's shares", PS5SharesProblem::Text(listed.first));
+					return;
+				}
+				if (listed.second.empty())
+				{
+					bp::toast(nfs ? "The server exports no folder." : "The server shares no folder this account can see.", 6.f);
+					return;
+				}
+				std::vector<std::string> names = listed.second;
+				bp::pick(nfs ? "The server's exports" : "The server's shares", std::move(names), -1, [this, listed](int i) {
+					if (!m_netshare_draft || i < 0 || i >= static_cast<int>(listed.second.size()))
+						return;
+					m_netshare_draft->path = listed.second[static_cast<size_t>(i)];
+					m_pages++;
+					bp::toast(m_netshare_draft->nfs ? "Add a folder inside the export to the path if the games are in one." :
+													  "Add the folder with the games after the share (Games/PS2) if they are in one.",
+						5.f);
+				});
+			});
+	}
+
+	// The draft tried as it stands, the kind of failure said.
+	void TestNetShare()
+	{
+		if (!m_netshare_draft)
+			return;
+		const PS5Shares::Share asked = *m_netshare_draft;
+		const PS5Shares::ShareFile file = PS5Shares::Current();
+		struct Tested
+		{
+			PS5SharesProblem::Problem problem;
+			std::string detail;
+			size_t entries = 0;
+		};
+		NetShareAsk<Tested>("Trying the share (up to 20 seconds)...",
+			[asked, file] {
+				Tested t;
+				t.problem = PS5Shares::testShare(asked, file, &t.detail, &t.entries);
+				return t;
+			},
+			[](Tested t) {
+				std::string text = PS5SharesProblem::Text(t.problem);
+				if (t.problem == PS5SharesProblem::Problem::None)
+					text += fmt::format(" {} name(s) at its top.", t.entries);
+				else if (t.problem == PS5SharesProblem::Problem::NoSuchShare && !t.detail.empty())
+					text += "\n\nIt exports: " + t.detail;
+				else if (!t.detail.empty())
+					text += "\n\nWhat it said: " + t.detail.substr(t.detail.rfind('\n') == std::string::npos ? 0 : t.detail.rfind('\n') + 1);
+				ps5px_log("network shares: test: %s", PS5SharesProblem::Text(t.problem));
+				bp::message("Test the share", text);
+			});
 	}
 
 	// The draft into the shares, mounted, and network.cfg written.
-	void SaveShare()
+	void SaveNetShare()
 	{
-		PS5Shares::Share s = *m_share_draft;
+		PS5Shares::Share s = *m_netshare_draft;
 		while (!s.path.empty() && (s.path.back() == '/' || s.path.back() == ' '))
 			s.path.pop_back();
 		while (!s.nfs && !s.path.empty() && s.path.front() == '/')
@@ -2854,12 +3044,12 @@ public:
 
 		PS5Shares::ShareFile& file = PS5Shares::Current();
 		PS5Shares::Share* target = nullptr;
-		const bool changing = m_share_index >= 0 && m_share_index < static_cast<int>(file.shares.size());
+		const bool changing = m_netshare_index >= 0 && m_netshare_index < static_cast<int>(file.shares.size());
 		if (changing)
 		{
-			PS5Shares::unmountShare(file.shares[static_cast<size_t>(m_share_index)]);
-			file.shares[static_cast<size_t>(m_share_index)] = s;
-			target = &file.shares[static_cast<size_t>(m_share_index)];
+			PS5Shares::unmountShare(file.shares[static_cast<size_t>(m_netshare_index)]);
+			file.shares[static_cast<size_t>(m_netshare_index)] = s;
+			target = &file.shares[static_cast<size_t>(m_netshare_index)];
 		}
 		else
 		{
@@ -2873,8 +3063,8 @@ public:
 		ps5px_log("network shares: %s \"%s\", %s, %s%s", changing ? "changed" : "added", target->name.c_str(),
 			PS5Shares::shareAddress(*target).c_str(), mounted ? ("at " + target->mount).c_str() : ("not mounted: " + why).c_str(),
 			saved ? "" : ("; network.cfg not written: " + saved_why).c_str());
-		m_share_draft.reset();
-		m_share_index = -1;
+		m_netshare_draft.reset();
+		m_netshare_index = -1;
 		m_pages++;
 		if (!saved)
 			bp::toast("The share is there until Crux2 closes, but network.cfg could not be written: " + saved_why, 7.f);
@@ -2885,7 +3075,7 @@ public:
 		scan(false);
 	}
 
-	void RemoveShare(size_t index)
+	void RemoveNetShare(size_t index)
 	{
 		PS5Shares::ShareFile& file = PS5Shares::Current();
 		if (index >= file.shares.size())
@@ -2902,7 +3092,7 @@ public:
 	}
 
 	// The account the SMB shares without one of their own use: changed, and those shares connected with it again.
-	void SetSharesAccount(const std::string& user, const std::string& password)
+	void SetNetSharesAccount(const std::string& user, const std::string& password)
 	{
 		PS5Shares::ShareFile& file = PS5Shares::Current();
 		file.user = user.empty() ? "guest" : user;
@@ -2922,57 +3112,88 @@ public:
 		scan(false);
 	}
 
-	void SharesRows(bp::Page& page)
+	void NetSharesRows(bp::Page& page)
 	{
 		constexpr unsigned flags = bp::Option::NoGame;
 		page.rows.push_back(Heading("NETWORK SHARES"));
 		PS5Shares::ShareFile& file = PS5Shares::Current();
 
-		if (m_share_draft)
+		if (m_netshare_draft)
 		{
-			PS5Shares::Share& d = *m_share_draft;
-			page.rows.push_back(Heading(m_share_index < 0 ? "A NEW SHARE" : "CHANGING " + file.shares[static_cast<size_t>(m_share_index)].name));
+			PS5Shares::Share& d = *m_netshare_draft;
+			page.rows.push_back(Heading(m_netshare_index < 0 || m_netshare_index >= static_cast<int>(file.shares.size()) ?
+					std::string("A NEW SHARE") : "CHANGING " + file.shares[static_cast<size_t>(m_netshare_index)].name));
 			bp::Option kind = Action("Kind", "SMB for a Windows PC and most NAS; NFS for a NAS or a Linux PC that shares its folders that way.",
 				[this] {
-					bp::pick("Kind of share", {"SMB (a Windows PC, most NAS)", "NFS (a NAS or a Linux PC)"}, m_share_draft->nfs ? 1 : 0,
+					bp::pick("Kind of share", {"SMB (a Windows PC, most NAS)", "NFS (a NAS or a Linux PC)"}, m_netshare_draft->nfs ? 1 : 0,
 						[this](int i) {
-							if (m_share_draft)
-								m_share_draft->nfs = (i == 1);
+							if (m_netshare_draft)
+								m_netshare_draft->nfs = (i == 1);
 							m_pages++;
 						});
 				},
 				flags);
-			kind.info = [k = ShareKind(d)] { return k; };
+			kind.info = [k = NetShareKind(d)] { return k; };
 			page.rows.push_back(std::move(kind));
 
-			bp::Option server = Action("Server", "The PC or NAS: found on this network, or typed (its IP address is the safe choice).",
+			bp::Option server = Action("Server",
+				"The PC or NAS: found on this network (those answering on SMB's or NFS's port), its address on the number pad, "
+				"or its name typed.",
 				[this] {
-					bp::pick("The share's server", {"Find SMB servers on this network", "Type its address"}, -1, [this](int i) {
-						if (i == 0)
-							FindServers();
-						else if (i == 1 && m_share_draft)
-							bp::editText("Server (192.168.1.10)", m_share_draft->host, false, [this](const std::string& text) {
-								if (m_share_draft)
-									m_share_draft->host = text;
-								m_pages++;
-							});
-					});
+					bp::pick("The share's server", {"Find the file servers on this network", "Its address (number pad)", "Type its name"}, -1,
+						[this](int i) {
+							if (!m_netshare_draft)
+								return;
+							if (i == 0)
+							{
+								FindNetShareServers();
+							}
+							else if (i == 1)
+							{
+								int numbers[4];
+								const std::string now = bp::parseAddress(m_netshare_draft->host, numbers) ? m_netshare_draft->host : std::string();
+								const std::string from = PS5Net::CurrentStatus().console_ip;
+								bp::editAddress("The server's address", now, from.empty() ? std::string("192.168.1.1") : from,
+									[this](const std::string& text) {
+										if (m_netshare_draft && !text.empty())
+											m_netshare_draft->host = text;
+										m_pages++;
+									});
+							}
+							else if (i == 2)
+							{
+								bp::editText("The server's name", m_netshare_draft->host, false, [this](const std::string& text) {
+									if (m_netshare_draft)
+										m_netshare_draft->host = text;
+									m_pages++;
+								});
+							}
+						});
 				},
 				flags);
 			server.info = [h = d.host] { return h.empty() ? std::string("Not set") : h; };
 			page.rows.push_back(std::move(server));
 
 			bp::Option path = Action(d.nfs ? "Export and folder" : "Share and folder",
-				d.nfs ? "The folder on the NAS, as it exports it: /volume1/games/ps2." : "The share and the folder in it with the games: Games/PS2.",
+				d.nfs ? "The folder on the NAS, as it exports it: /volume1/games/ps2. Picked from the server's list, or typed." :
+						"The share and the folder in it with the games: Games/PS2. Picked from the server's list, or typed.",
 				[this] {
-					const bool nfs = m_share_draft->nfs;
-					bp::editText(nfs ? "Export and folder (/volume1/games/ps2)" : "Share and folder (Games/PS2)", m_share_draft->path, false,
-						[this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->path = text;
-							m_pages++;
-						},
-						160);
+					const bool nfs = m_netshare_draft->nfs;
+					bp::pick(nfs ? "Export and folder" : "Share and folder", {nfs ? "Pick from the server's exports" : "Pick from the server's shares", "Type it"}, -1,
+						[this, nfs](int i) {
+							if (!m_netshare_draft)
+								return;
+							if (i == 0)
+								PickFromNetShareServer();
+							else if (i == 1)
+								bp::editText(nfs ? "Export and folder (/volume1/games/ps2)" : "Share and folder (Games/PS2)", m_netshare_draft->path, false,
+									[this](const std::string& text) {
+										if (m_netshare_draft)
+											m_netshare_draft->path = text;
+										m_pages++;
+									},
+									160);
+						});
 				},
 				flags);
 			path.info = [p = d.path] { return p.empty() ? std::string("Not set") : p; };
@@ -2980,9 +3201,9 @@ public:
 
 			bp::Option name = Action("Name", "How the share is shown in the library. Left empty: its last folder.",
 				[this] {
-					bp::editText("Name", m_share_draft->name, false, [this](const std::string& text) {
-						if (m_share_draft)
-							m_share_draft->name = text;
+					bp::editText("Name", m_netshare_draft->name, false, [this](const std::string& text) {
+						if (m_netshare_draft)
+							m_netshare_draft->name = text;
 						m_pages++;
 					});
 				},
@@ -2994,9 +3215,9 @@ public:
 			{
 				bp::Option user = Action("User", "An account of the share's own. Left empty: the shares' account below (guest for an open share).",
 					[this] {
-						bp::editText("User (DOMAIN;user works too)", m_share_draft->user, false, [this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->user = text;
+						bp::editText("User (DOMAIN;user works too)", m_netshare_draft->user, false, [this](const std::string& text) {
+							if (m_netshare_draft)
+								m_netshare_draft->user = text;
 							m_pages++;
 						});
 					},
@@ -3005,9 +3226,9 @@ public:
 				page.rows.push_back(std::move(user));
 				bp::Option password = Action("Password", "The password of the share's own account.",
 					[this] {
-						bp::editText("Password", m_share_draft->password, true, [this](const std::string& text) {
-							if (m_share_draft)
-								m_share_draft->password = text;
+						bp::editText("Password", m_netshare_draft->password, true, [this](const std::string& text) {
+							if (m_netshare_draft)
+								m_netshare_draft->password = text;
 							m_pages++;
 						});
 					},
@@ -3015,47 +3236,55 @@ public:
 				password.info = [has = !d.password.empty()] { return has ? std::string("\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2") : std::string("None"); };
 				page.rows.push_back(std::move(password));
 			}
-			page.rows.push_back(Action(m_share_index < 0 ? "Add the share" : "Save the share",
-				"Connects to it now and adds its games to the library; network.cfg keeps it for the next start.", [this] { SaveShare(); }, flags));
+			page.rows.push_back(Action("Test the share",
+				"Connects to it and reads its folder, and says what went wrong if it can't: the address, the port, the account, "
+				"the share's name or the folder. Nothing is saved.",
+				[this] { TestNetShare(); }, flags));
+			page.rows.push_back(Action(m_netshare_index < 0 ? "Add the share" : "Save the share",
+				"Connects to it now and adds its games to the library; network.cfg keeps it for the next start.", [this] { SaveNetShare(); }, flags));
 			page.rows.push_back(Action("Cancel", "Leaves the share as it was.", [this] {
-				m_share_draft.reset();
-				m_share_index = -1;
+				m_netshare_draft.reset();
+				m_netshare_index = -1;
 				m_pages++;
 			}, flags));
 			return;
 		}
 
 		page.rows.push_back(Action("Add a network share",
-			"A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS). Typed here with the on-screen "
-			"keyboard: network.cfg is written for you.",
+			"A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS). Set up here with the on-screen "
+			"keyboard and number pad: network.cfg is written for you.",
 			[this] {
-				m_share_draft = PS5Shares::Share{};
-				m_share_index = -1;
+				m_netshare_draft = PS5Shares::Share{};
+				m_netshare_index = -1;
 				m_pages++;
 			},
 			flags));
 		for (size_t i = 0; i < file.shares.size(); i++)
 		{
 			const PS5Shares::Share& s = file.shares[i];
-			bp::Option row = Action(s.name, "A network share. Press to change it or take it away.",
+			bp::Option row = Action(s.name, "A network share. Press to change it, test it or take it away.",
 				[this, i] {
 					if (i >= PS5Shares::Current().shares.size())
 						return;
 					const std::string name = PS5Shares::Current().shares[i].name;
-					bp::pick(name, {"Change it", "Take it away"}, -1, [this, i, name](int choice) {
-						if (choice == 0 && i < PS5Shares::Current().shares.size())
+					bp::pick(name, {"Change it", "Test it", "Take it away"}, -1, [this, i, name](int choice) {
+						if (i >= PS5Shares::Current().shares.size())
+							return;
+						if (choice == 0 || choice == 1)
 						{
-							m_share_draft = PS5Shares::Current().shares[i];
-							m_share_draft->mount.clear();
-							m_share_index = static_cast<int>(i);
+							m_netshare_draft = PS5Shares::Current().shares[i];
+							m_netshare_draft->mount.clear();
+							m_netshare_index = static_cast<int>(i);
 							m_pages++;
+							if (choice == 1)
+								TestNetShare();
 						}
-						else if (choice == 1)
+						else if (choice == 2)
 						{
 							bp::confirm("Take this share away?", name + "\n\nIts games leave the library. Nothing on the PC or NAS is deleted.",
 								[this, i](bool yes) {
 									if (yes)
-										RemoveShare(i);
+										RemoveNetShare(i);
 								},
 								"Take it away", "Keep it");
 						}
@@ -3073,7 +3302,7 @@ public:
 				const PS5Shares::ShareFile& now = PS5Shares::Current();
 				bp::editText("User for the shares (guest: an open share)", now.user, false, [this](const std::string& user) {
 					bp::editText("Password (empty: none)", PS5Shares::Current().password, true,
-						[this, user](const std::string& password) { SetSharesAccount(user, password); });
+						[this, user](const std::string& password) { SetNetSharesAccount(user, password); });
 				});
 			},
 			flags);
@@ -3140,7 +3369,7 @@ public:
 		for (const std::string& path : found)
 			page.rows.push_back(Line("Found by Crux2", Shown(path)));
 
-		SharesRows(page);
+		NetSharesRows(page);
 
 		page.rows.push_back(Heading("WHERE CRUX2 KEEPS ITS FILES"));
 		for (const KeptFolder& kept : KeptFolders())
@@ -3253,7 +3482,8 @@ public:
 					if (at < 0 || at >= static_cast<int>(places.size()))
 						return;
 					const PS5TexturePacks::Place place = places[static_cast<size_t>(at)];
-					const bool started = PS5TexturePacks::Start(pack, place, [this, serial, crc](bool ok, std::string sentence) {
+					const unsigned connections = static_cast<unsigned>(std::clamp(Host::GetBaseIntSettingValue("PS5", "TexturePackConnections", 10), 1, 16));
+					const bool started = PS5TexturePacks::Start(pack, place, connections, [this, serial, crc](bool ok, std::string sentence) {
 						if (ok)
 							UseTexturePacks(serial, crc);
 						PS5UI::SetBackgroundNote(std::string());
@@ -3265,13 +3495,28 @@ public:
 						return;
 					}
 					PS5UI::SetBackgroundNote("Downloading a texture pack");
-					bp::toast(fmt::format("Downloading {} to {}. It is unpacked as it comes; this page shows how far.", pack.title, place.name), 6.f);
+					bp::toast(fmt::format("Downloading {} to {}. It is unpacked as it comes; the bar below shows how far.", pack.title, place.name), 6.f);
 				});
 			});
 		});
 	}
 
 	std::string texturePackDoing() override { return PS5TexturePacks::Doing(); }
+
+	DownloadBar texturePackBar() override
+	{
+		const PS5TexturePacks::Progress p = PS5TexturePacks::Now();
+		DownloadBar bar;
+		if (!p.active)
+			return bar;
+		bar.title = p.title;
+		bar.got = p.got;
+		bar.total = p.total;
+		bar.speed = p.speed;
+		bar.connections = p.connections;
+		bar.secondsLeft = p.seconds_left;
+		return bar;
+	}
 
 	void stopTexturePack() override
 	{
@@ -3655,6 +3900,12 @@ public:
 		page.rows.push_back(Heading("WHILE PLAYING"));
 		page.rows.push_back(Toggle("Say when an achievement is earned", "Displays popup messages on events such as achievement unlocks and game completion.", "Achievements", "Notifications", true,
 			bp::Option::AllGames));
+		// (From Porpoise 1679c95, GPL-3.0-or-later: ps5_notify.cpp.)
+		page.rows.push_back(Toggle("As the console's trophy notifications",
+			"An achievement earned is announced by the PlayStation 5 itself, as a trophy is: its notification with the badge and the "
+			"trophy sound, the platinum trophy's when every achievement of the game is earned. Off: PCSX2's notice over the game, "
+			"silent.",
+			"Achievements", "ConsoleNotifications", true, bp::Option::AllGames));
 		page.rows.push_back(Toggle("Say when a leaderboard attempt starts and ends", "Displays popup messages when starting, submitting, or failing a leaderboard challenge.", "Achievements", "LeaderboardNotifications", true,
 			bp::Option::AllGames));
 		page.rows.push_back(Toggle("Show achievements in progress",
@@ -3724,7 +3975,6 @@ public:
 	bp::Page logPage() override
 	{
 		bp::Page page{"\xef\x85\x9c", "Log", {}};
-		LogSettingsRows(page);
 		page.rows.push_back(Heading("WHAT CRUX2 WROTE DOWN"));
 		const auto show = [](const char* title, std::string path) {
 			return [title, path = std::move(path)] {
@@ -3738,21 +3988,42 @@ public:
 		const PS5Logs::Files files = PS5Jobs::LogFiles();
 		page.rows.push_back(Action("This run",
 			"Shows the log of this session.",
-			[show, now = files.now] {
-				// (kept in memory only: its folder's drive is out)
+			[now = show("The log of this run", files.now)] {
+				// (Kept in memory: from there.)
 				std::string text;
 				if (PS5Platform::LogInMemory(&text))
-				{
-					std::vector<std::string> lines = PS5Logs::TailText(text, 800, 2000);
-					if (lines.empty())
-						bp::toast("There is no such log (yet).");
-					else
-						bp::showText("The log of this run (kept in memory)", std::move(lines));
-					return;
-				}
-				show("The log of this run", now)();
+					bp::showText("The log of this run", PS5Logs::TailText(text, 800, 2000));
+				else
+					now();
 			},
 			bp::Option::AllGames));
+		// (From OGBox 0.0.7) The boot log kept in memory, written only when something goes wrong.
+		page.rows.push_back(Action("Save the log",
+			"Writes this session's log to crux2-boot.log now, and the rest of the session's lines as they come. For something "
+				"that went wrong without Crux2 noticing.",
+			[] {
+				if (ps5px_log_keep("Save the log was chosen"))
+					bp::toast("The log was written to crux2-boot.log.");
+				else
+					bp::toast("The log is written to crux2-boot.log as it goes already.");
+			},
+			bp::Option::AllGames));
+		page.rows.back().info = [] { return std::string(ps5px_log_in_memory() ? "Kept in memory" : "Written as it goes"); };
+		{
+			bp::Option o;
+			o.kind = bp::Option::StringList;
+			o.label = "Boot log";
+			o.desc = "Only when something goes wrong: the session's log is kept in memory and written to crux2-boot.log after a "
+					 "crash, a game that did not start, 15 seconds without a new picture while a game runs, or Save the log. "
+					 "Always written: every line goes to the file as it is logged, as before. Takes effect the next time Crux2 starts.";
+			o.section = "PS5";
+			o.key = "LogMode";
+			o.names = {"Only when something goes wrong", "Always written"};
+			o.strings = {"memory", "always"};
+			o.defString = "memory";
+			o.flags = bp::Option::AllGames | bp::Option::Restart;
+			page.rows.push_back(std::move(o));
+		}
 		{
 			bp::Option before = Action("The run before",
 				"Shows the log of the previous session, including a crash report if it crashed.",
@@ -3778,70 +4049,8 @@ public:
 		}
 		if (places.empty())
 			page.rows.push_back(Line("Copy the logs", "Put a USB drive in, or name a share in network.cfg; then open this page again"));
-		page.rows.push_back(Line("This run's log", files.now.empty() ? std::string("No file (kept in memory, or off)") : Shown(files.now)));
+		page.rows.push_back(Line("On the console", Shown(ps5px_title_dir()) + "crux2-boot.log"));
 		return page;
-	}
-
-	// v1.0.19: what is logged and where (ps5_platform.cpp reads these at the start, by hand).
-	void LogSettingsRows(bp::Page& page)
-	{
-		constexpr unsigned flags = bp::Option::AllGames;
-		page.rows.push_back(Heading("WHAT IS LOGGED, AND WHERE"));
-		page.rows.push_back(Toggle("Logs",
-			"Off: no logs at all, from the next start: no crux2-boot.log, no emulog.txt, no copy in the console's kernel log, the "
-			"graphics driver's messages dropped. A problem can then not be looked into; turn them on again to report one.",
-			"PS5", "Logs", true, flags));
-
-		bp::Option place = Action("Logs go to",
-			"The console's own drive (the title folder), or a USB drive's Crux2-logs folder, which spares the console's drive the "
-			"writes. A drive that is out at the start: the boot log is kept in memory for that session. From the next start.",
-			[this] {
-				std::vector<std::string> names = {"This console (the title folder)"};
-				std::vector<std::string> paths = {""};
-				for (const PS5Jobs::Place& p : PS5Jobs::Places())
-				{
-					if (p.path.rfind("/mnt/usb", 0) != 0)
-						continue; // (a share takes whole files only: a log can't be written to one as it grows)
-					names.push_back(p.name + " (" + p.path + "/Crux2-logs)");
-					paths.push_back(p.path + "/Crux2-logs");
-				}
-				const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-				int at = 0;
-				for (size_t i = 0; i < paths.size(); i++)
-					if (paths[i] == now)
-						at = static_cast<int>(i);
-				if (names.size() == 1)
-					names[0] += " (put a USB drive in for another place)";
-				bp::pick("Logs go to", names, at, [this, paths](int i) {
-					if (i < 0 || i >= static_cast<int>(paths.size()))
-						return;
-					Host::SetBaseStringSettingValue("PS5", "LogPlace", paths[static_cast<size_t>(i)].c_str());
-					Host::CommitBaseSettingChanges();
-					ps5px_log("logs: from the next start in %s", paths[static_cast<size_t>(i)].empty() ? "the title folder" : paths[static_cast<size_t>(i)].c_str());
-					bp::toast("The logs go there from the next start.");
-					m_pages++;
-				});
-			},
-			flags);
-		place.info = [] {
-			const std::string now = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-			return now.empty() ? std::string("This console") : now;
-		};
-		page.rows.push_back(std::move(place));
-		page.rows.push_back(Toggle("Crux2's boot log",
-			"crux2-boot.log: the start, each game, its speed and pacing, and what went wrong (and a crash report). The file to "
-			"send with a report. From the next start.",
-			"PS5", "LogBoot", true, flags));
-		page.rows.push_back(Toggle("The graphics driver's messages",
-			"What the graphics driver prints, in the boot log: needed for a report of a graphics fault. From the next start.",
-			"PS5", "LogDriver", true, flags));
-		page.rows.push_back(Toggle("The emulator's own log",
-			"emulog.txt: PCSX2's own messages about the game (its disc, memory cards, the game's own debug output).",
-			"Logging", "EnableFileLogging", true, flags));
-		page.rows.push_back(Toggle("A copy in the console's kernel log",
-			"Each line of the boot log also to klog, for a computer that reads the console's log as it runs. Nothing is written "
-			"to a drive for it. From the next start.",
-			"PS5", "LogKlog", true, flags));
 	}
 
 	// What PCSX2's game database recommends for the open game and does not set by itself: the
@@ -3861,6 +4070,42 @@ public:
 			fmt::format("{} change{}", found.changes.size(), found.changes.size() == 1 ? "" : "s");
 		row.info = [text = std::move(text)] { return text; };
 		rows.push_back(std::move(row));
+		{
+			// (From Porpoise 35e1dab and 1880404, GPL-3.0-or-later) Settings tested on a PS5 for this game,
+			// from the repository's ps5/recommended.ini (ps5_recommend.h): what each changes, and one press
+			// to make them the game's own.
+			PS5Recommend::Pick pick;
+			if (PS5Recommend::ForGame(m_game_serial, &pick))
+			{
+				// (No heading: the rows after these are not of them.)
+				rows.push_back(Line("Settings tested on a PS5",
+					pick.note.empty() ? fmt::format("{} setting{}", pick.values.size(), pick.values.size() == 1 ? "" : "s") : pick.note));
+				for (const PS5Recommend::Value& v : pick.values)
+				{
+					bp::Option line = Line("    " + v.section + " / " + v.key, std::string());
+					line.info = [this, v] {
+						std::optional<std::string> now = getString(bp::Own, v.section.c_str(), v.key.c_str());
+						const bool own = now.has_value();
+						if (!own)
+							now = getString(bp::Shared, v.section.c_str(), v.key.c_str());
+						const std::string was = now.value_or("the default");
+						if (was == v.value)
+							return v.value + (own ? "  (the game's already)" : "  (already)");
+						return was + "  \xe2\x86\x92  " + v.value;
+					};
+					rows.push_back(std::move(line));
+				}
+				rows.push_back(Action("Use the settings tested on a PS5",
+					"Writes the settings above as this game's own. Each can be changed or taken away again here.",
+					[this, values = pick.values] {
+						for (const PS5Recommend::Value& v : values)
+							setString(bp::Own, v.section.c_str(), v.key.c_str(), v.value);
+						ps5px_log("recommended settings: %zu written for %s", values.size(), m_game_serial.c_str());
+						bp::toast("The settings tested on a PS5 are this game's own now.");
+					},
+					bp::Option::OneGame));
+			}
+		}
 		{
 			// Where this game's texture pack is: the title folder and the USB drives are looked at
 			// (a share is asked only when the game starts; what it was given then is known).
@@ -3886,7 +4131,7 @@ public:
 	{
 		bp::Page page{"\xef\x81\x9a", "About", {}};
 		page.rows.push_back(Line("Crux2", *ps5px_build_version() != '\0' ?
-			fmt::format("{}, a work in progress, built {}", ps5px_build_version(), ps5px_build_stamp()) :
+			fmt::format("{}, a work in progress, built {}", PS5Update::RunningVersionLabel(), ps5px_build_stamp()) :
 			fmt::format("A work in progress, built {}", ps5px_build_stamp())));
 		page.rows.push_back(Line("Made by", "Press5elect. Crux2 by Press5elect: Copyright (C) 2026 Press5elect"));
 		page.rows.push_back(Line("Emulator", fmt::format("PCSX2 {}, by the PCSX2 Dev Team", GIT_REV)));
@@ -3895,7 +4140,7 @@ public:
 		page.rows.push_back(Line("Build", ps5px_build_identity()));
 		page.rows.push_back(Line("Licence", "GPL-3.0 or later, with credit to Press5elect required (NOTICE.txt). LEGAL.txt and licenses/ in the title "
 											 "folder name every part"));
-		page.rows.push_back(Line("Log", PS5Platform::LogPath().empty() ? std::string("No file this run (Settings > Debug > Logs)") : Shown(PS5Platform::LogPath())));
+		page.rows.push_back(Line("Log", Shown(ps5px_title_dir()) + "crux2-boot.log"));
 		page.rows.push_back(Line("Crux2's files", PS5Platform::OutsideFolder().empty() ?
 			fmt::format("{} (a folder /data/crux2 is used in its place when there is one)", Shown(EmuFolders::DataRoot)) :
 			fmt::format("{}, outside the title folder", Shown(EmuFolders::DataRoot))));
@@ -3986,6 +4231,11 @@ public:
 		}
 		else if (w == "interface")
 		{
+			// The startup video (frontend/ps5_intro.cpp, bigpicture/bp_splash.cpp): in the start-up animation's place.
+			rows.push_back(Toggle("Startup video",
+				"Plays Crux2's short video when it starts, in place of the start-up animation, with the start-up sound's volume. "
+				"Press any button to skip it. Needs the start-up animation on and Motion set to All.",
+				"PS5", "StartupVideo", true, A));
 			rows.push_back(Heading("SOUND"));
 			{
 				bp::Option set;
@@ -4066,12 +4316,92 @@ public:
 				size.flags = A | bp::Option::Restart;
 				rows.push_back(std::move(size));
 			}
+			// Crux2: HDR output (ps5_hdr.h; the passes in GSDeviceVK_PS5.cpp, the driver's ps5/patches/mesa-27/0020).
+			{
+				const auto hdr_on = [](int) { return Host::GetBaseBoolSettingValue("PS5", "HDR", false); };
+				const auto nits = [](const std::vector<int>& values, bp::Option& o) {
+					for (int v : values)
+					{
+						o.ints.push_back(v);
+						o.names.push_back(v == 0 ? std::string("Off") :
+										  v == PS5Hdr::DEFAULT_WHITE ? std::string("203 nits (reference)") :
+																	   std::to_string(v) + " nits");
+					}
+				};
+				bp::Option hdr = Toggle("HDR",
+					"Sends the picture to the TV as HDR10, with the game's brightest parts brighter. Needs the console's own HDR "
+						"setting on and a TV that takes HDR; otherwise the picture stays SDR.",
+					"PS5", "HDR", false, A);
+				rows.push_back(std::move(hdr));
+				bp::Option peak;
+				peak.kind = bp::Option::IntList;
+				peak.label = "Peak brightness";
+				peak.desc = "For HDR: how bright the game's brightest parts (the sky, lights, fire) become. Set it near the TV's "
+					"peak. Off: the SDR picture as it is, at the white level.";
+				peak.section = "PS5";
+				peak.key = "HDRPeak";
+				nits(PS5Hdr::PeakChoices(), peak);
+				peak.defInt = PS5Hdr::DEFAULT_PEAK;
+				peak.flags = A;
+				peak.enabled = hdr_on;
+				rows.push_back(std::move(peak));
+				bp::Option white;
+				white.kind = bp::Option::IntList;
+				white.label = "White level";
+				white.desc = "For HDR: how bright white is, the menus' and the game's ordinary whites. 203 nits is HDR's reference; "
+					"raise it if the picture looks dim.";
+				white.section = "PS5";
+				white.key = "HDRWhite";
+				nits(PS5Hdr::WhiteChoices(), white);
+				white.defInt = PS5Hdr::DEFAULT_WHITE;
+				white.flags = A;
+				white.enabled = hdr_on;
+				rows.push_back(std::move(white));
+				bp::Option adjust = Action("Adjust HDR brightness",
+					"A test screen: the X in a square raised until it vanishes sets the peak, then a grey scale sets the white "
+						"level.",
+					[] { PS5Hdr::OpenCalibration(); }, A);
+				adjust.enabled = hdr_on;
+				adjust.info = [] { return std::string("HDR: ") + PS5Hdr::Status(); };
+				rows.push_back(std::move(adjust));
+			}
 		}
 		else if (w == "picture")
 		{
 			rows.push_back(Action("A look of your own",
 				"Loads a libretro shader preset (.slangp) from a \"shaders\" folder on a USB drive or in the title folder.",
 				[this, layer] { PickOwnLook(layer); }));
+			// Crux2: debanding, the last pass before the screen (GSDeviceVK_PS5.cpp; before HDR's when that is on).
+			bp::Option deband;
+			deband.kind = bp::Option::IntList;
+			deband.label = "Debanding";
+			deband.desc = "Smooths the colour bands in skies, fog and dark gradients; edges and detail are kept. Low: the fine "
+				"steps of 32-bit colour. High: the wider ones of 16-bit colour.";
+			deband.section = "PS5";
+			deband.key = "Deband";
+			deband.names = {"Off", "Low", "High"};
+			deband.ints = {0, 1, 2};
+			deband.defInt = 0;
+			deband.flags = A;
+			rows.push_back(std::move(deband));
+			// Crux2: the colour filter on the game's picture (ps5_final.glsl, after debanding, before HDR's
+			// encode). From Porpoise aa6ec1f (GPL-3.0-or-later): its choices.
+			bp::Option filter;
+			filter.kind = bp::Option::IntList;
+			filter.label = "Colour filter on the game";
+			filter.desc = "For colour blindness: moves the colours you may not tell apart to ones you can. Red-weak and "
+				"green-weak help with reds and greens, blue-weak with blues and yellows. The game's picture only; the "
+				"menus' colours are under Interface.";
+			filter.section = "PS5";
+			filter.key = "ColourFilter";
+			for (int i = 0; i < PS5Hdr::FILTER_COUNT; i++)
+			{
+				filter.names.push_back(PS5Hdr::FILTER_CHOICES[i]);
+				filter.ints.push_back(i);
+			}
+			filter.defInt = 0;
+			filter.flags = A;
+			rows.push_back(std::move(filter));
 		}
 		else if (w == "controllers")
 		{
@@ -4105,14 +4435,111 @@ public:
 				"For games that use pressure-sensitive buttons: how far you pull R2 sets how hard the face buttons and D-pad "
 					"are pressed.",
 				"PS5", "PressureFromR2", false));
+			{
+				// The sticks' response curves (PS5InputSource: before PCSX2 sees the axis; Linear is as
+				// before). A game can have its own.
+				for (const auto& [label, key] : {std::pair<const char*, const char*>{"Left stick response", "StickCurveLeft"},
+						 std::pair<const char*, const char*>{"Right stick response", "StickCurveRight"}})
+				{
+					bp::Option curve;
+					curve.kind = bp::Option::StringList;
+					curve.label = label;
+					curve.desc = "Linear: as the stick is pushed. Gentle to Gentlest: a small push moves less, for finer control "
+								 "near the centre; a full push still goes all the way.";
+					curve.section = "PS5";
+					curve.key = key;
+					curve.names = {"Linear", "Gentle", "Gentler", "Gentlest"};
+					curve.strings = {"Linear", "Gentle", "Gentler", "Gentlest"};
+					curve.defString = "Linear";
+					rows.push_back(std::move(curve));
+				}
+			}
 			rows.push_back(Toggle("Aim with motion",
-				"Aims the GunCon 2 light gun by moving the controller. Press R3 to recentre.",
+				"Aims the GunCon 2 light gun by moving the controller (always, while a GunCon 2 is plugged in). Hold R3 a "
+					"moment to recentre; hold it for two seconds to measure the screen.",
 				"PS5", "MotionAim", false));
+			{
+				bp::Option mode;
+				mode.kind = bp::Option::StringList;
+				mode.label = "Aim";
+				mode.desc = "Steady: where the controller points is where the gun aims, and it does not drift away. Like a "
+							"mouse: the aim of before, which adds up the controller's turns and stops at the edges.";
+				mode.section = "PS5";
+				mode.key = "MotionAimMode";
+				mode.names = {"Steady (new)", "Like a mouse (before)"};
+				mode.strings = {"Steady", "Mouse"};
+				mode.defString = "Steady";
+				rows.push_back(std::move(mode));
+			}
+			{
+				bp::Option speed;
+				speed.kind = bp::Option::IntList;
+				speed.label = "Aim speed";
+				speed.desc = "How far you turn the controller to aim at the edge of the screen (steady aim). Your screen: as "
+							 "measured by pointing at its corners.";
+				speed.section = "PS5";
+				speed.key = "MotionAimSpeed";
+				speed.names = {"Your screen (measured)", "1 (slowest)", "2", "3", "4", "5", "6", "7", "8", "9", "10 (fastest)"};
+				speed.ints = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+				speed.defInt = 5;
+				speed.flags = A;
+				rows.push_back(std::move(speed));
+			}
+			rows.push_back(Action("Measure the screen",
+				"Back in the game, point at the screen's top-left corner and press R3, then at its bottom-right corner and "
+					"press R3. Holding R3 for two seconds in a game does the same.",
+				[] {
+					PS5InputSource::RequestScreenMeasure();
+					bp::message("Measure the screen",
+						"Back in the game, point the controller at the screen's top-left corner and press R3, then at its "
+						"bottom-right corner and press R3.");
+				},
+				A));
+			{
+				bp::Option smooth;
+				smooth.kind = bp::Option::IntList;
+				smooth.label = "Aim smoothing";
+				smooth.desc = "Steadies a still hand without slowing a quick sweep (steady aim).";
+				smooth.section = "PS5";
+				smooth.key = "MotionAimSmoothing";
+				smooth.names = {"Off", "Light", "Medium", "Strong"};
+				smooth.ints = {0, 1, 2, 3};
+				smooth.defInt = 1;
+				smooth.flags = A;
+				rows.push_back(std::move(smooth));
+			}
+			{
+				bp::Option grip;
+				grip.kind = bp::Option::StringList;
+				grip.label = "Holding the controller";
+				grip.desc = "Steady aim: in both hands, or stood upright in one hand with your index finger on R2 like a "
+							"pistol. Either: read from how you hold it when the aim is centred.";
+				grip.section = "PS5";
+				grip.key = "MotionAimGrip";
+				grip.names = {"Either", "In both hands", "Upright in one hand"};
+				grip.strings = {"Auto", "TwoHands", "Upright"};
+				grip.defString = "Auto";
+				grip.flags = A;
+				rows.push_back(std::move(grip));
+			}
+			{
+				bp::Option feel;
+				feel.kind = bp::Option::StringList;
+				feel.label = "R2's click for the light gun";
+				feel.desc = "While a GunCon 2 is plugged in, R2 resists and then gives way like a trigger, and the shot comes "
+							"with the click.";
+				feel.section = "PS5";
+				feel.key = "GunConTriggerFeel";
+				feel.names = {"Off", "Light", "Firm"};
+				feel.strings = {"Off", "Light", "Firm"};
+				feel.defString = "Firm";
+				rows.push_back(std::move(feel));
+			}
 			{
 				bp::Option sens;
 				sens.kind = bp::Option::IntRange;
-				sens.label = "Aiming: how far to turn to the edge";
-				sens.desc = "How far you need to turn the controller to aim at the edge of the screen.";
+				sens.label = "Aim like a mouse: how far to turn to the edge";
+				sens.desc = "How far you need to turn the controller to aim at the edge of the screen (the aim like a mouse).";
 				sens.section = "PS5";
 				sens.key = "MotionAimSensitivity";
 				sens.defInt = 20;
@@ -4123,6 +4550,10 @@ public:
 				sens.flags = A;
 				rows.push_back(std::move(sens));
 			}
+			rows.push_back(Toggle("Aim with a PlayStation Move (Move Management)",
+				"Player 1 aims the GunCon 2 with a PlayStation Move, and a Navigation controller works its D-pad. Needs the "
+					"Move Management payload running. Press Select on the Move to recentre.",
+				"PS5", "MoveAim", false, A));
 			rows.push_back(Toggle("USB keyboard",
 				"Lets a USB keyboard type in the menus, and act as a PS2 keyboard in games that support one.",
 				"PS5", "USBKeyboard", true, A | bp::Option::Restart));
@@ -4134,9 +4565,8 @@ public:
 		else if (w == "saves")
 		{
 			rows.push_back(Toggle("Sleep-safe saving",
-				"Saves the game's state when you open the PS5 menu (at most once a minute), so you can continue after the console "
-					"goes to rest mode. Every five minutes a state is also kept in memory, and written to the console only if "
-					"Crux2 crashes: the console's drive is spared the writes.",
+				"Saves the game's state when you open the PS5 menu and every five minutes, so you can continue after the "
+					"console goes to rest mode.",
 				"PS5", "SleepSafe", true, A));
 		}
 		else if (w == "network")
@@ -4187,6 +4617,9 @@ public:
 			rows.push_back(Toggle("Look for a newer Crux2 at start-up",
 				"Checks GitHub for a newer version each time Crux2 starts. Nothing is downloaded without asking.", "PS5",
 				"UpdateAtStart", true, A));
+			rows.push_back(Toggle("Game fixes from GitHub at start",
+				"Each time Crux2 starts, fetches the game fixes that changed since this version was made (game database entries "
+				"and game patches). They apply to the games started after they came.", "PS5", "FixesAtStart", true, A));
 			{
 				bp::Option news = Action("What's new", "What was added, changed and fixed in each version, newest first.", [] {
 					int versions = 0;
@@ -4277,7 +4710,23 @@ public:
 
 	void frame() override
 	{
-		SharesFrame();
+		NetSharesFrame();
+		SharesAndWritesFrame();
+		LaunchArgsFrame();
+		// (From Porpoise's screenshots) Options + Square for Crux2's own screenshot, given to settings
+		// that have no binding for it yet (an empty one is the user's: left alone).
+		if (!m_shot_binding_given)
+		{
+			m_shot_binding_given = true;
+			if (!Host::ContainsBaseSettingValue("Hotkeys", "Screenshot"))
+			{
+				setString(bp::Shared, "Hotkeys", "Screenshot", PS5Shots::DEFAULT_BINDING);
+				ps5px_log("screenshots: Options + Square takes one (Settings > Controllers > Hotkeys)");
+			}
+		}
+		// The recommended settings asked for once a run, a few seconds in (at most once a day).
+		if (m_frame >= 300)
+			PS5Recommend::Start(); // (once: it keeps that itself)
 		// L1 and R1 held as the title starts: a television that shows nothing at 120 Hz gets 60 Hz
 		// from the next start (the screen is open by now: this start stays as it is).
 		if (!m_safe_asked && m_frame < 150 && (pad().held & (bp::Pad::L1 | bp::Pad::R1)) == (bp::Pad::L1 | bp::Pad::R1))
@@ -4302,6 +4751,337 @@ public:
 			if (!track.name.empty() && !VMManager::HasValidVM() && m_frame > 300)
 				bp::toast(std::string(ICON_FA_MUSIC "  ") + track.name, 3.f);
 		}
+	}
+
+	// ---- (from OGBox 0.0.6 to 0.0.9) the network shares, the writes an exit waits for, the settings
+	// written when the menus close
+
+	static double NowSeconds() { return Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue()); }
+
+	// Once a frame (frame()).
+	void SharesAndWritesFrame()
+	{
+		const VMState vm = VMManager::GetState();
+		// The boot log's watch: 15 s without a frame while a game runs writes a log kept in memory.
+		ps5px_log_frame(vm == VMState::Running ? 1 : 0);
+		// The settings: kept while the settings or the quick menu are open, written as they close.
+		const bool menus = bp::menusOpen();
+		if (menus != m_menus_open)
+		{
+			m_menus_open = menus;
+			ps5px_settings_hold(menus ? 1 : 0);
+			if (!menus)
+				ps5px_settings_flush();
+		}
+		// The shares woken once, while the game list is looked at.
+		if (!m_shares_woken && m_frame >= 2)
+		{
+			m_shares_woken = true;
+			WakeShares();
+		}
+		if (m_share_wait.active)
+			PollShareWait();
+		if (m_leave.active)
+			PollLeave();
+		// A game closing: its state (when asked for) and memory cards on their way to the disk.
+		if (vm == VMState::Stopping)
+		{
+			if (m_stopping_since < 0)
+				m_stopping_since = NowSeconds();
+			else if (NowSeconds() - m_stopping_since >= 0.4 && !m_leave.active)
+				DrawWriteBar("Closing the game", "Its memory cards, and its state when one is saved, on their way to the disk", -1.f, false,
+					static_cast<float>((NowSeconds() - m_stopping_since - 0.4) / 0.25));
+		}
+		else
+		{
+			m_stopping_since = -1;
+		}
+		// A read of the share that has not finished for 2 s while a game runs (the share stopped
+		// answering): said, with the seconds, until it answers. (Drawn when the graphics thread
+		// draws a frame: a game whose emulation waits for the read gives it none.)
+		const double stalled = (vm == VMState::Running && !bp::active()) ? ps5vfs_stalled_seconds() : 0.0;
+		if (stalled >= 2.0)
+		{
+			if (!m_stall_said)
+				ps5px_log("vfs: a read of the share has not finished for %.1f s (the game waits for it)", stalled);
+			m_stall_said = true;
+			std::string disc;
+			{
+				const std::lock_guard lock(s_told_mutex);
+				disc = std::string(Path::GetFileName(s_game_path));
+			}
+			DrawWriteBar(fmt::format("Waiting for the network share... {} s", static_cast<int>(stalled)),
+				(disc.empty() ? std::string() : "Disc: " + disc + ". ") + "The game goes on when the share answers.", -1.f, false,
+				static_cast<float>((stalled - 2.0) / 0.25));
+		}
+		else if (m_stall_said && stalled == 0.0)
+		{
+			m_stall_said = false;
+			ps5px_log("vfs: the share answered again");
+		}
+	}
+
+	// (From Porpoise 839dfda, GPL-3.0-or-later) The game given at launch (--rom, ps5_launch.h): started
+	// once the interface has drawn its first frames; with --exit-after-game, Crux2 closes when that
+	// game has run and is closed. A game that does not start leaves the library open, with the reason.
+	void LaunchArgsFrame()
+	{
+		const PS5Launch::Args& args = PS5Launch::Given();
+		if (args.rom.empty() || m_launch == Launch::Over)
+			return;
+		const VMState vm = VMManager::GetState();
+		const bool pending = s_boot_pending.load(std::memory_order_acquire) || m_share_wait.active;
+		switch (m_launch)
+		{
+			case Launch::Waiting:
+			{
+				if (m_frame < 30 || pending || vm != VMState::Shutdown)
+					return;
+				const std::string path = PS5Launch::Resolve(args.rom, Path::Combine(ps5px_title_dir(), "games"));
+				const bool there = !path.empty() && (ps5vfs_is_virtual(path.c_str()) || FileSystem::FileExists(path.c_str()));
+				if (!there)
+				{
+					ps5px_log("launch: the game given (%s) was not found%s", args.rom.c_str(),
+						path.empty() ? ": a path inside games/ may not go above it" : "");
+					bp::toast("The game Crux2 was started with was not found: " + args.rom, 8.f);
+					m_launch = Launch::Over;
+					return;
+				}
+				ps5px_log("launch: starting %s", path.c_str());
+				VMBootParameters params;
+				params.filename = path;
+				Boot(std::move(params));
+				m_launch = Launch::Starting;
+				return;
+			}
+			case Launch::Starting:
+				if (VMManager::HasValidVM())
+					m_launch = Launch::Playing;
+				else if (!pending && vm == VMState::Shutdown)
+				{
+					// (Its start failed: bp::startFailed said why. The library stays.)
+					ps5px_log("launch: the game did not start; the library stays open");
+					m_launch = Launch::Over;
+				}
+				return;
+			case Launch::Playing:
+				if (vm != VMState::Shutdown || pending)
+					return;
+				m_launch = Launch::Over;
+				if (args.exit_after_game)
+				{
+					ps5px_log("launch: the game was closed; Crux2 closes (--exit-after-game)");
+					Host::RequestExitApplication(false);
+				}
+				return;
+			case Launch::Over:
+				return;
+		}
+	}
+
+	// When the title starts: each share read a little on a thread of its own, the game played last
+	// on it where there is one, so that a NAS's disks are turning when a game is started.
+	void WakeShares()
+	{
+		std::vector<std::pair<time_t, std::string>> played;
+		for (const bp::GameInfo& g : games())
+		{
+			if (g.lastPlayed > 0 && ps5vfs_is_virtual(g.path.c_str()))
+				played.emplace_back(g.lastPlayed, g.path);
+		}
+		std::sort(played.begin(), played.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+		std::vector<std::string> preferred;
+		for (auto& p : played)
+			preferred.push_back(std::move(p.second));
+		ps5vfs_wake_mounts(std::move(preferred));
+	}
+
+	// The start of a game whose image is on a share: true when it waits for the share.
+	bool WaitForShare(VMBootParameters& params)
+	{
+		if (params.filename.empty() || !ps5vfs_is_virtual(params.filename.c_str()))
+			return false;
+		m_share_wait = ShareWait();
+		m_share_wait.active = true;
+		m_share_wait.since = NowSeconds();
+		m_share_wait.image = params.filename;
+		m_share_wait.params = std::move(params);
+		s_boot_pending.store(true, std::memory_order_release);
+		StartShareProbe();
+		return true;
+	}
+
+	// The image looked for on a thread of its own (a share that does not answer can take a while to
+	// say so): 1 there, 2 not yet, 3 the share answers and the image is not on it.
+	void StartShareProbe()
+	{
+		auto result = std::make_shared<std::atomic<int>>(0);
+		m_share_wait.result = result;
+		m_share_wait.next = NowSeconds() + 1.0;
+		std::thread([result, image = m_share_wait.image]() {
+			struct stat st;
+			if (ps5vfs_stat(image.c_str(), &st) == 0)
+			{
+				result->store(1);
+				return;
+			}
+			const int error = errno;
+			const std::string folder(Path::GetDirectory(image));
+			result->store((error == ENOENT && !folder.empty() && ps5vfs_stat(folder.c_str(), &st) == 0) ? 3 : 2);
+		}).detach();
+	}
+
+	void PollShareWait()
+	{
+		const int result = m_share_wait.result ? m_share_wait.result->load() : 2;
+		const double now = NowSeconds();
+		if (result == 1 || result == 3)
+		{
+			if (m_share_wait.told)
+				ps5px_log("game: the share answered after %.1f s: starting the game", now - m_share_wait.since);
+			m_share_wait.active = false;
+			m_share_wait.result.reset();
+			// (Not there: the start says so, as it would without the wait.)
+			Boot(std::move(m_share_wait.params), true);
+			return;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+		{
+			ps5px_log("game: waiting for the share given up (Circle)");
+			m_share_wait.active = false;
+			m_share_wait.result.reset();
+			s_boot_pending.store(false, std::memory_order_release);
+			return;
+		}
+		if (result == 2 && !m_share_wait.told)
+		{
+			m_share_wait.told = true;
+			ps5px_log("game: the disc image %s is not reachable yet: waiting for the share", m_share_wait.image.c_str());
+		}
+		if (result == 2 && now >= m_share_wait.next)
+			StartShareProbe();
+	}
+
+	// then() once nothing is left on its way to the disk: at once (the next frame) when nothing is,
+	// else with a bar along the bottom saying what: a save state being packed into its file, and
+	// with `jobs` (Crux2 closing) the jobs that write (the memory cards' sync, a backup, a card
+	// being changed, the logs' copy), which Circle leaves when only they are left.
+	void LeaveAfterWrites(const char* what, std::function<void()> then, bool jobs = false)
+	{
+		if (m_leave.active)
+		{
+			// (One asked for while another waits, Crux2 closing above all: after it.)
+			m_leave.then = [first = std::move(m_leave.then), then = std::move(then)] {
+				first();
+				then();
+			};
+			return;
+		}
+		m_leave = Leave();
+		m_leave.active = true;
+		m_leave.what = what;
+		m_leave.then = std::move(then);
+		m_leave.since = NowSeconds();
+		m_leave.lastLog = m_leave.since - 4.75; // (the first line once it has waited a quarter of a second)
+		m_leave.stage = std::make_shared<std::atomic<int>>(1);
+		m_leave.skip = std::make_shared<std::atomic<bool>>(false);
+		std::thread([stage = m_leave.stage, skip = m_leave.skip, jobs]() {
+			// (Safe beside the emulation thread's own waits: each joins the packing threads it takes.)
+			VMManager::WaitForSaveStateFlush();
+			stage->store(2);
+			while (jobs && !skip->load() && !PS5Jobs::Writing().empty())
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			stage->store(3);
+		}).detach();
+	}
+
+	void PollLeave()
+	{
+		const int stage = m_leave.stage->load();
+		const double now = NowSeconds();
+		if (stage == 3)
+		{
+			if (now - m_leave.since >= 0.25)
+				ps5px_log("interface: %s: the writes were done after %.1f s%s", m_leave.what.c_str(), now - m_leave.since,
+					m_leave.skip->load() ? " (the jobs left, Circle)" : "");
+			std::function<void()> then = std::move(m_leave.then);
+			m_leave.active = false;
+			then();
+			return;
+		}
+		std::vector<std::string> parts;
+		if (stage == 1)
+			parts.emplace_back("A save state being written");
+		else
+			parts = PS5Jobs::Writing();
+		const bool can_skip = (stage == 2);
+		if (can_skip && !m_leave.skip->load() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+		{
+			m_leave.skip->store(true);
+			ps5px_log("interface: %s: the jobs still writing left (Circle)", m_leave.what.c_str());
+		}
+		if (now - m_leave.lastLog >= 5.0)
+		{
+			m_leave.lastLog = now;
+			std::string all;
+			for (const std::string& p : parts)
+				all += (all.empty() ? "" : ", ") + p;
+			ps5px_log("interface: %s: waiting for the disk (%s)", m_leave.what.c_str(), all.c_str());
+		}
+		if (now - m_leave.since < 0.25)
+			return;
+		std::string detail;
+		for (const std::string& p : parts)
+			detail += (detail.empty() ? "" : "  \xC2\xB7  ") + p;
+		DrawWriteBar("Saving before " + m_leave.what, detail, -1.f, can_skip, static_cast<float>((now - m_leave.since - 0.25) / 0.25));
+	}
+
+	// Along the bottom, over everything: what is being waited for (title), what is left (detail), a
+	// bar (fraction 0-1; below 0 a light goes along it: no end known), Circle's hint when what is
+	// left may be left.
+	static void DrawWriteBar(const std::string& title, const std::string& detail, float fraction, bool can_skip, float appear)
+	{
+		const float a = std::clamp(appear, 0.f, 1.f);
+		if (a <= 0.f)
+			return;
+		ImDrawList* const dl = ImGui::GetForegroundDrawList();
+		const ImVec2 screen = ImGui::GetIO().DisplaySize;
+		const float u = screen.y / 1080.f;
+		const auto alpha = [a](int r, int g, int b, float o) { return IM_COL32(r, g, b, static_cast<int>(255.f * o * a)); };
+		const float margin = 48.f * u, h = 118.f * u, rise = 24.f * u * (1.f - a);
+		const ImVec2 p0(margin, screen.y - margin - h + rise), p1(screen.x - margin, screen.y - margin + rise);
+		dl->AddRectFilled(ImVec2(p0.x, p0.y + 8.f * u), ImVec2(p1.x, p1.y + 12.f * u), alpha(0, 0, 0, 0.35f), 22.f * u);
+		dl->AddRectFilled(p0, p1, alpha(28, 30, 38, 0.96f), 20.f * u);
+		dl->AddRect(p0, p1, alpha(255, 255, 255, 0.10f), 20.f * u, 1.5f * u);
+		const float x = p0.x + 36.f * u, w = p1.x - p0.x - 72.f * u;
+		ImFont* const regular = ps5px_interface_font(0);
+		ImFont* const bold = ps5px_interface_font(1);
+		float hint_w = 0.f;
+		if (can_skip)
+		{
+			static constexpr const char HINT[] = "Circle  Leave now";
+			hint_w = (regular ? regular : ImGui::GetFont())->CalcTextSizeA(20.f * u, FLT_MAX, 0.f, HINT).x;
+			dl->AddText(regular, 20.f * u, ImVec2(p1.x - 36.f * u - hint_w, p0.y + 26.f * u), alpha(170, 176, 190, 1.f), HINT);
+		}
+		const ImVec4 clip(x, p0.y, x + w - (hint_w > 0.f ? hint_w + 24.f * u : 0.f), p1.y);
+		dl->AddText(bold, 26.f * u, ImVec2(x, p0.y + 20.f * u), alpha(240, 242, 248, 1.f), title.c_str(), nullptr, 0.f, &clip);
+		const ImVec4 clip2(x, p0.y, x + w, p1.y);
+		dl->AddText(regular, 20.f * u, ImVec2(x, p0.y + 56.f * u), alpha(176, 182, 196, 1.f), detail.c_str(), nullptr, 0.f, &clip2);
+		const float by = p1.y - 28.f * u, bh = 6.f * u;
+		dl->AddRectFilled(ImVec2(x, by), ImVec2(x + w, by + bh), alpha(255, 255, 255, 0.12f), bh * 0.5f);
+		float f0 = 0.f, f1 = 0.f;
+		if (fraction >= 0.f)
+		{
+			f1 = std::min(1.f, fraction);
+		}
+		else
+		{
+			const float t = static_cast<float>(std::fmod(ImGui::GetTime(), 1.6) / 1.6);
+			f0 = std::max(0.f, t * 1.3f - 0.3f);
+			f1 = std::min(1.f, t * 1.3f);
+		}
+		if (f1 > f0)
+			dl->AddRectFilled(ImVec2(x + w * f0, by), ImVec2(x + w * f1, by + bh), alpha(74, 158, 255, 1.f), bh * 0.5f);
 	}
 
 	// Sleep-safe saving's note (PS5Extras): the console closed the title while a game was played.
@@ -5101,7 +5881,10 @@ public:
 
 	void quit() override
 	{
-		Host::RunOnCPUThread([]() { Host::RequestExitApplication(false); });
+		// (From OGBox 0.0.9) What is still on its way to a disk first, the memory cards' sync stopping
+		// after the card it copies; the settings written by the closing (ps5_host.cpp).
+		PS5Jobs::AskToStop();
+		LeaveAfterWrites("Crux2 closes", [] { Host::RunOnCPUThread([]() { Host::RequestExitApplication(false); }); }, true);
 	}
 
 	void log(const std::string& line) override { ps5px_log("interface: %s", line.c_str()); }
@@ -5422,6 +6205,27 @@ private:
 				si->SetStringValue("USB2", "singstar_player2_device_name", setup.player2);
 			}
 		}
+		// The light gun choice plugs GunCon 2s into USB ports 1 and 2 in the same layer, with their
+		// default buttons; None takes out only the guns it put there.
+		if (where == "PS5" && what == "LightGun")
+		{
+			const auto lock = Host::GetSettingsLock();
+			if (SettingsInterface* const si = Layer(layer); si != nullptr)
+			{
+				const int guns = std::clamp(si->GetIntValue("PS5", "LightGun", 0), 0, 2);
+				for (u32 port = 0; port < 2; port++)
+				{
+					const char* const section = port == 0 ? "USB1" : "USB2";
+					if (static_cast<int>(port) < guns)
+					{
+						si->SetStringValue(section, "Type", "guncon2");
+						PS5InputSource::SetGunCon2Defaults(*si, port);
+					}
+					else if (si->GetStringValue(section, "Type", "None") == "guncon2")
+						si->SetStringValue(section, "Type", "None");
+				}
+			}
+		}
 		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the
 		// first release's default): they go to the top right, or switching them on would show nothing.
 		if (where == "EmuCore/GS" && what.compare(0, 7, "OsdShow") == 0 && what != "OsdShowIndicators")
@@ -5734,8 +6538,14 @@ private:
 		});
 	}
 
-	void Boot(VMBootParameters params)
+	void Boot(VMBootParameters params, bool share_answered = false)
 	{
+		// (From OGBox 0.0.6) An image on a share: looked for on a thread first, and the start waits
+		// while the share does not answer (PollShareWait calls this again once it does).
+		if (!share_answered && WaitForShare(params))
+			return;
+		// (From OGBox 0.0.7) What was changed in the menus and not yet written, written first.
+		ps5px_settings_flush();
 		s_boot_pending.store(true, std::memory_order_release);
 		s_boot_from_network.store(params.filename.compare(0, 5, "/smb/") == 0, std::memory_order_relaxed);
 		PS5UI::SetLoadProgress(std::string(), -1.f);
@@ -5763,6 +6573,7 @@ private:
 				if (result != VMBootResult::StartupSuccess)
 				{
 					ps5px_log("game: could not be started: %s", error.GetDescription().c_str());
+					ps5px_log_keep("a game did not start");
 					s_boot_pending.store(false, std::memory_order_release);
 					if (MTGS::IsOpen())
 						MTGS::RunOnGSThread([why = error.GetDescription()]() { bp::startFailed(why); });
@@ -5903,14 +6714,14 @@ private:
 	u32 m_unlabelled = 0;
 
 	unsigned m_pages = 1;
-	// v1.0.19: Settings > Folders' network share being added (m_share_index -1) or changed, and the
-	// servers found on the network for it (found on a thread, offered at the next frame).
-	std::optional<PS5Shares::Share> m_share_draft;
-	int m_share_index = -1;
-	std::atomic<bool> m_finding{false};
-	std::mutex m_found_lock;
-	bool m_found_ready = false;
-	std::vector<PS5Shares::FoundServer> m_found;
+	// Settings > Folders' network share being added (m_netshare_index -1) or changed (v1.0.19, back
+	// after 883c832), and what the threads that ask the network for it hand back to the next frame
+	// (a search of the network, a server's list, a share's test).
+	std::optional<PS5Shares::Share> m_netshare_draft;
+	int m_netshare_index = -1;
+	std::atomic<bool> m_netshare_busy{false};
+	std::mutex m_netshare_lock;
+	std::vector<std::function<void()>> m_netshare_done;
 	// The backups: the place whose list was asked for, and how many lists had been read when the
 	// pages were last made.
 	std::string m_backup_asked;
@@ -5923,6 +6734,40 @@ private:
 	bool m_disc_lent = false; // the drive was given to a start from the disc
 	unsigned m_disc_seen = ~0u;
 	std::map<std::string, u32> m_disc_crcs;
+
+	// (From OGBox 0.0.6 to 0.0.9: SharesAndWritesFrame.)
+	bool m_menus_open = false;  // the settings or the quick menu, as last seen
+	bool m_shares_woken = false;
+	enum class Launch
+	{
+		Waiting,
+		Starting,
+		Playing,
+		Over,
+	} m_launch = Launch::Waiting; // the game given at launch (LaunchArgsFrame)
+	bool m_shot_binding_given = false;
+	bool m_stall_said = false;  // a read of the share that has not finished, logged
+	double m_stopping_since = -1;
+	// A start waiting for the share its image is on.
+	struct ShareWait
+	{
+		bool active = false;
+		bool told = false; // logged
+		double since = 0, next = 0;
+		std::string image;
+		VMBootParameters params;
+		std::shared_ptr<std::atomic<int>> result;
+	} m_share_wait;
+	// An exit waiting for what is still on its way to the disk.
+	struct Leave
+	{
+		bool active = false;
+		std::string what; // "going back to the game list"
+		std::function<void()> then;
+		double since = 0, lastLog = 0;
+		std::shared_ptr<std::atomic<int>> stage; // 1 the states, 2 the jobs, 3 done
+		std::shared_ptr<std::atomic<bool>> skip; // Circle: the jobs left
+	} m_leave;
 };
 
 PCSX2Backend s_backend;
@@ -6291,7 +7136,9 @@ void FullscreenUI::Render()
 		Achievements::DrawGameOverlays();
 
 	// (While one of PCSX2's lists is up the screens draw nothing and read no button.)
-	bp::render();
+	// (Nor while Adjust HDR brightness's test screen is up: ps5_hdr.h.)
+	if (!PS5Hdr::CalibrationFrame())
+		bp::render();
 	if (overlay == 1)
 		Achievements::DrawAchievementsWindow();
 	else if (overlay == 2)

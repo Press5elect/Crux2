@@ -634,6 +634,13 @@ void ListBackups()
 }
 
 std::atomic_bool s_syncing_cards{false};
+std::atomic_bool s_stop_asked{false}; // Crux2 closes: a sync stops after the card it is copying
+
+void AskToStop()
+{
+	if (!s_stop_asked.exchange(true, std::memory_order_acq_rel) && s_syncing_cards.load(std::memory_order_acquire))
+		ps5px_log("card sync: Crux2 closes: the sync stops after the card it is copying");
+}
 
 void SyncCards(bool quiet)
 {
@@ -650,6 +657,8 @@ void SyncCards(bool quiet)
 			PS5UI::Toast("No USB drive or network share to sync the memory cards with.");
 		return;
 	}
+	if (s_stop_asked.load(std::memory_order_acquire))
+		return; // (Crux2 is closing: a sync begun now would be cut off)
 	bool expected = false;
 	if (!s_syncing_cards.compare_exchange_strong(expected, true))
 		return;
@@ -685,7 +694,8 @@ void SyncCards(bool quiet)
 		io.read = [](const std::string& path, std::string* data) { return PS5Backup::ReadWholeFile(path, data); };
 		io.write = [](const std::string& path, const std::string& data) { return PS5Backup::WriteWholeFile(path, data); };
 		io.make_folder = [](const std::string& folder) { return PS5Backup::MakeAllFolders(folder); };
-		io.stop = [] { return GameLoadedOrStarting(); };
+		// (Or Crux2 closing: the sync stops after the card it is copying, AskToStop.)
+		io.stop = [] { return GameLoadedOrStarting() || s_stop_asked.load(std::memory_order_acquire); };
 
 		// What each side was after the last sync with this place, in a list of the console's own.
 		uint32_t hash = 2166136261u;
@@ -755,12 +765,24 @@ void GameClosed()
 		PS5UI::SetBackgroundNote("Backing up the memory cards to " + place.name);
 }
 
+std::vector<std::string> Writing()
+{
+	std::vector<std::string> out;
+	if (s_changing_card.load(std::memory_order_acquire))
+		out.emplace_back("A memory card being changed");
+	if (s_syncing_cards.load(std::memory_order_acquire))
+		out.emplace_back("The memory cards' sync");
+	if (std::string doing = PS5Backup::Doing(); !doing.empty())
+		out.push_back(std::move(doing));
+	if (s_copying.load(std::memory_order_acquire))
+		out.emplace_back("The logs' copy");
+	return out;
+}
+
 PS5Logs::Files LogFiles()
 {
-	// v1.0.19: where Settings > Debug > Logs put them (none: "", and a boot log kept in memory has no file).
-	const std::string place = Host::GetBaseStringSettingValue("PS5", "LogPlace", "");
-	PS5Logs::Files files{PS5Platform::LogPath(), PS5Platform::LogPreviousPath(),
-		Path::Combine(place.empty() ? EmuFolders::Logs : place, "emulog.txt"), {}};
+	PS5Logs::Files files{Path::Combine(ps5px_title_dir(), "crux2-boot.log"), Path::Combine(ps5px_title_dir(), "crux2-boot.previous.log"),
+		Path::Combine(EmuFolders::Logs, "emulog.txt"), {}};
 	// A profiling build's counts go with the logs (ps5_pgo.h).
 	if (const std::string pgo = PS5Pgo::Folder(); !pgo.empty())
 	{
@@ -784,6 +806,8 @@ void CopyLogs(const Place& place)
 		[](void* argument) -> void* {
 			const Place* const to = static_cast<Place*>(argument);
 			std::string message;
+			// (A boot log kept in memory goes into its file first: the copy is of the file.)
+			ps5px_log_keep("the logs were copied");
 			const int written = PS5Logs::CopyTo(LogFiles(), to->path, &message);
 			ps5px_log("logs: copy to %s: %d file(s), %s", to->path.c_str(), written, message.c_str());
 			if (written > 0)

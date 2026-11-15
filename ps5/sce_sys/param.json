@@ -4,13 +4,13 @@
   },
   "applicationCategoryType": 0,
   "applicationDrmType": "free",
-  "attribute": 0,
+  "attribute": 536870912,
   "attribute2": 0,
   "attribute3": 524352,
   "conceptId": "99249",
   "contentBadgeType": 1,
   "contentId": "UP9000-PPSA99249_00-PCSX2PS500000000",
-  "contentVersion": "01.020.000",
+  "contentVersion": "01.019.000",
   "downloadDataSize": 256,
   "gameIntent": {
     "permittedIntents": [

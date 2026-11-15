@@ -466,9 +466,6 @@ public:
 	{
 		const time_t now = 1790000000;
 		add("Brass Comet (USA).chd", "Brass Comet", "SLUS-29001", 0, bp::GameInfo::PS2, 6, now - 3600, 5 * 3600 + 720);
-		// An invented Japanese title (kana and kanji), and a Korean one: the font's letters, not "?".
-		add("Toudai no Hoshimatsuri (Japan).chd", "\xe7\x81\xaf\xe5\x8f\xb0\xe3\x81\xae\xe6\x98\x9f\xe7\xa5\xad\xe3\x82\x8a \xe3\x83\x89\xe3\x83\xa9\xe3\x82\xa4\xe3\x83\x90\xe3\x83\xbc", "SLPS-29010", 0, bp::GameInfo::PS2, 5, now - 7200, 3600);
-		add("Byeolbit (Korea).chd", "\xeb\xb3\x84\xeb\xb9\x9b \xec\x9d\xb4\xec\x95\xbc\xea\xb8\xb0", "SLKA-25010", 0, bp::GameInfo::PS2, 4, now - 9000, 1800);
 		add("The Ninth Lantern (USA).chd", "The Ninth Lantern", "SLUS-29002", 0, bp::GameInfo::PS2, 5, now - 86400, 41 * 3600);
 		add("Moonfall Tactics (Europe) (En,Fr,De).iso", "Moonfall Tactics", "SLES-59003", 0, bp::GameInfo::PS2, 5, now - 3 * 86400, 1900);
 		add("Starbound Rally (USA).chd", "Starbound Rally", "SLUS-29004", 0, bp::GameInfo::PS2, 4);
@@ -607,6 +604,29 @@ public:
 	}
 	bool scanning() override { return scanBusy; }
 	std::string backgroundNote() override { return note; }
+	// A texture pack's download, made up: it goes on a little each frame until stopped or whole.
+	DownloadBar download;
+	void findTexturePacks() override
+	{
+		download = DownloadBar();
+		download.title = "Invented Game (USA) [SLUS-00000] HD Remaster";
+		download.total = 1800ull << 20;
+	}
+	std::string texturePackDoing() override { return download.title.empty() ? std::string() : download.title + ": downloading"; }
+	void stopTexturePack() override { download = DownloadBar(); }
+	DownloadBar texturePackBar() override
+	{
+		if (download.title.empty())
+			return download;
+		download.got = std::min(download.total, download.got + (3u << 20));
+		download.speed = 42.5e6;
+		download.connections = 10;
+		download.secondsLeft = static_cast<double>(download.total - download.got) / download.speed;
+		const DownloadBar now = download;
+		if (download.got >= download.total)
+			download = DownloadBar();
+		return now;
+	}
 	std::string shownFolder(const char* which) override
 	{
 		const std::string root = "/data/homebrew/PPSA99249/";
@@ -716,6 +736,7 @@ public:
 	}
 	void setFrameLimit(bool on) override { run.frameLimit = on; }
 	void toggleSoftwareRenderer() override { run.hardware = !run.hardware; }
+	bool saveLog() override { return true; }
 	void recordGsDump() override
 	{
 		g_check.expect(run.valid, "a GS dump is recorded in a running game");
@@ -1368,20 +1389,6 @@ public:
 		found.label = "Found by Crux2";
 		found.info = [] { return std::string("/mnt/usb0/PS2/"); };
 		page.rows.push_back(found);
-		// v1.0.19: the network shares, as the console's Backend lists them.
-		page.rows.push_back(heading("NETWORK SHARES"));
-		page.rows.push_back(act("Add a network share",
-			"A folder of games on a PC or NAS, read over the network as the games play (SMB or NFS).",
-			[] { bp::pick("Kind of share", {"SMB (a Windows PC, most NAS)", "NFS (a NAS or a Linux PC)"}, 0, [](int) {}); }));
-		bp::Option share = act("PS2", "A network share. Press to change it or take it away.",
-			[] { bp::pick("PS2", {"Change it", "Take it away"}, -1, [](int) {}); });
-		share.info = [] { return std::string("smb://192.168.1.10/Games/PS2"); };
-		page.rows.push_back(std::move(share));
-		bp::Option account = act("The shares' account",
-			"The user and password for the SMB shares without an account of their own: guest and no password for an open share.",
-			[] { bp::editText("User for the shares (guest: an open share)", "guest", false, [](const std::string&) {}); });
-		account.info = [] { return std::string("guest"); };
-		page.rows.push_back(std::move(account));
 		page.rows.push_back(heading("WHERE CRUX2 KEEPS ITS FILES"));
 		for (const char* label : {"BIOS", "Memory cards", "Save states", "Screenshots and GS dumps", "Cheats", "Covers", "Texture replacements"})
 		{
@@ -2048,9 +2055,9 @@ void remakeContext()
 
 bool loadFonts(const std::string& folder)
 {
-	static std::vector<unsigned char> files[5];
-	const char* names[5] = {"Roboto-Regular.ttf", "Roboto-Bold.ttf", "fa-solid-900.ttf", "Saira-ExtraBold.ttf", "NotoSansCJK-Subset.otf"};
-	for (int i = 0; i < 5; i++)
+	static std::vector<unsigned char> files[4];
+	const char* names[4] = {"Roboto-Regular.ttf", "Roboto-Bold.ttf", "fa-solid-900.ttf", "Saira-ExtraBold.ttf"};
+	for (int i = 0; i < 4; i++)
 	{
 		const std::string path = folder + "/" + names[i];
 		FILE* f = std::fopen(path.c_str(), "rb");
@@ -2077,11 +2084,6 @@ bool loadFonts(const std::string& folder)
 		ImFontConfig cfg;
 		cfg.FontDataOwnedByAtlas = false;
 		fonts[i] = io.Fonts->AddFontFromMemoryTTF(files[i].data(), static_cast<int>(files[i].size()), 15.f, &cfg, nullptr);
-		// Behind it, the letters of Japanese, Chinese and Korean names.
-		ImFontConfig cjk;
-		cjk.MergeMode = true;
-		cjk.FontDataOwnedByAtlas = false;
-		io.Fonts->AddFontFromMemoryTTF(files[4].data(), static_cast<int>(files[4].size()), 15.f, &cjk, nullptr);
 		static const ImWchar exclude[] = {0x1, 0xdfff, 0xf900, 0x10ffff, 0, 0};
 		ImFontConfig icons;
 		icons.MergeMode = true;
@@ -2178,6 +2180,12 @@ void shots(Harness& h)
 	h.press(P::Right);
 	h.wait(30);
 	h.shot("02-library-shelves");
+	b.findTexturePacks();
+	b.download.got = (1240ull << 20) - (3u << 20) * 30;
+	h.wait(30);
+	h.shot("02a-library-texture-pack-download");
+	b.stopTexturePack();
+	h.wait(30);
 	h.press(P::Down, 30);
 	h.press(P::Right);
 	h.press(P::R2, 4);
@@ -2524,9 +2532,6 @@ void shots(Harness& h)
 	h.shot("13a3-settings-restored");
 	h.press(P::Cross, 20);
 	h.press(P::Circle);
-	// v1.0.19: the Folders page, its network shares under the game folders.
-	go("Folders", "Add a network share");
-	h.shot("13a4-settings-folders-shares");
 	// The network adapter and the hard drive; an address is changed number by number.
 	go("Network & HDD", "Network adapter");
 	h.shot("13b-settings-network");
@@ -3255,6 +3260,8 @@ void crawl(Harness& h, unsigned seed)
 	h.press(P::Options, 10);
 	h.press(P::Options, 10);
 
+	// (A texture pack's bar over the screens for the first of the random steps.)
+	b.findTexturePacks();
 	std::mt19937 rng(seed);
 	const uint32_t buttons[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1,
 		P::L2, P::R2, P::Options, P::TouchPad, P::R3};

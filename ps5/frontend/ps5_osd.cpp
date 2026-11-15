@@ -293,7 +293,14 @@ namespace PS5Osd
 				{
 					Add(GSConfig.Renderer == GSRendererType::SW ? "Software" : "Vulkan", Number(PerformanceMetrics::GetInternalFPS(), 0), "FPS",
 						FRAME_NAME, speed_colour);
-					if (const float shown = PS5Pacing::ShownPerSecond(); shown > PerformanceMetrics::GetInternalFPS() + 2.0f)
+					// With frame generation running: the pictures a second the screen is given, and how
+					// many of them are made (counted where they are presented, over the last half second).
+					if (const float given = PS5Pacing::FrameGenShownPerSecond(); given > 0.5f)
+					{
+						Add("screen", Number(given, 0), "FPS", FRAME_NAME, COOL_VALUE);
+						Add("made", Number(PS5Pacing::FrameGenMadePerSecond(), 0), "FPS", FRAME_NAME, COOL_VALUE);
+					}
+					else if (const float shown = PS5Pacing::ShownPerSecond(); shown > PerformanceMetrics::GetInternalFPS() + 2.0f)
 						Add("shown", Number(shown, 0), "FPS", FRAME_NAME, COOL_VALUE);
 				}
 				if (GSConfig.OsdShowVPS)

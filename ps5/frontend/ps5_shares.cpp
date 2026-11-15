@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 //
-// Crux2 v1.0.19 - the network shares (ps5_shares.h), from OGBox 0.0.3's ogbox_shares.cpp.
+// Crux2 v1.0.19 - the network shares (ps5_shares.h), from OGBox 0.0.3's ogbox_shares.cpp; brought
+// back after 883c832, with Porpoise's discovery of NFS servers, its share and export lists and its
+// categorised test (35c039c, bc835d2).
 #include "ps5_shares.h"
+#include "vfs/ps5_socket.h"
 
 #include <algorithm>
 #include <cctype>
@@ -18,7 +21,7 @@
 #include <cstring>
 
 #ifndef PS5_SHARES_HOST_TEST
-#include "ps5_vfs.h"
+#include "vfs/ps5_vfs.h"
 #endif
 
 namespace PS5Shares {
@@ -157,6 +160,10 @@ bool readShares(const std::string &file, ShareFile &out, std::string *error)
 				while (!value.empty() && value[0] == '/') {
 					value.erase(0, 1);
 				}
+				if (value.empty()) {
+					pendingName.clear();
+					continue; // (as ps5vfs_load_network_config: not a share, no mount)
+				}
 			}
 			const size_t slash = value.find('/');
 			std::string head = value.substr(0, slash);
@@ -277,9 +284,8 @@ std::string shareMountName(const std::string &name, const std::vector<std::strin
 	}
 }
 
-bool mountShare(Share &s, const ShareFile &file, const std::vector<std::string> &taken, std::string *error)
+std::string mountUrl(const Share &s, const ShareFile &file)
 {
-	const std::string name = shareMountName(s.name, taken);
 	std::string url;
 	if (s.nfs) {
 		url = shareAddress(s);
@@ -298,6 +304,13 @@ bool mountShare(Share &s, const ShareFile &file, const std::vector<std::string> 
 		url = "smb://" + accountEncode(user.empty() ? std::string("guest") : user) +
 			(password.empty() ? std::string() : ":" + percentEncode(password)) + "@" + s.host + "/" + s.path;
 	}
+	return url;
+}
+
+bool mountShare(Share &s, const ShareFile &file, const std::vector<std::string> &taken, std::string *error)
+{
+	const std::string name = shareMountName(s.name, taken);
+	const std::string url = mountUrl(s, file);
 #ifndef PS5_SHARES_HOST_TEST
 	const int r = s.nfs ? ps5vfs_mount_nfs(name.c_str(), url.c_str()) : ps5vfs_mount_smb(name.c_str(), url.c_str());
 	if (r != 0) {
@@ -306,6 +319,9 @@ bool mountShare(Share &s, const ShareFile &file, const std::vector<std::string> 
 		}
 		return false;
 	}
+#else
+	(void)url;
+	(void)error;
 #endif
 	s.mount = "/smb/" + name;
 	return true;
@@ -348,45 +364,11 @@ uint32_t localAddress()
 	return ip;
 }
 
-/* a NetBIOS node status answer's file server name (suffix 0x20, unique), else its first unique */
-std::string nbstatName(const uint8_t *b, size_t n)
+/* The hosts of the /24 `net` (but `me`) that take a connection on `port`, sorted: 64 at a time,
+ * each batch given 400 ms. The sockets non-blocking the console's way (vfs/ps5_socket.h): with
+ * fcntl alone each connect would wait for its answer, one host after another. */
+std::vector<uint32_t> answering(uint32_t net, uint32_t me, int port)
 {
-	if (n < 57) {
-		return std::string();
-	}
-	const unsigned count = b[56];
-	std::string first;
-	for (unsigned i = 0; i < count && 57 + (i + 1) * 18 <= n; i++) {
-		const uint8_t *e = b + 57 + i * 18;
-		const bool group = (e[16] & 0x80) != 0;
-		std::string name(reinterpret_cast<const char *>(e), 15);
-		while (!name.empty() && (name.back() == ' ' || name.back() == 0)) {
-			name.pop_back();
-		}
-		if (group || name.empty()) {
-			continue;
-		}
-		if (e[15] == 0x20) {
-			return name;
-		}
-		if (first.empty() && e[15] == 0x00) {
-			first = name;
-		}
-	}
-	return first;
-}
-
-} // namespace
-
-std::vector<FoundServer> findServers()
-{
-	std::vector<FoundServer> out;
-	const uint32_t me = localAddress();
-	if (!me) {
-		return out;
-	}
-	const uint32_t net = me & 0xFFFFFF00u;
-	/* port 445 of the /24's hosts, 64 at a time, each batch given 400 ms */
 	std::vector<uint32_t> open;
 	for (uint32_t base = 1; base < 255; base += 64) {
 		std::vector<std::pair<int, uint32_t>> socks;
@@ -399,16 +381,17 @@ std::vector<FoundServer> findServers()
 			if (fd < 0) {
 				continue;
 			}
-			fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+			PS5Socket::NoSigPipe(fd);
+			PS5Socket::MakeNonBlocking(fd);
 			sockaddr_in a{};
 			a.sin_family = AF_INET;
-			a.sin_port = htons(445);
+			a.sin_port = htons(static_cast<uint16_t>(port));
 			a.sin_addr.s_addr = htonl(ip);
 			const int rc = connect(fd, reinterpret_cast<sockaddr *>(&a), sizeof(a));
 			if (rc == 0) {
 				open.push_back(ip);
 				close(fd);
-			} else if (errno == EINPROGRESS) {
+			} else if (errno == EINPROGRESS || errno == EWOULDBLOCK) {
 				socks.push_back({ fd, ip });
 			} else {
 				close(fd);
@@ -437,6 +420,53 @@ std::vector<FoundServer> findServers()
 			close(s.first);
 		}
 	}
+	std::sort(open.begin(), open.end());
+	open.erase(std::unique(open.begin(), open.end()), open.end());
+	return open;
+}
+
+} // namespace
+
+/* a NetBIOS node status answer's file server name (suffix 0x20, unique), else its first unique */
+std::string nbstatName(const unsigned char *b, size_t n)
+{
+	if (n < 57) {
+		return std::string();
+	}
+	const unsigned count = b[56];
+	std::string first;
+	for (unsigned i = 0; i < count && 57 + (i + 1) * 18 <= n; i++) {
+		const uint8_t *e = b + 57 + i * 18;
+		const bool group = (e[16] & 0x80) != 0;
+		std::string name(reinterpret_cast<const char *>(e), 15);
+		while (!name.empty() && (name.back() == ' ' || name.back() == 0)) {
+			name.pop_back();
+		}
+		if (group || name.empty()) {
+			continue;
+		}
+		if (e[15] == 0x20) {
+			return name;
+		}
+		if (first.empty() && e[15] == 0x00) {
+			first = name;
+		}
+	}
+	return first;
+}
+
+std::vector<FoundServer> findServers()
+{
+	std::vector<FoundServer> out;
+	const uint32_t me = localAddress();
+	if (!me) {
+		return out;
+	}
+	const uint32_t net = me & 0xFFFFFF00u;
+	const std::vector<uint32_t> smb = answering(net, me, 445);
+	const std::vector<uint32_t> nfs = answering(net, me, 2049);
+	std::vector<uint32_t> open = smb;
+	open.insert(open.end(), nfs.begin(), nfs.end());
 	std::sort(open.begin(), open.end());
 	open.erase(std::unique(open.begin(), open.end()), open.end());
 	/* their names: a NetBIOS node status request ("*") to each, the answers for 500 ms */
@@ -483,7 +513,12 @@ std::vector<FoundServer> findServers()
 	for (size_t i = 0; i < open.size(); i++) {
 		char ip[16];
 		std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u", open[i] >> 24, (open[i] >> 16) & 255, (open[i] >> 8) & 255, open[i] & 255);
-		out.push_back({ ip, names[i] });
+		FoundServer found;
+		found.ip = ip;
+		found.name = names[i];
+		found.smb = std::binary_search(smb.begin(), smb.end(), open[i]);
+		found.nfs = std::binary_search(nfs.begin(), nfs.end(), open[i]);
+		out.push_back(found);
 	}
 	return out;
 }
@@ -491,15 +526,39 @@ std::vector<FoundServer> findServers()
 namespace {
 ShareFile s_current;
 std::string s_current_file;
+
+/* The first use: network.cfg as the start mounted it, each share given the mount the layer made
+ * for its path line (the same lines in the same order: ps5vfs_load_network_config). */
+void adopt()
+{
+	static bool adopted = false;
+	if (adopted) {
+		return;
+	}
+	adopted = true;
+#ifndef PS5_SHARES_HOST_TEST
+	s_current_file = ps5vfs_network_config_path();
+	if (s_current_file.empty() || !readShares(s_current_file, s_current)) {
+		return;
+	}
+	const std::vector<std::string> mounts = ps5vfs_network_config_mounts();
+	for (size_t i = 0; i < s_current.shares.size() && i < mounts.size(); i++) {
+		s_current.shares[i].mount = mounts[i];
+	}
+#endif
+}
+
 } // namespace
 
 ShareFile &Current()
 {
+	adopt();
 	return s_current;
 }
 
 const std::string &CurrentFile()
 {
+	adopt();
 	return s_current_file;
 }
 
@@ -511,27 +570,126 @@ std::vector<std::string> MountsTaken(const Share *except)
 			taken.push_back(s.mount);
 		}
 	}
-	return taken;
-}
-
-int LoadAndMount(const std::string &file, std::string *error)
-{
-	s_current_file = file;
-	if (!readShares(file, s_current, error)) {
-		return -1;
-	}
-	int mounted = 0;
-	for (Share &s : s_current.shares) {
-		if (mountShare(s, s_current, MountsTaken(&s))) {
-			mounted++;
+#ifndef PS5_SHARES_HOST_TEST
+	// and every other mount of the layer's (one this list does not know of is not mounted over)
+	for (unsigned i = 0;; i++) {
+		const char *const point = ps5vfs_mount_point(i);
+		if (!point) {
+			break;
+		}
+		if ((!except || except->mount != point) && std::find(taken.begin(), taken.end(), point) == taken.end()) {
+			taken.push_back(point);
 		}
 	}
-	return mounted;
+#endif
+	return taken;
 }
 
 bool Save(std::string *error)
 {
+	adopt();
+	if (s_current_file.empty()) {
+		if (error) {
+			*error = "the start read no network.cfg";
+		}
+		return false;
+	}
 	return writeShares(s_current_file, s_current, error);
+}
+
+// ---- trying a share, and a server's list -------------------------------------------------
+
+namespace {
+
+/* An export path as a server lists it, for comparing: '/' for '\\', no '/' at the end (case kept:
+ * a Linux or NAS server tells /Games from /games). */
+std::string plainExport(std::string e)
+{
+	std::replace(e.begin(), e.end(), '\\', '/');
+	const size_t q = e.find('?');
+	if (q != std::string::npos) {
+		e.resize(q);
+	}
+	while (e.size() > 1 && e.back() == '/') {
+		e.pop_back();
+	}
+	return e;
+}
+
+} // namespace
+
+bool exportListed(const std::string &path, const std::vector<std::string> &exports)
+{
+	const std::string wanted = plainExport(path);
+	for (const std::string &e : exports) {
+		const std::string x = plainExport(e);
+		// the path is the export, or a folder inside it
+		if (wanted == x || (wanted.size() > x.size() && wanted.compare(0, x.size(), x) == 0 && (x == "/" || wanted[x.size()] == '/'))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// From Porpoise bc835d2 (GPL-3.0-or-later): its test(), with an NFS export the server does not
+// list called what it is (WinNFSd answers "access denied" for one).
+PS5SharesProblem::Problem testShare(const Share &s, const ShareFile &file, std::string *detail, size_t *entries)
+{
+	using PS5SharesProblem::Problem;
+	if (s.host.empty()) {
+		return Problem::NoServer;
+	}
+	std::string p = s.path;
+	while (!p.empty() && (p.back() == '/' || p.front() == '/')) {
+		p.erase(p.back() == '/' ? p.size() - 1 : 0, 1);
+	}
+	if (p.empty() || p[0] == '?') {
+		return Problem::NoShare;
+	}
+#ifdef PS5_SHARES_HOST_TEST
+	(void)file;
+	(void)detail;
+	(void)entries;
+	return Problem::Other;
+#else
+	std::string said;
+	Problem problem = ps5vfs_test_share(mountUrl(s, file), &said, entries);
+	if (s.nfs && (problem == Problem::Denied || problem == Problem::NoFolder || problem == Problem::Other)) {
+		std::vector<std::string> exports;
+		if (ps5vfs_list_nfs_exports(s.host, &exports, nullptr) == Problem::None && !exports.empty() &&
+			!exportListed(s.path, exports)) {
+			said = "";
+			for (const std::string &e : exports) {
+				said += (said.empty() ? "" : ", ") + e;
+			}
+			problem = Problem::NoSuchShare;
+		}
+	}
+	if (detail) {
+		*detail = said;
+	}
+	return problem;
+#endif
+}
+
+PS5SharesProblem::Problem listOnServer(const Share &s, const ShareFile &file, std::vector<std::string> &out, std::string *detail)
+{
+	out.clear();
+	if (s.host.empty()) {
+		return PS5SharesProblem::Problem::NoServer;
+	}
+#ifdef PS5_SHARES_HOST_TEST
+	(void)file;
+	(void)detail;
+	return PS5SharesProblem::Problem::Other;
+#else
+	if (s.nfs) {
+		return ps5vfs_list_nfs_exports(s.host, &out, detail);
+	}
+	const std::string user = s.user.empty() ? file.user : s.user;
+	const std::string password = s.user.empty() ? file.password : s.password;
+	return ps5vfs_list_smb_shares(s.host, user, password, &out, detail);
+#endif
 }
 
 } // namespace PS5Shares

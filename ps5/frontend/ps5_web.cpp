@@ -68,6 +68,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "vfs/ps5_socket.h"
+
 #if defined(__PROSPERO__)
 // The platform layer's (ps5platform/libc.h): no system module exports arc4random_buf to a title.
 extern "C" void ps5_arc4random_buf(void* buffer, size_t bytes);
@@ -764,11 +766,11 @@ namespace PS5Web
 			}
 		}
 
+		// fcntl's O_NONBLOCK alone does not take on the console's sockets: FIONBIO and SO_NBIO as
+		// well (vfs/ps5_socket.h, from Porpoise e6e0b64).
 		void SetNonBlocking(int fd)
 		{
-			const int flags = fcntl(fd, F_GETFL, 0);
-			if (flags >= 0)
-				fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+			(void)PS5Socket::MakeNonBlocking(fd);
 		}
 
 		void CloseConnection(Connection& connection)

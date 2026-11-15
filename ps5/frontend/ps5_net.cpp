@@ -27,6 +27,7 @@
 #include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #if !defined(__PROSPERO__)
@@ -84,6 +85,12 @@ namespace PS5Net
 		std::map<std::string, NameAnswer> s_names;
 		std::mutex s_lookup_mutex; // held across a lookup
 		std::atomic<bool> s_cancel_lookups{false};
+
+		// Public name servers asked when the console's own answers 0.0.0.0 (a name blocked by the
+		// console's DNS), and the port a name server is asked on: the tests change both.
+		std::mutex s_dns_mutex; // s_public_servers, s_dns_port
+		std::vector<std::string> s_public_servers = {"1.1.1.1", "8.8.8.8"};
+		std::uint16_t s_dns_port = 53;
 
 		// ---- small helpers -------------------------------------------------------------------
 
@@ -318,6 +325,163 @@ namespace PS5Net
 				std::memcpy(local, &from.sin_addr, 4);
 			close(fd);
 			return result;
+		}
+
+		// ---- a question to a name server ---------------------------------------------------------
+		// From Porpoise 901f30a (GPL-3.0-or-later), src/porpoise_dns.cpp: one question over UDP for the name's
+		// first IPv4 address (an A record; CNAMEs in the answer are skipped over), three tries of
+		// 0.6 s each, so a lost packet costs a try and not the answer.
+
+		enum class Said
+		{
+			Address, // here it is
+			No, // it answered: no such name, refused, or no address
+			Nothing, // no answer at all
+		};
+
+		Said AskServer(const std::string& server, const std::string& name, std::uint8_t out[4], std::string* why)
+		{
+			in_addr to_addr{};
+			if (inet_pton(AF_INET, server.c_str(), &to_addr) != 1)
+			{
+				*why = "not an address: " + server;
+				return Said::Nothing;
+			}
+			unsigned char q[512];
+			std::size_t n = 0;
+			static std::atomic<unsigned> s_id{0x5c2u};
+			const std::uint16_t id = static_cast<std::uint16_t>(s_id.fetch_add(0x9e37u) ^ static_cast<unsigned>(Clock::now().time_since_epoch().count()));
+			const unsigned char header[12] = {static_cast<unsigned char>(id >> 8), static_cast<unsigned char>(id), 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0};
+			std::memcpy(q, header, sizeof(header));
+			n = sizeof(header);
+			std::size_t start = 0;
+			while (start <= name.size())
+			{
+				std::size_t dot = name.find('.', start);
+				if (dot == std::string::npos)
+					dot = name.size();
+				const std::size_t len = dot - start;
+				if (len == 0 && dot == name.size())
+					break; // a trailing dot
+				if (len == 0 || len > 63 || n + len + 1 > sizeof(q) - 6)
+				{
+					*why = "a name DNS can't carry";
+					return Said::No;
+				}
+				q[n++] = static_cast<unsigned char>(len);
+				std::memcpy(q + n, name.data() + start, len);
+				n += len;
+				start = dot + 1;
+			}
+			q[n++] = 0;
+			q[n++] = 0;
+			q[n++] = 1; // A
+			q[n++] = 0;
+			q[n++] = 1; // IN
+
+			std::uint16_t port;
+			{
+				std::lock_guard lock(s_dns_mutex);
+				port = s_dns_port;
+			}
+			const int fd = socket(AF_INET, SOCK_DGRAM, 0);
+			if (fd < 0)
+			{
+				*why = std::string("socket: ") + std::strerror(errno);
+				return Said::Nothing;
+			}
+			sockaddr_in sin{};
+#if defined(__FreeBSD__) || defined(__PROSPERO__)
+			sin.sin_len = sizeof(sin);
+#endif
+			sin.sin_family = AF_INET;
+			sin.sin_port = htons(port);
+			sin.sin_addr = to_addr;
+			bool found = false, answered = false;
+			*why = "no answer";
+			for (int attempt = 0; attempt < 3 && !found; ++attempt)
+			{
+				if (sendto(fd, q, n, 0, reinterpret_cast<sockaddr*>(&sin), sizeof(sin)) != static_cast<ssize_t>(n))
+				{
+					*why = std::string("send: ") + std::strerror(errno);
+					break;
+				}
+				const Clock::time_point deadline = Clock::now() + std::chrono::milliseconds(600);
+				while (!found)
+				{
+					const long long left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+					if (left <= 0)
+						break;
+					pollfd p{fd, POLLIN, 0};
+					const int ready = poll(&p, 1, static_cast<int>(left));
+					if (ready < 0 && errno == EINTR)
+						continue;
+					if (ready <= 0)
+						break;
+					unsigned char r[1500];
+					const ssize_t got = recv(fd, r, sizeof(r), 0);
+					if (got < 12 || r[0] != q[0] || r[1] != q[1] || !(r[2] & 0x80))
+						continue; // not the answer to this question
+					answered = true;
+					const int rcode = r[3] & 0x0F;
+					if (rcode != 0)
+					{
+						*why = rcode == 3 ? "no such name" : "the server refused (" + std::to_string(rcode) + ")";
+						attempt = 3;
+						break;
+					}
+					const int qd = (r[4] << 8) | r[5], an = (r[6] << 8) | r[7];
+					std::size_t at = 12;
+					const std::size_t size = static_cast<std::size_t>(got);
+					const auto skip_name = [&]() {
+						while (at < size)
+						{
+							const unsigned char len = r[at];
+							if (len == 0)
+							{
+								++at;
+								return true;
+							}
+							if ((len & 0xC0) == 0xC0)
+							{
+								at += 2;
+								return at <= size;
+							}
+							at += 1 + len;
+						}
+						return false;
+					};
+					bool ok = true;
+					for (int i = 0; i < qd && ok; ++i)
+						ok = skip_name() && (at += 4) <= size;
+					for (int i = 0; i < an && ok && !found; ++i)
+					{
+						ok = skip_name() && at + 10 <= size;
+						if (!ok)
+							break;
+						const int type = (r[at] << 8) | r[at + 1];
+						const int klass = (r[at + 2] << 8) | r[at + 3];
+						const std::size_t length = static_cast<std::size_t>((r[at + 8] << 8) | r[at + 9]);
+						at += 10;
+						if (at + length > size)
+							break;
+						if (type == 1 && klass == 1 && length == 4)
+						{
+							std::memcpy(out, r + at, 4);
+							found = true;
+						}
+						at += length;
+					}
+					if (!found)
+					{
+						*why = "no address in the answer";
+						attempt = 3;
+						break;
+					}
+				}
+			}
+			close(fd);
+			return found ? Said::Address : answered ? Said::No : Said::Nothing;
 		}
 
 		int RealResolve(const char* name, std::uint8_t address[4])
@@ -659,7 +823,30 @@ namespace PS5Net
 		std::uint8_t found[4] = {};
 		error = probes.resolve ? probes.resolve(key.c_str(), found) : RealResolve(key.c_str(), found);
 		if (error == 0 && IsZero(found))
+		{
+			// The console's name server answered 0.0.0.0: a name its DNS blocks (a filter set on the
+			// console or the router). The game's name is asked of public DNS instead. (Porpoise
+			// 7026d66 does this for the Wii's update servers; here for every name a game asks.)
+			std::vector<std::string> servers;
+			{
+				std::lock_guard lock(s_dns_mutex);
+				servers = s_public_servers;
+			}
 			error = EAI_NONAME;
+			for (const std::string& server : servers)
+			{
+				std::uint8_t other[4] = {};
+				std::string why;
+				if (AskServer(server, key, other, &why) == Said::Address && !IsZero(other))
+				{
+					ps5px_log("net: name %s: the console's name server gave 0.0.0.0; %s gave %s", key.c_str(), server.c_str(), Dotted(other).c_str());
+					std::memcpy(found, other, 4);
+					error = 0;
+					break;
+				}
+				ps5px_log("net: name %s: the console's name server gave 0.0.0.0; %s: %s", key.c_str(), server.c_str(), why.c_str());
+			}
+		}
 
 		{
 			std::lock_guard lock(s_name_mutex);
@@ -746,7 +933,8 @@ namespace PS5Net
 			return fail(with_errno("creating the file", errno));
 		const auto give_up = [&](const std::string& message) {
 			// (An emptied file first: removing a large allocated one can itself take long.)
-			(void)ftruncate(fd, 0);
+			if (ftruncate(fd, 0) != 0)
+				(void)0; // (removed below all the same)
 			close(fd);
 			unlink(path.c_str());
 			return fail(message);
@@ -811,7 +999,44 @@ namespace PS5Net
 		return true;
 	}
 
+	// ---- a name server's test -------------------------------------------------------------------
+
+	// From Porpoise 18d12f1 (GPL-3.0-or-later), src/porpoise_dns.cpp probe(): the question asked up to three
+	// times while nothing answers.
+	NameServerTest TestNameServer(const std::string& server, const std::string& name)
+	{
+		NameServerTest test;
+		const Clock::time_point started = Clock::now();
+		std::uint8_t out[4] = {};
+		Said said = Said::Nothing;
+		for (int attempt = 0; attempt < 3 && said == Said::Nothing; ++attempt)
+			said = AskServer(server, name, out, &test.why);
+		test.ms = static_cast<int>(MillisecondsSince(started));
+		test.result = said == Said::Address ? 1 : said == Said::No ? 0 : -1;
+		if (said == Said::Address)
+		{
+			test.address = Dotted(out);
+			test.why.clear();
+		}
+		ps5px_log("net: name server %s asked for %s: %s after %d ms", server.c_str(), name.c_str(),
+			test.result == 1 ? test.address.c_str() : (test.result == 0 ? ("an answer without an address (" + test.why + ")").c_str() : ("no answer (" + test.why + ")").c_str()),
+			test.ms);
+		return test;
+	}
+
 	// ---- for the PC tests --------------------------------------------------------------------
+
+	void Testing::SetNameServerPort(std::uint16_t port)
+	{
+		std::lock_guard lock(s_dns_mutex);
+		s_dns_port = port;
+	}
+
+	void Testing::SetPublicNameServers(const std::vector<std::string>& servers)
+	{
+		std::lock_guard lock(s_dns_mutex);
+		s_public_servers = servers;
+	}
 
 	void Testing::SetProbes(const Probes& probes)
 	{

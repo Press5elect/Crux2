@@ -21,6 +21,7 @@
 #   pcsx2-<revision>.tar.xz        PCSX2 at the pinned revision, as fetched (the patch is in the
 #                                  project archive)
 #   SOURCES.txt                    every other part: its repository and the exact revision
+#   Crux2-recomp-kit-<tag>.zip  the recomp kit (ps5/tools/make-recomp-kit.sh; --no-kit leaves it out)
 #   SHA256SUMS                     of everything above
 #
 # The shape is the release procedure of Mihawk's PS5 titles (one ZIP of the title folder, the
@@ -112,6 +113,7 @@ def main() -> int:
     parser.add_argument("--date", default=None, help="the timestamp of every entry (default: today)")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--part-mib", type=float, default=0.0, help="also write parts no larger than this")
+    parser.add_argument("--no-kit", action="store_true", help="leave the recomp kit out")
     args = parser.parse_args()
 
     title_id = json.loads((PS5 / "sce_sys/param.json").read_text())["titleId"]
@@ -220,6 +222,14 @@ def main() -> int:
     sources = out / "SOURCES.txt"
     sources.write_text("\n".join(lines))
     produced.append(sources)
+
+    # ---- the recomp kit (ps5/tools/make-recomp-kit.sh): the PC side of native code modules and of
+    # Crux2 Recomp's modules, released with every version
+    if not args.no_kit:
+        if subprocess.run(["bash", str(PS5 / "tools/make-recomp-kit.sh"), args.tag, str(out)]).returncode != 0:
+            print("the recomp kit was not made (--no-kit leaves it out)", file=sys.stderr)
+            return 1
+        produced.append(out / f"Crux2-recomp-kit-{args.tag}.zip")
 
     (out / "SHA256SUMS").write_text("".join(f"{sha256(path)}  {path.name}\n" for path in produced))
     for path in produced:

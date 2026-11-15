@@ -36,6 +36,8 @@
  * "insecure" option.
  */
 #include "ps5_vfs_internal.h"
+#include "ps5_socket.h"
+#include "ps5_vfs.h"
 
 #include <algorithm>
 #include <cctype>
@@ -319,9 +321,9 @@ bool Probe(const std::string& host, int port, std::string* why)
   const int fd = socket(found->ai_family, SOCK_STREAM, 0);
   if (fd >= 0)
   {
-    const int flags = fcntl(fd, F_GETFL, 0);
-    if (flags >= 0)
-      (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    /* fcntl alone does not make a socket non-blocking on the console (ps5_socket.h). */
+    PS5Socket::NoSigPipe(fd);
+    (void)PS5Socket::MakeNonBlocking(fd);
     int result = connect(fd, found->ai_addr, found->ai_addrlen);
     if (result != 0 && errno == EINPROGRESS)
     {
@@ -407,6 +409,9 @@ class NFSBackend final : public Backend
 {
 public:
   explicit NFSBackend(ExportURL url) : m_url(std::move(url)) {}
+
+  /* The server's exports (ps5vfs_list_nfs_exports). */
+  bool Exports(std::vector<std::string>* list, std::string* why) { return ListExports(list, why); }
 
   ~NFSBackend() override
   {
@@ -1026,6 +1031,46 @@ std::unique_ptr<Backend> CreateNFSBackend(const char* url, std::string* error)
 }
 
 } // namespace ps5vfs
+
+/* From Porpoise bc835d2 (GPL-3.0-or-later): its enumerate() for NFS, the NFS port checked first
+ * (five seconds at most), then the server's MOUNT service asked for its exports. */
+PS5SharesProblem::Problem ps5vfs_list_nfs_exports(const std::string& server, std::vector<std::string>* exports, std::string* detail)
+{
+  using namespace ps5vfs;
+  using PS5SharesProblem::Problem;
+  exports->clear();
+  if (server.empty())
+    return Problem::NoServer;
+  std::string why;
+  if (!Probe(server, DEFAULT_NFS_PORT, &why))
+  {
+    Log("vfs: the exports of %s: %s", server.c_str(), why.c_str());
+    if (detail)
+      *detail = why;
+    return PS5SharesProblem::Classify(why);
+  }
+  ExportURL parsed;
+  std::string error;
+  if (!ParseURL(("nfs://" + server + "/").c_str(), &parsed, &error))
+  {
+    if (detail)
+      *detail = error;
+    return Problem::Other;
+  }
+  NFSBackend lister(std::move(parsed));
+  if (!lister.Exports(exports, &why))
+  {
+    Log("vfs: the exports of %s: %s", server.c_str(), why.c_str());
+    if (detail)
+      *detail = why;
+    exports->clear();
+    return Problem::NoExports;
+  }
+  std::sort(exports->begin(), exports->end());
+  exports->erase(std::unique(exports->begin(), exports->end()), exports->end());
+  Log("vfs: %s exports %zu folder(s)", server.c_str(), exports->size());
+  return Problem::None;
+}
 
 /* The console's build of libnfs calls these in place of libc's (ps5/tools/build-deps.sh):
  *   getservbyport  no system module exports it. libnfs asks it whether a reserved port is a

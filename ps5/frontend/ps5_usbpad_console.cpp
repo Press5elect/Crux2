@@ -20,9 +20,14 @@
 // interface whose report descriptor has a joystick or game pad in it, or a DualShock 3 (054c:0268).
 // Each is opened once when it comes; the HID report descriptor is read then (GET_DESCRIPTOR on the
 // default pipe), and kept while the device stays plugged in.
+//
+// When libSceUsbd cannot be loaded or started, or a pad it found cannot be opened through it, the
+// pads are read through the console's ugen nodes instead (ps5_ugen.h: FreeBSD's own USB ioctls, as
+// Porpoise reads a DolphinBar). The same reports reach the same decoding either way.
 
 #include "ps5_usbpad.h"
 #include "ps5_keyboard.h" // PS5SystemModules
+#include "ps5_ugen.h"
 
 #include <cstdarg>
 #include <cstdint>
@@ -498,8 +503,99 @@ namespace PS5UsbPads
 		};
 	} // namespace
 
+	namespace
+	{
+		void UgenLog(const char* line) { ps5px_log("%s", line); }
+
+		/// libSceUsbd first; ugen when it cannot be used at all, or for a pad it cannot open. The ugen
+		/// transport's handles are told apart by a high bit.
+		class FallbackTransport final : public Transport
+		{
+		public:
+			bool Start() override
+			{
+				if (m_usbd.Start())
+				{
+					m_usbd_on = true;
+					return true;
+				}
+				ps5px_log("usb pads: libSceUsbd could not be used: trying the ugen nodes");
+				m_ugen_on = m_ugen.Start();
+				m_ugen_tried = true;
+				return m_ugen_on;
+			}
+
+			void Stop() override
+			{
+				if (m_usbd_on)
+					m_usbd.Stop();
+				if (m_ugen_on)
+					m_ugen.Stop();
+				m_usbd_on = m_ugen_on = m_ugen_tried = false;
+			}
+
+			bool Enumerate(std::vector<DeviceInfo>* devices) override
+			{
+				return m_usbd_on ? m_usbd.Enumerate(devices) : m_ugen.Enumerate(devices);
+			}
+
+			int Open(const DeviceInfo& device) override
+			{
+				if (m_usbd_on)
+				{
+					const int h = m_usbd.Open(device);
+					if (h >= 0)
+						return h;
+					// Refused through libSceUsbd: the same device's ugen node (bus and address are
+					// the node's numbers, as FreeBSD's libusb has them).
+					if (!m_ugen_tried)
+					{
+						m_ugen_tried = true;
+						m_ugen_on = m_ugen.Start();
+					}
+					if (!m_ugen_on)
+						return -1;
+					ps5px_log("usb pads: %04x:%04x: trying its ugen node", device.vendor, device.product);
+				}
+				const int h = m_ugen.Open(device);
+				return h >= 0 ? (h | UGEN) : -1;
+			}
+
+			int Read(int handle, uint8_t* buffer, uint32_t size, uint32_t timeout_ms) override
+			{
+				return (handle & UGEN) ? m_ugen.Read(handle & ~UGEN, buffer, size, timeout_ms) : m_usbd.Read(handle, buffer, size, timeout_ms);
+			}
+
+			bool Write(int handle, const uint8_t* data, uint32_t size) override
+			{
+				return (handle & UGEN) ? m_ugen.Write(handle & ~UGEN, data, size) : m_usbd.Write(handle, data, size);
+			}
+
+			int Control(int handle, uint8_t request_type, uint8_t request, uint16_t value, uint16_t index, uint8_t* data,
+				uint16_t length) override
+			{
+				return (handle & UGEN) ? m_ugen.Control(handle & ~UGEN, request_type, request, value, index, data, length) :
+										 m_usbd.Control(handle, request_type, request, value, index, data, length);
+			}
+
+			void Close(int handle) override
+			{
+				if (handle & UGEN)
+					m_ugen.Close(handle & ~UGEN);
+				else
+					m_usbd.Close(handle);
+			}
+
+		private:
+			static constexpr int UGEN = 0x40000000;
+			UsbdTransport m_usbd;
+			PS5Ugen::Transport m_ugen{PS5Ugen::ConsoleSysOps(), UgenLog};
+			bool m_usbd_on = false, m_ugen_on = false, m_ugen_tried = false;
+		};
+	} // namespace
+
 	std::unique_ptr<Transport> CreateConsoleTransport()
 	{
-		return std::make_unique<UsbdTransport>();
+		return std::make_unique<FallbackTransport>();
 	}
 } // namespace PS5UsbPads

@@ -1,9 +1,11 @@
 # The changes Crux2's RADV carries, on Mesa main (27.0-devel)
 
-`CRUX2_MESA_PATCHES=ps5/patches/mesa-27 ps5/tools/build-radv-crux2.sh` applies these, in order, to
-PS5 Mesa at the revision PS5_Vulkan pins, and builds the archive Crux2 links
-(`.deps/native/radv-crux2` in PS5_Vulkan). Without the variable the script uses `ps5/patches/mesa`
-(Mesa 26.2.5), as before. Applied to the pin, they give the tree of branch `crux2-radv-27` in
+`ps5/tools/build-radv-crux2.sh` applies these, in order, to PS5 Mesa at the revision PS5_Vulkan
+pins (`mesa_revision` in PS5_Vulkan's `tools/build-radv.sh`: `1ba9874` at PS5_Vulkan `f410e67` and
+`ace98a9`), and builds the archive Crux2 links (`.deps/native/radv-crux2` in PS5_Vulkan). This
+folder is the script's default; `CRUX2_MESA_PATCHES=ps5/patches/mesa` builds the older Mesa 26.2.5
+series instead. Rebuild RADV after any change here: a Crux2 build links whatever archive is in
+`.deps/native/radv-crux2` (see [`docs/dev/patches.md`](../../../docs/dev/patches.md)). Applied to the pin, they give the tree of branch `crux2-radv-27` in
 PS5_Mesa (its merge commit `7d698f21d65`, on branch `crux2-radv-27b`; the merge of 2026-10-23, `ebe30d18aca`, is on `crux2-radv-27`).
 
 | Patch | From | What it does |
@@ -15,6 +17,7 @@ PS5_Mesa (its merge commit `7d698f21d65`, on branch `crux2-radv-27b`; the merge 
 | `0015-wsi-videoout-119.88-Hz-on-a-VRR-display` | PSFlyCast (Press5elect), as it is | After the high-frame-rate mode is taken, a VRR display with nothing flipped yet refreshes at the 48 Hz floor of its window (about 20.8 ms); the settle check took that for a display still at 60 Hz and restored 59.94 Hz. A period of 19.5-22.5 ms is now 119.88 Hz on a VRR display, and `PS5_VIDEOOUT_59HZ` keeps a title at 59.94 Hz whatever `param.json` declares. Each outcome is logged (`wsi/videoout: 119.88 Hz selected ...`) |
 | `0016-wsi-videoout-variable-refresh-on-request` | PSFlyCast (Press5elect), as it is | With `PS5_VIDEOOUT_VRR=1` before the first Vulkan call, the output is asked to leave its fixed rate once 119.88 Hz is configured; the variable then reads `on` or `refused`, and a refusal configures the mode again as it was |
 | `0017-wsi-videoout-variable-refresh-found-at-run-time` | Crux2 | `sceVideoOutVrrUnpegFromFixedRate` (0016) is not exported by every firmware, and a title importing it would not start there: the driver calls a weak hook, `ps5_title_videoout_vrr_unpeg`, which Crux2 answers after looking the function up by its NID (`T4ucGB8CsnM`); without it variable refresh is refused |
+| `0020-wsi-videoout-HDR10-framebuffers-on-request` | OGBox (Press5elect), as it is; after [VLC for PS5](https://github.com/ZiZc3/VLC)'s `patches/mesa/0001-videoout-hdr10.patch` (GPL-3.0; the WSI code it changes is MIT) | `wsi_videoout_set_hdr10(1)` retypes every registered set of framebuffers in place as HDR10 (pixel format `0x8100070400000000`: 10:10:10:2 in the buffers' B, G, R order, BT.2020, PQ), and `(0)` back to SDR; a set registered later follows, or every set goes back to SDR (`wsi_videoout_hdr10()` says which). `wsi_videoout_output_range()` reads the output's dynamic range (1 SDR, 2 HDR). `sceVideoOutSubmitChangeBufferAttribute2` and `sceVideoOutGetOutputStatus` are reached through weak hooks Crux2 answers after looking them up by NID (`HuViW4HnrOw`, `utPrVdxio-8`), as 0017's. VideoOut takes HDR10 only from a title whose `param.json` attribute carries `0x20000000` (`0x80290003` without it). Logged as `wsi/videoout: framebuffers HDR10: taken ...` and `wsi/videoout: output status ...` |
 
 `0012` is a binary-safe `git diff --binary` from the pin with `0001`-`0011` to the merged tree
 without `0013`, about 59 MB. It is plain text that `git apply --index` takes; the build script
@@ -33,13 +36,3 @@ the PS epilog; the SMEM cache line size used for uploads; and addrlib 10.9.
 
 Mesa's licences apply to all of them (the PS5 winsys is MIT, like the code around it;
 PS5CEMU-HAR's patches are published under GPL-3.0). Crux2's own changes: Crux2 by Press5elect.
-
-Crux2 v1.0.19 adds two of PS5_Mesa's own RADV fixes (Mihawk), newer than its pin:
-`0018-radv-ps5-back-a-large-buffer-with-several-direct-memory-ranges.patch` (PS5_Mesa
-53cc83ff82b, as OGBox 0.1.28 carries it, its one conflict against `0001-diagnostic-breadcrumbs`
-merged): a large GPU buffer is backed by several direct-memory ranges when no single free range is
-big enough, instead of failing; and `0019-radv-ps5-a-buffer-piece-is-mapped-only-where-nothing-else-is.patch`
-(PS5_Mesa 249fe49d2d8): each such piece is placed only where nothing else is mapped. PS5_Mesa's
-f5610fe2709 (a freed buffer kept until the GPU has run what was submitted before) is not taken:
-`0007` already does that for buffers, and the two do not merge; it adds sparse ranges, which
-PCSX2's renderer does not use.

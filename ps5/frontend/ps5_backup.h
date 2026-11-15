@@ -54,6 +54,7 @@ struct Snapshot
 	time_t when = 0;      // from its name, as local time
 	bool automatic = false;
 	bool complete = false; // backup.txt is there
+	bool unreadable = false; // backup.txt is there but could not be read when listed (never pruned for it)
 	int card_files = 0;
 	int states = 0;
 	uint64_t bytes = 0;

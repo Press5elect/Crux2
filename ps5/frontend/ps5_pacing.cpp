@@ -49,6 +49,17 @@ namespace PS5Pacing
 		std::atomic<uint32_t> s_shown_in_window{0};
 		std::atomic<float> s_shown_per_second{0.0f};
 
+		// Frame generation's figures: counted on the GS thread, the rates read by the on-screen display.
+		FrameGenFigures s_fg;
+		std::atomic<float> s_fg_shown_rate{0.0f}, s_fg_made_rate{0.0f};
+		std::atomic<bool> s_fg_stopped{false}; // the game stopped (on the CPU thread): the GS thread starts the figures again
+
+		void FrameGenStoppedThenOff()
+		{
+			if (s_fg_stopped.exchange(false, std::memory_order_relaxed))
+				s_fg.Off();
+		}
+
 		// The intervals between presents: the whole of the game played, and the profiler's window.
 		std::mutex s_times_lock;
 		FrameTimes s_times, s_window;
@@ -261,6 +272,9 @@ namespace PS5Pacing
 		s_shown_window_start.store(0, std::memory_order_relaxed);
 		s_shown_in_window.store(0, std::memory_order_relaxed);
 		s_shown_per_second.store(0.0f, std::memory_order_relaxed);
+		s_fg_stopped.store(true, std::memory_order_relaxed);
+		s_fg_shown_rate.store(0.0f, std::memory_order_relaxed);
+		s_fg_made_rate.store(0.0f, std::memory_order_relaxed);
 	}
 
 	void NoteShown(bool distinct)
@@ -298,5 +312,48 @@ namespace PS5Pacing
 	float ShownPerSecond()
 	{
 		return s_shown_per_second.load(std::memory_order_relaxed);
+	}
+
+	void NoteFrameGenGame()
+	{
+		FrameGenStoppedThenOff();
+		s_fg.Game();
+	}
+
+	void NoteFrameGenShown(bool made, unsigned period)
+	{
+		const uint64_t now_ns = static_cast<uint64_t>(Common::Timer::ConvertValueToNanoseconds(Common::Timer::GetCurrentValue()));
+		FrameGenStoppedThenOff();
+		FrameGenFigures::Line line;
+		const bool due = s_fg.Shown(now_ns, made, line);
+		s_fg_shown_rate.store(s_fg.shown_rate, std::memory_order_relaxed);
+		s_fg_made_rate.store(s_fg.made_rate, std::memory_order_relaxed);
+		if (due)
+		{
+			ps5px_log("framegen: in %.0f s the screen was given %llu pictures, %llu of them made; the game gave %llu (the pacer takes "
+					  "each to stay %u refreshes)",
+				line.seconds, static_cast<unsigned long long>(line.shown), static_cast<unsigned long long>(line.made),
+				static_cast<unsigned long long>(line.own), period);
+		}
+	}
+
+	void NoteFrameGenOff()
+	{
+		FrameGenStoppedThenOff();
+		if (s_fg.rate_start == 0 && s_fg.own == 0)
+			return;
+		s_fg.Off();
+		s_fg_shown_rate.store(0.0f, std::memory_order_relaxed);
+		s_fg_made_rate.store(0.0f, std::memory_order_relaxed);
+	}
+
+	float FrameGenShownPerSecond()
+	{
+		return s_fg_shown_rate.load(std::memory_order_relaxed);
+	}
+
+	float FrameGenMadePerSecond()
+	{
+		return s_fg_made_rate.load(std::memory_order_relaxed);
 	}
 } // namespace PS5Pacing

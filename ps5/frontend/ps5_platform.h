@@ -58,13 +58,19 @@ void ps5px_audio_counters(unsigned long long* writes, unsigned long long* short_
 void ps5px_profile_start(int all_threads);
 void ps5px_profile_thread_named(const char* name);
 
-/// The boot log's descriptor (-1: none), for the crash report.
+/// The boot log's descriptor (-1: none), for the crash report. A log kept in memory is written into
+/// the file first.
 int ps5px_log_fd(void);
-// Everything logged so far into the file and onto the disk (waits up to 5 s for the log's writer).
-void ps5px_log_flush(void);
-// The same, at a moment that matters (a game starts or closes): the only times the boot log is
-// synced to the drive while Crux2 runs (v1.0.19).
-void ps5px_log_checkpoint(void);
+/// (From OGBox 0.0.7) The boot log kept in memory (the default: [PS5] LogMode is not "always"):
+/// written to the file now, `why` said at its top, and the session's lines to the file from then on.
+/// 1 when it was in memory, 0 otherwise. Waits for the file (call it off the frame's way when it
+/// can be).
+int ps5px_log_keep(const char* why);
+/// 1 while the boot log is kept in memory.
+int ps5px_log_in_memory(void);
+/// Once a frame the interface draws: `game_running` while a game runs. 15 s without one while a
+/// game runs writes a boot log kept in memory to its file.
+void ps5px_log_frame(int game_running);
 
 /// Gives the calling thread a stack of its own for the crash report, so that a stack overflow can
 /// be reported too (ps5_crash.cpp). The emulator's threads do this as they start.
@@ -86,10 +92,8 @@ namespace PS5Platform {
 /// sandbox when USB drives are wanted, then starts klog capture and the boot log.
 void EarlyInit();
 
-/// The boot log (v1.0.19: Settings > Debug > Logs chooses what and where): its file now and the run
-/// before's, "" when there is none; and its text when it is kept in memory only (false otherwise).
-std::string LogPath();
-std::string LogPreviousPath();
+/// The boot log's text while it is kept in memory (true), for Settings > Debug > Log; false when it
+/// goes to its file.
 bool LogInMemory(std::string* text);
 
 /// Whether a file of this name is in the title folder: a switch for when the interface cannot be

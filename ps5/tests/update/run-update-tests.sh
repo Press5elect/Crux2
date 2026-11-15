@@ -11,6 +11,7 @@
 # in vendor/pcsx2/3rdparty/libzip is built once into the work folder (libzip-pc/CMakeLists.txt,
 # deflate only; needs cmake and zlib). rapidjson is PCSX2's copy, header-only. When a release ZIP
 # was made in this tree (dist/release-<tag>/Crux2-<tag>.zip) the newest is installed as well.
+# CXX: the compiler (default clang++).
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ps5=$(cd "$here/../.." && pwd)
@@ -35,7 +36,7 @@ fi
 
 export ASAN_OPTIONS=detect_leaks=1
 export UBSAN_OPTIONS=print_stacktrace=1
-clang++ -std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+"${CXX:-clang++}" -std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
 	-fno-omit-frame-pointer -pthread -DCRUX2_UPDATE_TEST -I "$ps5/frontend" \
 	-isystem "$root/vendor/pcsx2/3rdparty/rapidjson/include" \
 	"$here/update_test.cpp" "$ps5/frontend/ps5_update.cpp" "${zipflags[@]}" -o "$work/update_test"

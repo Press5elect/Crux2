@@ -68,6 +68,15 @@ if ! have ports-copy; then
     done
     mark ports-copy
 fi
+# The startup video's decoder (frontend/ps5_intro.cpp): libvpx 1.14.1's VP9 (BSD-3-Clause), the same
+# ports release's, as OGBox takes it.
+if ! have ports-vpx; then
+    step "copying the video decoder's port (libvpx)"
+    rm -rf "$sys/include/vpx"
+    cp -r "$pacbrew/include/vpx" "$sys/include/"
+    cp "$pacbrew/lib/libvpx.a" "$sys/lib/"
+    mark ports-vpx
+fi
 
 # --------------------------------------------------------------------- sources
 # name, repository, revision: PCSX2's versions; shaderc is the fork with the debug-information

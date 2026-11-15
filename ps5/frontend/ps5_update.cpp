@@ -20,7 +20,10 @@
 //
 // Only the program's own files are ever unpacked or replaced (IsManaged). The ZIP's other entries
 // are passed over, and a file on the disk that the release does not have is left where it is,
-// also inside the program's folders.
+// also inside the program's folders, unless the running build's resource manifest lists it
+// (Setup::shipped): such a file, which the old version shipped and the new one dropped, is moved
+// into backup/ with the install (it is in the journal after the plan, and an undo puts it back),
+// then removed with .update/. Without a manifest nothing is removed.
 //
 // exFAT. The title folder can be on an exFAT USB drive, and there a rename onto a file that exists
 // was measured to report success yet keep the old file. So no rename here is ever made onto
@@ -122,6 +125,27 @@ constexpr const char* MANAGED_FILES[] = {"eboot.bin", "sandbox-elevator.elf", "s
 // request (Settings > Interface > PlayStation 5 > Download PCSX2's patches) or the user copies in;
 // the package never carries it. Compared without regard to case, as exFAT names are.
 constexpr const char* USER_FILES_INSIDE[] = {"resources/patches.zip"};
+
+#if !defined(CRUX2_UPDATE_TEST)
+// The files this build shipped below resources/: its resource manifest (tools/build.sh), as
+// paths below the title folder.
+struct ShippedResource
+{
+	const char* name;
+	long long size;
+};
+constexpr ShippedResource SHIPPED_RESOURCES[] = {
+#include "ps5_resource_manifest.inc"
+};
+
+std::vector<std::string> ShippedByThisBuild()
+{
+	std::vector<std::string> paths;
+	for (const ShippedResource& file : SHIPPED_RESOURCES)
+		paths.push_back(std::string("resources/") + file.name);
+	return paths;
+}
+#endif
 
 // ------------------------------------------------------------------------------------- text
 
@@ -895,6 +919,15 @@ void RunCheck(const Setup& use)
 	const Version running = ParseVersion(use.version);
 	if (!running.valid)
 		Say(log, "the running version \"%s\" cannot be read; every release counts as newer", use.version.c_str());
+	// A developer build of X.Y.Z comes before X.Y.Z's release: that release is offered.
+	const bool developer = use.release == 0 && running.valid;
+	if (developer)
+		Say(log, "a developer build of v%s: releases from v%s on are offered", ToString(running).c_str(),
+			ToString(running).c_str());
+	const auto newer = [&](const Version& version) {
+		const int order = CompareVersions(version, running);
+		return order > 0 || (developer && order == 0);
+	};
 
 	Status status;
 	status.version = ToString(newest.version);
@@ -904,7 +937,7 @@ void RunCheck(const Setup& use)
 		status.name = "Crux2 v" + status.version;
 	for (const Release& release : releases)
 	{
-		if (CompareVersions(release.version, running) <= 0)
+		if (!newer(release.version))
 			break;
 		ReleaseNotes notes;
 		notes.version = ToString(release.version);
@@ -922,7 +955,7 @@ void RunCheck(const Setup& use)
 	}
 	status.notes = CutCharacters(status.notes, MAX_NOTES_ALL, "\n...");
 
-	if (CompareVersions(newest.version, running) <= 0)
+	if (!newer(newest.version))
 	{
 		Say(log, "v%s is running, the newest release is v%s", ToString(running).c_str(), status.version.c_str());
 		status.state = State::UpToDate;
@@ -1633,6 +1666,28 @@ std::string ToString(const Version& version)
 	return std::to_string(version.major) + "." + std::to_string(version.minor) + "." + std::to_string(version.patch);
 }
 
+std::string VersionLabel(const std::string& version_given, bool release)
+{
+	std::string version = Trim(version_given);
+	if (!version.empty() && (version[0] == 'v' || version[0] == 'V'))
+		version.erase(0, 1);
+	if (version.empty())
+		return "";
+	return "v" + version + (release ? "" : " - developer build");
+}
+
+std::vector<std::string> StaleFiles(const std::vector<std::string>& shipped, const std::vector<std::string>& incoming)
+{
+	std::set<std::string> kept;
+	for (const std::string& path : incoming)
+		kept.insert(Lowercase(path));
+	std::set<std::string> seen, stale;
+	for (const std::string& path : shipped)
+		if (IsManaged(path) && kept.count(Lowercase(path)) == 0 && seen.insert(Lowercase(path)).second)
+			stale.insert(path);
+	return std::vector<std::string>(stale.begin(), stale.end());
+}
+
 // ------------------------------------------------------------------------------------ helpers
 
 bool IsManaged(const std::string& path)
@@ -1845,6 +1900,15 @@ void Init(const Setup& given)
 	std::lock_guard<std::mutex> lock(g_state_mutex);
 	g_setup = given;
 	g_setup.app_dir = WithSlash(g_setup.app_dir);
+#if defined(CRUX2_UPDATE_TEST)
+	if (g_setup.release < 0)
+		g_setup.release = 1;
+#else
+	if (g_setup.release < 0)
+		g_setup.release = RunningIsRelease() ? 1 : 0;
+	if (g_setup.shipped.empty())
+		g_setup.shipped = ShippedByThisBuild();
+#endif
 	while (!g_setup.api_base.empty() && g_setup.api_base.back() == '/')
 		g_setup.api_base.pop_back();
 	g_found = Release();
@@ -1978,8 +2042,21 @@ bool Install()
 		Finish(log, State::Failed, error);
 		return false;
 	}
+	// The files the running build shipped that the release no longer has, where they are files
+	// still: moved into backup/ after the new files are in place, in the journal after the plan.
+	std::vector<std::string> stale;
+	for (const std::string& path : StaleFiles(use.shipped, plan))
+	{
+		struct stat st;
+		if (!IsLink(use.app_dir + path) && LookAt(use.app_dir + path, st) && S_ISREG(st.st_mode))
+		{
+			stale.push_back(path);
+			plan_text += path + "\n";
+		}
+	}
 
-	Say(log, "installing v%s (%zu files)", version.c_str(), plan.size());
+	Say(log, "installing v%s (%zu files; %zu of the old version's that it no longer has go)", version.c_str(), plan.size(),
+		stale.size());
 #if defined(CRUX2_UPDATE_TEST)
 	const int stop_after = Test::stop_after, fail_at = Test::fail_at, lie_at = Test::lie_at;
 #else
@@ -2035,6 +2112,18 @@ bool Install()
 				break;
 			}
 		}
+		for (size_t i = 0; error.empty() && i < stale.size(); i++)
+		{
+			if (cut())
+				return false;
+			const std::string& path = stale[i];
+			const std::string backup = dir + "backup/" + path;
+			MakeDirs(ParentOf(backup));
+			folders.insert(ParentOf(use.app_dir + path));
+			if (!step(use.app_dir + path, backup))
+				error = Format("%s, which the new version no longer has, could not be moved aside (errno %d).",
+					path.c_str(), errno);
+		}
 	}
 	if (!error.empty())
 	{
@@ -2056,6 +2145,15 @@ bool Install()
 	unlink((dir + "journal").c_str());
 	SyncDir(dir);
 	RemoveTree(dir);
+	// The folders the removed files leave empty, inside the program's folders (never one of
+	// those itself): the deepest first; one with anything in it stays.
+	for (const std::string& path : stale)
+		for (std::string folder = ParentOf(path); folder.find('/') != std::string::npos && IsManaged(folder + "/x");
+			 folder = ParentOf(folder))
+			if (rmdir((use.app_dir + folder).c_str()) != 0)
+				break;
+	for (size_t i = 0; i < stale.size() && i < 40; i++)
+		Say(log, "removed %s: the new version no longer has it", stale[i].c_str());
 	Say(log, "v%s is installed (%zu files); the title closes", version.c_str(), plan.size());
 	Finish(log, State::Installed);
 	return true;

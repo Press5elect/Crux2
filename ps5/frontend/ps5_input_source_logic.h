@@ -5,8 +5,10 @@
 //
 // Everything here is plain arithmetic over what a controller reported and when, so the PC tests
 // (ps5/tests/input) hold it to account: the held combination that asks to leave the game, the
-// double buzz that confirms it, the pressure a face button reports when R2 sets it, and the
-// pointer the motion sensor aims with.
+// double buzz that confirms it, the pressure a face button reports when R2 sets it, the sticks'
+// response curve, R2's click for the light gun, the pointer the motion sensor aims with (the one
+// that moves like a mouse; the steady one is ps5_aim_logic.h's), and the minimum hold that keeps a
+// quick tap.
 
 #pragma once
 
@@ -166,6 +168,82 @@ namespace PS5InputLogic
 		return std::clamp(static_cast<float>(trigger) / 255.0f, floor, 1.0f);
 	}
 
+	// ---------------------------------------------------------------- the sticks' response curve
+
+	/// A stick's response curve ([PS5] StickCurveLeft / StickCurveRight: 0 Linear, 1 Gentle, 2
+	/// Gentler, 3 Gentlest). The push's length, on a curve: a small push moves less, a full one still
+	/// all the way, in the same direction. x and y are -1..1, as the source hands them to InputManager.
+	/// Linear leaves them exactly as they are.
+	// From Porpoise db2171c (GPL-3.0-or-later): the curve of its Stick Sensitivity (porpoise_core.cpp
+	// input_state, set_stick_shape), without its dead zone (PCSX2's own Deadzone does that here).
+	inline void CurveStick(float& x, float& y, int curve)
+	{
+		static constexpr float POWER[4] = {1.0f, 1.4f, 1.8f, 2.3f};
+		if (curve <= 0 || curve > 3)
+			return;
+		const float len = std::min(1.0f, std::sqrt(x * x + y * y));
+		if (!(len > 0.0f))
+			return;
+		const float k = std::pow(len, POWER[curve]) / len;
+		x = std::clamp(x * k, -1.0f, 1.0f);
+		y = std::clamp(y * k, -1.0f, 1.0f);
+	}
+
+	/// The setting's name as its number (anything not known is Linear).
+	inline int StickCurveFromName(std::string_view name)
+	{
+		return name == "Gentle" ? 1 : name == "Gentler" ? 2 : name == "Gentlest" ? 3 : 0;
+	}
+
+	// ---------------------------------------------------------------- R2's click for the light gun
+
+	// From Porpoise 82f4316 and ac621f2 (GPL-3.0-or-later): scePadSetTriggerEffect's parameters,
+	// one command per trigger, the mode's parameters in data (porpoise_pad.cpp, push_triggers).
+	struct TriggerEffectCommand
+	{
+		int32_t mode; // 0 off, 1 feedback, 2 weapon, 3 vibration
+		int32_t reserved;
+		uint8_t data[48];
+	};
+	struct TriggerEffectParam
+	{
+		uint8_t trigger_mask; // 1 L2, 2 R2
+		uint8_t reserved[7];
+		TriggerEffectCommand l2, r2;
+	};
+	static_assert(sizeof(TriggerEffectCommand) == 56 && sizeof(TriggerEffectParam) == 120, "the console's trigger effect layout");
+
+	/// [PS5] GunConTriggerFeel: 0 Off, 1 Light, 2 Firm.
+	inline int TriggerFeelFromName(std::string_view name)
+	{
+		return name == "Off" ? 0 : name == "Light" ? 1 : 2;
+	}
+
+	/// The effect for both triggers: R2 a click (the "weapon" mode: resistance from six tenths of the
+	/// travel that gives way at eight) at this feel, L2 left free. feel 0: both off.
+	inline TriggerEffectParam GunTriggerEffect(int feel)
+	{
+		TriggerEffectParam p{};
+		p.trigger_mask = 1 | 2;
+		if (feel > 0)
+		{
+			p.r2.mode = 2;
+			p.r2.data[0] = 6; // the resistance starts six tenths down
+			p.r2.data[1] = 8; // and gives way at eight
+			p.r2.data[2] = feel >= 2 ? 6 : 3; // strength 0..8: Light 3, Firm 6
+		}
+		return p;
+	}
+
+	/// With the click on, R2 is given to the game as the click itself: up until it is pulled past
+	/// where the resistance gives way, then all the way down until it is let back above RELEASE. So
+	/// the shot comes with the click, and not at half the travel where the GunCon would take it.
+	inline bool GunTriggerDown(bool was_down, uint8_t value)
+	{
+		constexpr uint8_t PRESS = 200, RELEASE = 140;
+		return was_down ? value >= RELEASE : value >= PRESS;
+	}
+
 	// ---------------------------------------------------------------- aiming with the motion sensor
 
 	struct GyroAimSettings
@@ -258,4 +336,56 @@ namespace PS5InputLogic
 		const float dt = static_cast<float>(current_us - previous_us) * 1e-6f;
 		return (dt > 0.1f) ? fallback_s : dt;
 	}
+
+	// ---------------------------------------------------------------- quick taps
+
+	/// A press shorter than a frame held long enough for the game to see it. The pad service
+	/// keeps every reading since the last poll, and the source passes each one to InputManager in
+	/// order; the game reads the pad's state once in its frame, so a press that went down and up
+	/// between two of its reads was seen by nobody. Each button the game is given stays down for
+	/// at least the minimum hold from the reading it went down in; a release that comes during
+	/// the hold is given when the hold ends (Update with what is held now, also on a poll with
+	/// no new readings). Buttons held longer are let go at once, as before.
+	class TapHold
+	{
+	public:
+		static constexpr uint64_t MIN_HOLD_US = 50000; // three frames of a game at 60, one and a half at 30
+
+		/// down: the buttons held in this reading (bit n: button n). min_hold_us: 0 gives them
+		/// as they are (no game running). The buttons the game gets.
+		uint32_t Update(uint32_t down, uint64_t now_us, uint64_t min_hold_us = MIN_HOLD_US)
+		{
+			const uint32_t went_down = down & ~m_down;
+			uint32_t out = down;
+			for (uint32_t bit = 0; bit < 32; bit++)
+			{
+				const uint32_t mask = 1u << bit;
+				if (went_down & mask)
+					m_since_us[bit] = now_us;
+				else if ((m_out & mask) && !(down & mask) && now_us - m_since_us[bit] < min_hold_us)
+					out |= mask; // let go too soon: still down for the game
+			}
+			m_down = down;
+			m_out = out;
+			return out;
+		}
+
+		/// The same buttons as the last reading, later: what the game gets now.
+		uint32_t Tick(uint64_t now_us, uint64_t min_hold_us = MIN_HOLD_US) { return Update(m_down, now_us, min_hold_us); }
+
+		/// What the game was given last.
+		uint32_t Given() const { return m_out; }
+
+		/// Nothing held (the controller went away).
+		void Reset()
+		{
+			m_down = 0;
+			m_out = 0;
+		}
+
+	private:
+		uint32_t m_down = 0; // the last reading's buttons
+		uint32_t m_out = 0; // what the game was given last
+		uint64_t m_since_us[32] = {}; // when each button last went down
+	};
 } // namespace PS5InputLogic

@@ -195,6 +195,69 @@ namespace PS5Pacing
 		}
 	};
 
+	// Frame generation's figures, counted where the pictures are presented: the pictures the screen
+	// was given while frame generation ran, how many of them were made, and how many the game gave.
+	// The rate is worked out each half second (for the on-screen display); each 10 s a line for the
+	// boot log is due. Fed nanoseconds; Off() when frame generation stops (the rate is 0 then, and
+	// the windows start again when it comes back).
+	struct FrameGenFigures
+	{
+		static constexpr uint64_t RATE_NS = 500000000ULL;
+		static constexpr uint64_t LOG_NS = 10000000000ULL;
+		uint64_t shown = 0, made = 0, own = 0; // since frame generation last came on
+		uint64_t rate_start = 0, rate_shown = 0, rate_made = 0;
+		float shown_rate = 0.0f, made_rate = 0.0f; // pictures a second, over the last half second
+		uint64_t log_start = 0, log_shown = 0, log_made = 0, log_own = 0;
+
+		struct Line
+		{
+			double seconds = 0;
+			uint64_t shown = 0, made = 0, own = 0;
+		};
+
+		void Off() { *this = FrameGenFigures(); }
+
+		// A new picture of the game's while frame generation runs.
+		void Game() { own++; }
+
+		// A picture presented while frame generation runs; `was_made`: one made between two of the
+		// game's. True when a log line is due, in `line`.
+		bool Shown(uint64_t now_ns, bool was_made, Line& line)
+		{
+			shown++;
+			made += was_made ? 1 : 0;
+			if (rate_start == 0)
+			{
+				// (The first: the windows start at it, and it is in neither.)
+				rate_start = log_start = now_ns;
+				rate_shown = log_shown = shown;
+				rate_made = log_made = made;
+				log_own = own;
+				return false;
+			}
+			if (now_ns - rate_start >= RATE_NS)
+			{
+				const double seconds = static_cast<double>(now_ns - rate_start) / 1e9;
+				shown_rate = static_cast<float>(static_cast<double>(shown - rate_shown) / seconds);
+				made_rate = static_cast<float>(static_cast<double>(made - rate_made) / seconds);
+				rate_start = now_ns;
+				rate_shown = shown;
+				rate_made = made;
+			}
+			if (now_ns - log_start < LOG_NS)
+				return false;
+			line.seconds = static_cast<double>(now_ns - log_start) / 1e9;
+			line.shown = shown - log_shown;
+			line.made = made - log_made;
+			line.own = own - log_own;
+			log_start = now_ns;
+			log_shown = shown;
+			log_made = made;
+			log_own = own;
+			return true;
+		}
+	};
+
 	// Runtime (ps5_pacing.cpp).
 	// Applies a plan: the flip rate to VideoOut and the presents to the GS thread; logs changes.
 	void Apply(const Plan& plan, float host, float guest);
@@ -221,6 +284,16 @@ namespace PS5Pacing
 	void NoteShown(bool distinct);
 	// Distinct pictures shown a second, over the last second; 0 when none were counted.
 	float ShownPerSecond();
+	// Frame generation's figures (FrameGenFigures), on the GS thread: a new picture of the game's while
+	// it runs; a picture presented while it runs (`period`: the vsyncs the pacer takes each of the
+	// game's pictures to stay, for the log line every 10 s); and that it does not run.
+	void NoteFrameGenGame();
+	void NoteFrameGenShown(bool made, unsigned period);
+	void NoteFrameGenOff();
+	// The pictures a second the screen is given while frame generation runs, and how many of them are
+	// made, over the last half second; both 0 while it does not run.
+	float FrameGenShownPerSecond();
+	float FrameGenMadePerSecond();
 
 	// How evenly pictures reached the screen: the time between each two presents, kept as a
 	// histogram (0.1 ms steps up to 250 ms). Summary() says it as one line ("" with too few);
