@@ -954,6 +954,10 @@ Page graphicsPage(int layer, bool forGame)
 		o.enabled = [](int) { return !be->texturePackDoing().empty(); };
 		rows.push_back(std::move(o));
 	}
+	rows.push_back(range("Download connections",
+		"How many connections a texture pack is downloaded over at once, each bringing a piece of it. More is faster while the "
+		"Internet Archive slows each connection down; 1 is one stream, as before. Takes effect with the next download.",
+		"PS5", "TexturePackConnections", 10, 1, 16, 1, "", Option::OneGame | Option::Front));
 	rows.push_back(hw(toggle("Dump textures", "Dumps replaceable textures to disk. Will reduce performance.", GS,
 		"DumpReplaceableTextures", false, ADV)));
 	rows.push_back(when(toggle("Dump mipmaps", "Includes mipmaps when dumping textures.", GS, "DumpReplaceableMipmaps", false, ADV), GS, "DumpReplaceableTextures", false));

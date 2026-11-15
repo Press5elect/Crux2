@@ -70,7 +70,8 @@ FSR 3 optical flow and NIS, looks).
 | `input/run-input-tests.sh` | Controller features (hold to leave, pressure, keymaps) |
 | `ps2ftp/run-ps2ftp-tests.sh` | A PS2's memory cards over FTP |
 | `slang/run-slang-tests.sh` | `.slangp` looks |
-| `texturepacks/run-texturepacks-tests.sh` | Texture pack names and unpacking |
+| `texturepacks/run-texturepacks-tests.sh` | Texture pack names and unpacking (not run by run-host-tests.sh) |
+| `texturepacks/run-fetch-tests.sh` | The parallel ranged download (run by run-host-tests.sh): pieces in order, retries, slow restarts, the single-stream fallback, against `range_server.py` with curl and libarchive (needs `libcurl4-openssl-dev libarchive-dev`; skipped without them, as in CI today) |
 | `uiaudio/run-uiaudio-tests.sh` | The interface's sounds and music |
 | `update/run-update-tests.sh` | The updater |
 | `web/run-web-tests.sh` | The phone/computer web panel |

@@ -689,7 +689,10 @@ always go to the title folder.
 
 A game's options > Graphics > **Download an HD texture pack** fetches a pack from the Internet
 Archive's collection into the title folder's `textures/` or `<USB drive>/Crux2/textures/`. The
-packs are their makers' work and often several GB; nothing of them comes with Crux2.
+packs are their makers' work and often several GB; nothing of them comes with Crux2. A pack comes
+in pieces over several connections at once (**Download connections**, beside it: 10, from 1 to 16;
+1 is a single stream) and is unpacked as it comes, with no copy of the archive kept; a bar along the
+bottom of the menus shows how far it is, its speed, the connections and the time left.
 
 ### Game patches
 

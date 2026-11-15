@@ -61,6 +61,9 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   blindness (off).
 - Changed: texture packs are held within a memory budget (at most 2 GiB); the least recently used
   textures are let go and read again when needed.
+- Changed: HD texture packs download over 10 connections at once (a game's options > Graphics,
+  Download connections: 1 to 16; 1 is one stream as before), each piece on a new connection, with a
+  progress bar over the menus (size, percent, speed, connections, time left).
 - Fixed: a backup that could not read a file was written as complete, and with "replace older"
   the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
   are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't

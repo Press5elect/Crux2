@@ -604,6 +604,29 @@ public:
 	}
 	bool scanning() override { return scanBusy; }
 	std::string backgroundNote() override { return note; }
+	// A texture pack's download, made up: it goes on a little each frame until stopped or whole.
+	DownloadBar download;
+	void findTexturePacks() override
+	{
+		download = DownloadBar();
+		download.title = "Invented Game (USA) [SLUS-00000] HD Remaster";
+		download.total = 1800ull << 20;
+	}
+	std::string texturePackDoing() override { return download.title.empty() ? std::string() : download.title + ": downloading"; }
+	void stopTexturePack() override { download = DownloadBar(); }
+	DownloadBar texturePackBar() override
+	{
+		if (download.title.empty())
+			return download;
+		download.got = std::min(download.total, download.got + (3u << 20));
+		download.speed = 42.5e6;
+		download.connections = 10;
+		download.secondsLeft = static_cast<double>(download.total - download.got) / download.speed;
+		const DownloadBar now = download;
+		if (download.got >= download.total)
+			download = DownloadBar();
+		return now;
+	}
 	std::string shownFolder(const char* which) override
 	{
 		const std::string root = "/data/homebrew/PPSA99249/";
@@ -2157,6 +2180,12 @@ void shots(Harness& h)
 	h.press(P::Right);
 	h.wait(30);
 	h.shot("02-library-shelves");
+	b.findTexturePacks();
+	b.download.got = (1240ull << 20) - (3u << 20) * 30;
+	h.wait(30);
+	h.shot("02a-library-texture-pack-download");
+	b.stopTexturePack();
+	h.wait(30);
 	h.press(P::Down, 30);
 	h.press(P::Right);
 	h.press(P::R2, 4);
@@ -3231,6 +3260,8 @@ void crawl(Harness& h, unsigned seed)
 	h.press(P::Options, 10);
 	h.press(P::Options, 10);
 
+	// (A texture pack's bar over the screens for the first of the random steps.)
+	b.findTexturePacks();
 	std::mt19937 rng(seed);
 	const uint32_t buttons[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1,
 		P::L2, P::R2, P::Options, P::TouchPad, P::R3};

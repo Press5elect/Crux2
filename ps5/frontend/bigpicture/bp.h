@@ -413,6 +413,17 @@ public:
 	virtual void findTexturePacks() {}
 	virtual std::string texturePackDoing() { return {}; }
 	virtual void stopTexturePack() {}
+	/// The texture pack being downloaded, for the bar drawn over the menus: `title` empty when none.
+	/// Once a frame.
+	struct DownloadBar
+	{
+		std::string title;
+		uint64_t got = 0, total = 0;  // bytes; total 0 when not known
+		double speed = 0;             // bytes a second, over the last few seconds
+		int connections = 0;          // in a transfer now
+		double secondsLeft = -1;      // below 0: not known
+	};
+	virtual DownloadBar texturePackBar() { return {}; }
 	/// An interface sound (Cue below). Returns at once.
 	virtual void cue(int which) {}
 	/// What was typed on a keyboard (a USB one, or the phone's) since the last call: the text, and

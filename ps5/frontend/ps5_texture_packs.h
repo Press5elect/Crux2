@@ -47,13 +47,27 @@ std::vector<Place> Places();
 /// list and a reason when the list could not be had.
 void FindFor(const std::string& serial, bool again, std::function<void(std::vector<Pack>, std::string error)> then);
 
-/// Downloads and unpacks a pack into a place, on a thread of its own; one at a time. `done` is
-/// called on the graphics thread when it ends, with whether it is whole and a sentence. False
-/// when one runs already.
-bool Start(const Pack& pack, const Place& place, std::function<void(bool ok, std::string sentence)> done);
+/// Downloads and unpacks a pack into a place, on a thread of its own; one at a time. `connections`
+/// at once (1-16, [PS5] TexturePackConnections; 1 is one stream, as before). `done` is called on
+/// the graphics thread when it ends, with whether it is whole and a sentence. False when one runs
+/// already.
+bool Start(const Pack& pack, const Place& place, unsigned connections, std::function<void(bool ok, std::string sentence)> done);
 /// Stops the one that runs (what was unpacked whole stays; a file half written does not).
 void Stop();
 bool Busy();
 /// "Black (USA) [SLUS-21376] HD Remaster: 1.2 of 1.8 GB (66%)"; empty when none runs.
 std::string Doing();
+
+/// The download that runs, for the bar on the screen: on the graphics thread, once a frame (the
+/// speed is measured over the last few seconds of these calls).
+struct Progress
+{
+	bool active = false;
+	std::string title;
+	uint64_t got = 0, total = 0; // bytes received, of the archive's (0: not known)
+	double speed = 0;            // bytes a second
+	int connections = 0;         // in a transfer now
+	double seconds_left = -1;    // below 0: not known
+};
+Progress Now();
 } // namespace PS5TexturePacks

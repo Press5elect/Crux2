@@ -27,6 +27,10 @@
 #   - USB pads through /dev/ugen (frontend/ps5_ugen.h): the transfers over a made-up device node;
 #   - the updater (frontend/ps5_update.cpp, tests/update): a check, a download and an install
 #     over a made-up GitHub, developer builds, the files a new version dropped;
+#   - HD texture pack downloads (frontend/ps5_texture_packs_pieces.h and _fetch.h): pieces that
+#     finish out of order handed over in order, the memory they may hold, failures, slow parts and
+#     a stop; and, with the PC's libcurl and libarchive, the download over 10 connections from a
+#     made-up server with ranges, without them, cutting parts off, and a .zip unpacked as it comes;
 #   - the memory card held in memory (frontend/ps5_card_image.h): random saves on the image and
 #     on a copy, the file compared with the copy after each flush;
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
@@ -273,6 +277,11 @@ c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -DCRUX2_FIXES_TEST -DCRUX2_RECOMME
     "$tests/recommend/recommend_test.cpp" "$frontend/ps5_recommend.cpp" "$frontend/ps5_fixes_fetch.cpp" -o "$work/recommend_test"
 "$work/recommend_test" "$work/recommend" "$ps5/recommended.ini" 2> "$work/recommend_test.log" ||
     { cat "$work/recommend_test.log"; status=1; }
+
+echo "== HD texture pack downloads: pieces over several connections, in order (frontend/ps5_texture_packs_pieces.h, _fetch.h)"
+# The pieces' scheduling always; the download itself over curl against a made-up server on
+# 127.0.0.1 when the PC has libcurl and libarchive (tests/texturepacks/run-fetch-tests.sh).
+bash "$tests/texturepacks/run-fetch-tests.sh" "$work/texturepack-fetch" || status=1
 
 echo "== Crux2's own screenshots (frontend/ps5_shots.h)"
 # shellcheck disable=SC2086

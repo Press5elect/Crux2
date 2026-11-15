@@ -3,14 +3,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 //
-// The download and the unpacking run at once on two threads: curl hands what it receives to a
-// queue (32 MiB at most: when it is full, curl waits), and libarchive takes it from there. Nothing
-// of the archive is kept on the console but the files it holds.
+// The download and the unpacking run at once: the download over one connection or several
+// (ps5_texture_packs_fetch.h), libarchive taking the bytes in order as they come. Nothing of the
+// archive is kept on the console but the files it holds.
 
 #include "ps5_texture_packs.h"
 #include "ps5_priority.h"
 #include "ps5_texture_packs_extract.h"
+#include "ps5_texture_packs_fetch.h"
 #include "ps5_texture_packs_logic.h"
+#include "ps5_texture_packs_pieces.h"
 #include "ps5_platform.h"
 
 #include "Config.h"
@@ -24,7 +26,9 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <optional>
 #include <condition_variable>
@@ -43,15 +47,17 @@ namespace
 {
 using namespace PS5TexturePacksLogic;
 
-constexpr size_t QUEUE_LIMIT = 32u << 20;
 constexpr time_t LIST_KEPT_SECONDS = 24 * 60 * 60;
 
 std::atomic_bool s_busy{false};
 std::atomic_bool s_stop{false};
 std::atomic<uint64_t> s_received{0};
+std::atomic<int> s_active{0};
 std::mutex s_doing_mutex;
 std::string s_title;
 uint64_t s_total = 0;
+// The speed the bar shows, measured on the graphics thread (Now()).
+PS5TexturePacksPieces::SpeedMeter s_meter;
 
 std::string ListPath()
 {
@@ -190,55 +196,6 @@ std::vector<Pack> PacksIn(const std::string& json)
 	return packs;
 }
 
-// What curl receives, on its way to libarchive.
-struct Queue
-{
-	std::mutex mutex;
-	std::condition_variable changed;
-	std::deque<std::vector<char>> chunks;
-	size_t front_at = 0;
-	size_t queued = 0;
-	bool ended = false;  // curl is done
-	bool failed = false; // and the transfer did not complete
-	bool gone = false;   // the unpacking stopped reading
-};
-
-size_t ToQueue(char* data, size_t size, size_t count, void* user)
-{
-	Queue* const q = static_cast<Queue*>(user);
-	const size_t n = size * count;
-	std::unique_lock lock(q->mutex);
-	q->changed.wait(lock, [q] { return q->queued < QUEUE_LIMIT || q->gone || s_stop.load(); });
-	if (q->gone || s_stop.load())
-		return 0; // (curl ends the transfer)
-	q->chunks.emplace_back(data, data + n);
-	q->queued += n;
-	s_received.fetch_add(n, std::memory_order_relaxed);
-	q->changed.notify_all();
-	return n;
-}
-
-long FromQueue(Queue* q, void* buffer, size_t size)
-{
-	std::unique_lock lock(q->mutex);
-	q->changed.wait(lock, [q] { return !q->chunks.empty() || q->ended || s_stop.load(); });
-	if (s_stop.load())
-		return -1;
-	if (q->chunks.empty())
-		return q->failed ? -1 : 0;
-	std::vector<char>& front = q->chunks.front();
-	const size_t n = std::min(size, front.size() - q->front_at);
-	std::memcpy(buffer, front.data() + q->front_at, n);
-	q->front_at += n;
-	q->queued -= n;
-	if (q->front_at == front.size())
-	{
-		q->chunks.pop_front();
-		q->front_at = 0;
-	}
-	q->changed.notify_all();
-	return static_cast<long>(n);
-}
 } // namespace
 
 std::vector<Place> Places()
@@ -284,7 +241,7 @@ void FindFor(const std::string& serial, bool again, std::function<void(std::vect
 		then({}, "a thread could not be started");
 }
 
-bool Start(const Pack& pack, const Place& place, std::function<void(bool ok, std::string sentence)> done)
+bool Start(const Pack& pack, const Place& place, unsigned connections, std::function<void(bool ok, std::string sentence)> done)
 {
 	bool expected = false;
 	if (!s_busy.compare_exchange_strong(expected, true))
@@ -295,50 +252,32 @@ bool Start(const Pack& pack, const Place& place, std::function<void(bool ok, std
 		const std::lock_guard lock(s_doing_mutex);
 		s_title = pack.title;
 		s_total = pack.size;
+		s_meter.Clear();
 	}
-	const bool started = RunDetached([pack, place, done] {
-		const std::string url = fmt::format("https://archive.org/download/{}/{}", COLLECTION, EncodeForURL(pack.file));
-		ps5px_log("texture packs: %s (%s) into %s", pack.file.c_str(), SizeText(pack.size).c_str(), place.root.c_str());
-
-		auto queue = std::make_shared<Queue>();
-		CURLcode curl_result = CURLE_OK;
-		std::thread download([queue, url, &curl_result] {
-			CURL* const curl = curl_easy_init();
-			if (!curl)
-			{
-				curl_result = CURLE_FAILED_INIT;
-			}
-			else
-			{
-				Prepare(curl, url);
-				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &ToQueue);
-				curl_easy_setopt(curl, CURLOPT_WRITEDATA, queue.get());
-				curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 512L * 1024L);
-				curl_result = curl_easy_perform(curl);
-				curl_easy_cleanup(curl);
-			}
-			const std::lock_guard lock(queue->mutex);
-			queue->ended = true;
-			queue->failed = (curl_result != CURLE_OK);
-			queue->changed.notify_all();
-		});
+	const bool started = RunDetached([pack, place, connections, done] {
+		PS5TexturePacksFetch::Options options;
+		options.url = fmt::format("https://archive.org/download/{}/{}", COLLECTION, EncodeForURL(pack.file));
+		options.size = pack.size;
+		options.connections = std::clamp(connections, 1u, PS5TexturePacksPieces::CONNECTIONS_MOST);
+		options.ca_bundle = ps5px_ca_bundle();
+		options.stop = [] { return s_stop.load(); };
+		options.received = &s_received;
+		options.active = &s_active;
+		options.log = [](const std::string& line) { ps5px_log("%s", line.c_str()); };
+		ps5px_log("texture packs: %s (%s) into %s, %u connections", pack.file.c_str(), SizeText(pack.size).c_str(), place.root.c_str(),
+			options.connections);
 
 		PS5TexturePacksExtract::MakeFolders(place.root);
-		const PS5TexturePacksExtract::Result result = PS5TexturePacksExtract::Extract(
-			[queue](void* buffer, size_t size) { return FromQueue(queue.get(), buffer, size); }, place.root, pack.serials,
-			[] { return s_stop.load(); });
-		{
-			const std::lock_guard lock(queue->mutex);
-			queue->gone = true;
-			queue->changed.notify_all();
-		}
-		download.join();
+		PS5TexturePacksExtract::Result result;
+		const PS5TexturePacksFetch::Outcome fetched = PS5TexturePacksFetch::Run(options, [&](const PS5TexturePacksFetch::Read& read) {
+			result = PS5TexturePacksExtract::Extract(read, place.root, pack.serials, [] { return s_stop.load(); });
+		});
 
 		std::string sentence;
 		const bool stopped = s_stop.load();
-		// (The archive read to its end is whole, even where curl was cut off after it: a few
+		// (The archive read to its end is whole, even where the download was cut off after it: a few
 		// bytes past the end of an archive are not read.)
-		const bool whole = result.ok && (curl_result == CURLE_OK || curl_result == CURLE_WRITE_ERROR);
+		const bool whole = result.ok && fetched.complete;
 		if (whole)
 		{
 			sentence = fmt::format("{}: {} textures ({}) on {}. The game uses them now.", pack.title, result.files, SizeText(result.bytes), place.name);
@@ -349,8 +288,7 @@ bool Start(const Pack& pack, const Place& place, std::function<void(bool ok, std
 		}
 		else
 		{
-			const std::string why = (curl_result != CURLE_OK && curl_result != CURLE_WRITE_ERROR) ?
-										std::string(curl_easy_strerror(curl_result)) :
+			const std::string why = !fetched.complete ? fetched.error :
 										(result.error.empty() ? std::string("the archive ended early") : result.error);
 			sentence = fmt::format("{}: not complete ({}). {} textures were unpacked whole and stay on {}.", pack.title, why, result.files, place.name);
 		}
@@ -385,6 +323,23 @@ std::string Doing()
 	const uint64_t got = s_received.load(std::memory_order_relaxed);
 	if (s_total == 0)
 		return fmt::format("{}: {}", s_title, SizeText(got));
-	return fmt::format("{}: {} of {} ({}%)", s_title, SizeText(got), SizeText(s_total), got * 100 / s_total);
+	return fmt::format("{}: {} of {} ({}%)", s_title, SizeText(got), SizeText(s_total), std::min<uint64_t>(got * 100 / s_total, 100));
+}
+
+Progress Now()
+{
+	Progress p;
+	if (!s_busy.load())
+		return p;
+	const std::lock_guard lock(s_doing_mutex);
+	p.active = true;
+	p.title = s_title;
+	p.got = s_received.load(std::memory_order_relaxed);
+	p.total = s_total;
+	p.connections = s_active.load(std::memory_order_relaxed);
+	s_meter.Add(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(), p.got);
+	p.speed = s_meter.BytesPerSecond();
+	p.seconds_left = PS5TexturePacksPieces::SecondsLeft(p.got, p.total, p.speed);
+	return p;
 }
 } // namespace PS5TexturePacks

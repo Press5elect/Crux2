@@ -3482,7 +3482,8 @@ public:
 					if (at < 0 || at >= static_cast<int>(places.size()))
 						return;
 					const PS5TexturePacks::Place place = places[static_cast<size_t>(at)];
-					const bool started = PS5TexturePacks::Start(pack, place, [this, serial, crc](bool ok, std::string sentence) {
+					const unsigned connections = static_cast<unsigned>(std::clamp(Host::GetBaseIntSettingValue("PS5", "TexturePackConnections", 10), 1, 16));
+					const bool started = PS5TexturePacks::Start(pack, place, connections, [this, serial, crc](bool ok, std::string sentence) {
 						if (ok)
 							UseTexturePacks(serial, crc);
 						PS5UI::SetBackgroundNote(std::string());
@@ -3494,13 +3495,28 @@ public:
 						return;
 					}
 					PS5UI::SetBackgroundNote("Downloading a texture pack");
-					bp::toast(fmt::format("Downloading {} to {}. It is unpacked as it comes; this page shows how far.", pack.title, place.name), 6.f);
+					bp::toast(fmt::format("Downloading {} to {}. It is unpacked as it comes; the bar below shows how far.", pack.title, place.name), 6.f);
 				});
 			});
 		});
 	}
 
 	std::string texturePackDoing() override { return PS5TexturePacks::Doing(); }
+
+	DownloadBar texturePackBar() override
+	{
+		const PS5TexturePacks::Progress p = PS5TexturePacks::Now();
+		DownloadBar bar;
+		if (!p.active)
+			return bar;
+		bar.title = p.title;
+		bar.got = p.got;
+		bar.total = p.total;
+		bar.speed = p.speed;
+		bar.connections = p.connections;
+		bar.secondsLeft = p.seconds_left;
+		return bar;
+	}
 
 	void stopTexturePack() override
 	{

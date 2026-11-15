@@ -76,4 +76,11 @@ item is done or something new is learned; delete what no longer applies.
   scheduler rework and RADV's push-constant/descriptor rework are the first suspects; the four
   hand-merged files are listed in 9ad6b51's message) and test a game's first start on the console.
   `check-sources.sh` reports Mesa as held while 0012 is the HOLD revision.
+- HD texture packs download in 4 MiB pieces over 10 connections by default (a fresh connection per
+  piece, slow pieces restarted): untested on the console. Whether the Internet Archive throttles per
+  connection or per address shows in the boot log's `texture packs:` lines every 5 s; up to N+3
+  pieces (52 MiB at 10) are held in memory. `Download connections` = 1 is the old single stream.
+- CI skips the download's end-to-end test: its apt line lacks `libcurl4-openssl-dev libarchive-dev`.
+- `ps5/tests/bigpicture/run-bigpicture-tests.sh <dir> shots` reports 21 failed checks (quick menu,
+  skin, screen saver) with or without the download bar: not looked into (the crawl passes).
 

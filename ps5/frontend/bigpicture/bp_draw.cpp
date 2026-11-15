@@ -2192,11 +2192,88 @@ void dialogInput()
 
 namespace
 {
+// "1.2 GB", "345 MB".
+std::string bytesText(uint64_t bytes)
+{
+	char t[32];
+	if (bytes >= (1ull << 30))
+		std::snprintf(t, sizeof(t), "%.1f GB", static_cast<double>(bytes) / (1ull << 30));
+	else
+		std::snprintf(t, sizeof(t), "%.0f MB", static_cast<double>(bytes) / (1ull << 20));
+	return t;
+}
+
+// The texture pack being downloaded (Backend::texturePackBar): a card along the bottom, over the
+// hint bar's top, on every screen but a running game. Its height (0 when none), for the toasts
+// to go above it.
+float drawDownloadBar(ImDrawList* dl)
+{
+	static float s_shown = 0.f;
+	static Backend::DownloadBar s_last;
+	const Backend::DownloadBar now = (be != nullptr) ? be->texturePackBar() : Backend::DownloadBar();
+	if (!now.title.empty())
+		s_last = now;
+	s_shown = approach(s_shown, now.title.empty() ? 0.f : 1.f, 10);
+	if (s_shown < 0.01f || s_last.title.empty())
+		return 0.f;
+	const Backend::DownloadBar& b = s_last;
+	const float a = s_shown, w = std::min(W - 160.f, 1180.f), h = 112, x = (W - w) / 2, y = H - 72 - 20 - h + (1 - a) * 16;
+	glow(dl, x, y, w, h, 22, alpha(col::rgba(0, 0, 0, 255), 0.5f * a), 16);
+	rect(dl, x, y, w, h, alpha(col::sheetHi, 0.97f * a), 22);
+	outline(dl, x, y, w, h, alpha(col::line, a), 22, 1.5f);
+	const float pad = 32, inner = w - 2 * pad;
+	const float fraction = (b.total > 0) ? std::min(1.f, static_cast<float>(static_cast<double>(b.got) / static_cast<double>(b.total))) : -1.f;
+	char percent[16] = "";
+	if (fraction >= 0.f)
+		std::snprintf(percent, sizeof(percent), "%d%%", static_cast<int>(fraction * 100.f));
+	const float pw = percent[0] ? textSize(bold(), 28, percent).x : 0.f;
+	text(dl, bold(), 28, x + w - pad - pw, y + 16, alpha(col::text, a), percent);
+	const std::string title = fit(bold(), 26, std::string(ICON_FA_DOWNLOAD "   ") + b.title, inner - pw - 24);
+	text(dl, bold(), 26, x + pad, y + 18, alpha(col::text, a), title.c_str());
+	std::string detail = bytesText(b.got) + (b.total > 0 ? " of " + bytesText(b.total) : std::string());
+	char part[64];
+	if (b.speed > 0)
+	{
+		std::snprintf(part, sizeof(part), "   \xc2\xb7   %.1f MB/s", b.speed / 1e6);
+		detail += part;
+	}
+	std::snprintf(part, sizeof(part), "   \xc2\xb7   %d connection%s", b.connections, b.connections == 1 ? "" : "s");
+	detail += part;
+	if (b.secondsLeft >= 0)
+	{
+		const long sec = static_cast<long>(b.secondsLeft + 0.5);
+		if (sec >= 3600)
+			std::snprintf(part, sizeof(part), "   \xc2\xb7   %ld h %02ld min left", sec / 3600, (sec % 3600) / 60);
+		else if (sec >= 60)
+			std::snprintf(part, sizeof(part), "   \xc2\xb7   %ld min left", (sec + 30) / 60);
+		else
+			std::snprintf(part, sizeof(part), "   \xc2\xb7   %ld s left", sec);
+		detail += part;
+	}
+	text(dl, regular(), 22, x + pad, y + 56, alpha(col::dim, a), fit(regular(), 22, detail, inner).c_str());
+	const float by = y + h - 22, bh = 8;
+	rect(dl, x + pad, by, inner, bh, alpha(col::line, 2.f * a), bh / 2);
+	float f0 = 0.f, f1 = 0.f;
+	if (fraction >= 0.f)
+	{
+		f1 = fraction;
+	}
+	else
+	{
+		const float t = static_cast<float>(std::fmod(timeNow, 1.6) / 1.6);
+		f0 = std::max(0.f, t * 1.3f - 0.3f);
+		f1 = std::min(1.f, t * 1.3f);
+	}
+	if (f1 > f0)
+		rect(dl, x + pad + inner * f0, by, std::max(inner * (f1 - f0), bh), bh, alpha(col::accent, a), bh / 2);
+	return (h + 12) * a;
+}
+
 void drawToasts(ImDrawList* dl)
 {
 	while (!s_toasts.empty() && timeNow > s_toasts.front().until + 0.3)
 		s_toasts.pop_front();
-	float y = H - 72 - 60;
+	float y = H - 72 - 60 - drawDownloadBar(dl);
 	for (auto it = s_toasts.rbegin(); it != s_toasts.rend(); ++it)
 	{
 		Toast& t = *it;
