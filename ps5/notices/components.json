@@ -244,8 +244,8 @@
 			"copyright": "BlackBearReloaded",
 			"modifications": "this title's ID",
 			"texts": {
-				"ps5-native-app-boilerplate-LICENSE.txt": "../ps5-native-app-boilerplate/LICENSE",
-				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "../ps5-native-app-boilerplate/THIRD_PARTY_NOTICES.md"
+				"ps5-native-app-boilerplate-LICENSE.txt": "ps5/elevation/LICENSE",
+				"ps5-native-app-boilerplate-THIRD_PARTY_NOTICES.md": "ps5/elevation/THIRD_PARTY_NOTICES.md"
 			},
 			"artifacts": [
 				"sandbox-elevator.elf",
@@ -658,7 +658,7 @@
 			"copyright": "Samuel Ugochukwu",
 			"modifications": "none",
 			"texts": {
-				"plutosvg-LICENSE.txt": ".deps/src/plutosvg/LICENSE"
+				"plutosvg-LICENSE.txt": ".deps/src/plutosvg-upstream/LICENSE"
 			},
 			"artifacts": [
 				"eboot.bin"
