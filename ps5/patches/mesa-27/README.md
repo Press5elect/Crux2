@@ -1,9 +1,11 @@
 # The changes Crux2's RADV carries, on Mesa main (27.0-devel)
 
-`CRUX2_MESA_PATCHES=ps5/patches/mesa-27 ps5/tools/build-radv-crux2.sh` applies these, in order, to
-PS5 Mesa at the revision PS5_Vulkan pins, and builds the archive Crux2 links
-(`.deps/native/radv-crux2` in PS5_Vulkan). Without the variable the script uses `ps5/patches/mesa`
-(Mesa 26.2.5), as before. Applied to the pin, they give the tree of branch `crux2-radv-27` in
+`ps5/tools/build-radv-crux2.sh` applies these, in order, to PS5 Mesa at the revision PS5_Vulkan
+pins (`mesa_revision` in PS5_Vulkan's `tools/build-radv.sh`: `1ba9874` at PS5_Vulkan `f410e67` and
+`ace98a9`), and builds the archive Crux2 links (`.deps/native/radv-crux2` in PS5_Vulkan). This
+folder is the script's default; `CRUX2_MESA_PATCHES=ps5/patches/mesa` builds the older Mesa 26.2.5
+series instead. Rebuild RADV after any change here: a Crux2 build links whatever archive is in
+`.deps/native/radv-crux2` (see [`docs/dev/patches.md`](../../../docs/dev/patches.md)). Applied to the pin, they give the tree of branch `crux2-radv-27` in
 PS5_Mesa (its merge commit `7d698f21d65`, on branch `crux2-radv-27b`; the merge of 2026-10-23, `ebe30d18aca`, is on `crux2-radv-27`).
 
 | Patch | From | What it does |

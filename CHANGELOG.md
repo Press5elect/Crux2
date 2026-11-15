@@ -1,5 +1,42 @@
 # Crux2 - what changed
 
+A short entry for each version, newest first. The build copies this file into the title folder,
+where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)` headings and the
+`- Added:` / `- Changed:` / `- Fixed:` bullets (a heading without a version, such as Unreleased, is
+not shown). The full notes of each published release are in
+[`docs/releases/`](docs/releases/README.md).
+
+## Unreleased
+
+Since v1.0.18. The v1.0.19 and v1.0.20 work was taken out of this branch (883c832) and is not in
+this list; [`docs/history/v1.0.19-v1.0.20-reverted.md`](docs/history/v1.0.19-v1.0.20-reverted.md)
+says what it was and how to bring it back. Nothing below has run on a console yet.
+
+- Added: HDR10 output (Settings > Graphics, HDR; off), with highlight and white levels and Adjust
+  HDR brightness; it needs the console's HDR setting, a TV that takes HDR, and RADV built with
+  ps5/patches/mesa-27/0020.
+- Added: Debanding (Settings > Graphics; off, Low, High).
+- Added: a startup video of Crux2's own in the start-up animation's place (Settings > Interface,
+  Startup video).
+- Added: a PlayStation Move as player 1's GunCon 2, through the Move Management payload (Settings >
+  Controllers; off).
+- Added: game fixes fetched from GitHub at start (game database entries and patches, checked
+  against ps5/game-fixes.txt; Settings > PlayStation 5, on).
+- Added: the boot log is kept in memory and written when something goes wrong (Settings > Log,
+  Boot log: or always written); Save the log in Settings > Log and in the quick menu.
+- Added: the quick menu's entries can be shown, hidden and ordered (Triangle), the game's options
+  are in it, and Apply changes now restarts the game for settings that need it.
+- Added: frame generation's pictures a second on the on-screen display, and a log line every 10 s.
+- Added: test builds say "developer build" and their updater offers the release; the updater
+  removes files a new version no longer ships.
+- Changed: covers and pictures are downloaded three at a time; the covers on screen load first.
+- Changed: quick taps are held for the game at least 50 ms.
+- Changed: network shares are woken at start; a game on a share that does not answer waits for it
+  with a count on the screen, and a read stuck for 2 s is said on the screen.
+- Changed: an exit, a restart or a state load waits for the writes still under way, with a bar.
+- Changed: settings are written when the menus close, and at a game's start, quit and crash.
+- (Work in progress: more items are being added; the lead fills them in.)
+
 ## v1.0.18 (2026-10-31)
 
 - Added: Settings > Folders: game folders anywhere (USB drives, network shares, the console's
@@ -26,7 +63,7 @@
   show what it decided for each pixel, for checking frame generation.
 - Changed: frame generation works at the game picture's own size when the screen only stretches
   it (no FSR or NIS): less work for each picture it makes.
-- Fixed: What's new (Settings > System) only said whether a newer version was out. It now shows
+- Fixed: What's new (Settings > PlayStation 5) only said whether a newer version was out. It now shows
   what was added, changed and fixed in each version, newest first, and opens by itself once after
   an update with the changes since the version that ran before.
 

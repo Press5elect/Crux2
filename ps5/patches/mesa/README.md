@@ -1,7 +1,11 @@
 # The changes Crux2's RADV carries
 
-`ps5/tools/build-radv-crux2.sh` applies these, in order, to PS5 Mesa at the revision PS5_Vulkan
-pins, and builds the archive Crux2 links (`.deps/native/radv-crux2` in PS5_Vulkan).
+The older series, on Mesa 26.2.5. Releases since v1.0.13 are built with
+[`ps5/patches/mesa-27`](../mesa-27/README.md) (Mesa main, 27.0-devel), which is
+`ps5/tools/build-radv-crux2.sh`'s default and carries the same patches `0001`-`0011` and `0013`.
+`CRUX2_MESA_PATCHES=ps5/patches/mesa ps5/tools/build-radv-crux2.sh` applies these, in order, to
+PS5 Mesa at the revision PS5_Vulkan pins, and builds the archive Crux2 links
+(`.deps/native/radv-crux2` in PS5_Vulkan).
 
 | Patch | From | What it does |
 | --- | --- | --- |
