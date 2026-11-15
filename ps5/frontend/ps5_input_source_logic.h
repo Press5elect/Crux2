@@ -5,8 +5,10 @@
 //
 // Everything here is plain arithmetic over what a controller reported and when, so the PC tests
 // (ps5/tests/input) hold it to account: the held combination that asks to leave the game, the
-// double buzz that confirms it, the pressure a face button reports when R2 sets it, the
-// pointer the motion sensor aims with, and the minimum hold that keeps a quick tap.
+// double buzz that confirms it, the pressure a face button reports when R2 sets it, the sticks'
+// response curve, R2's click for the light gun, the pointer the motion sensor aims with (the one
+// that moves like a mouse; the steady one is ps5_aim_logic.h's), and the minimum hold that keeps a
+// quick tap.
 
 #pragma once
 
@@ -164,6 +166,82 @@ namespace PS5InputLogic
 		if (trigger <= rest)
 			return 1.0f;
 		return std::clamp(static_cast<float>(trigger) / 255.0f, floor, 1.0f);
+	}
+
+	// ---------------------------------------------------------------- the sticks' response curve
+
+	/// A stick's response curve ([PS5] StickCurveLeft / StickCurveRight: 0 Linear, 1 Gentle, 2
+	/// Gentler, 3 Gentlest). The push's length, on a curve: a small push moves less, a full one still
+	/// all the way, in the same direction. x and y are -1..1, as the source hands them to InputManager.
+	/// Linear leaves them exactly as they are.
+	// From Porpoise db2171c (GPL-3.0-or-later): the curve of its Stick Sensitivity (porpoise_core.cpp
+	// input_state, set_stick_shape), without its dead zone (PCSX2's own Deadzone does that here).
+	inline void CurveStick(float& x, float& y, int curve)
+	{
+		static constexpr float POWER[4] = {1.0f, 1.4f, 1.8f, 2.3f};
+		if (curve <= 0 || curve > 3)
+			return;
+		const float len = std::min(1.0f, std::sqrt(x * x + y * y));
+		if (!(len > 0.0f))
+			return;
+		const float k = std::pow(len, POWER[curve]) / len;
+		x = std::clamp(x * k, -1.0f, 1.0f);
+		y = std::clamp(y * k, -1.0f, 1.0f);
+	}
+
+	/// The setting's name as its number (anything not known is Linear).
+	inline int StickCurveFromName(std::string_view name)
+	{
+		return name == "Gentle" ? 1 : name == "Gentler" ? 2 : name == "Gentlest" ? 3 : 0;
+	}
+
+	// ---------------------------------------------------------------- R2's click for the light gun
+
+	// From Porpoise 82f4316 and ac621f2 (GPL-3.0-or-later): scePadSetTriggerEffect's parameters,
+	// one command per trigger, the mode's parameters in data (porpoise_pad.cpp, push_triggers).
+	struct TriggerEffectCommand
+	{
+		int32_t mode; // 0 off, 1 feedback, 2 weapon, 3 vibration
+		int32_t reserved;
+		uint8_t data[48];
+	};
+	struct TriggerEffectParam
+	{
+		uint8_t trigger_mask; // 1 L2, 2 R2
+		uint8_t reserved[7];
+		TriggerEffectCommand l2, r2;
+	};
+	static_assert(sizeof(TriggerEffectCommand) == 56 && sizeof(TriggerEffectParam) == 120, "the console's trigger effect layout");
+
+	/// [PS5] GunConTriggerFeel: 0 Off, 1 Light, 2 Firm.
+	inline int TriggerFeelFromName(std::string_view name)
+	{
+		return name == "Off" ? 0 : name == "Light" ? 1 : 2;
+	}
+
+	/// The effect for both triggers: R2 a click (the "weapon" mode: resistance from six tenths of the
+	/// travel that gives way at eight) at this feel, L2 left free. feel 0: both off.
+	inline TriggerEffectParam GunTriggerEffect(int feel)
+	{
+		TriggerEffectParam p{};
+		p.trigger_mask = 1 | 2;
+		if (feel > 0)
+		{
+			p.r2.mode = 2;
+			p.r2.data[0] = 6; // the resistance starts six tenths down
+			p.r2.data[1] = 8; // and gives way at eight
+			p.r2.data[2] = feel >= 2 ? 6 : 3; // strength 0..8: Light 3, Firm 6
+		}
+		return p;
+	}
+
+	/// With the click on, R2 is given to the game as the click itself: up until it is pulled past
+	/// where the resistance gives way, then all the way down until it is let back above RELEASE. So
+	/// the shot comes with the click, and not at half the travel where the GunCon would take it.
+	inline bool GunTriggerDown(bool was_down, uint8_t value)
+	{
+		constexpr uint8_t PRESS = 200, RELEASE = 140;
+		return was_down ? value >= RELEASE : value >= PRESS;
 	}
 
 	// ---------------------------------------------------------------- aiming with the motion sensor

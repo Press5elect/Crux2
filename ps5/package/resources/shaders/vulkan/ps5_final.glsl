@@ -6,9 +6,10 @@
 // From OGBox (Press5elect, GPL-3.0-or-later): its hdr.frag and deband.frag, put together for PCSX2's
 // Vulkan device (GSDeviceVK_PS5.cpp, the PS5Final passes). The vertex shader is convert.glsl's.
 //
-//   FINAL_PASS 0  Debanding, onto an SDR screen: the frame's picture (the presented game, at the
-//                 screen's size) into the swapchain image; the menus are drawn over it after.
-//   FINAL_PASS 1  HDR10: the picture (debanded first when u_deband.w is 1) and the menus, each drawn
+//   FINAL_PASS 0  Debanding and the colour filter, onto an SDR screen: the frame's picture (the
+//                 presented game, at the screen's size) into the swapchain image (debanded when
+//                 u_deband.w is 1, filtered when u_cal.z is not 0); the menus are drawn over it after.
+//   FINAL_PASS 1  HDR10: the picture (debanded first when u_deband.w is 1, then the colour filter) and the menus, each drawn
 //                 as for an SDR screen into a layer of its own, made into HDR10's pixels (BT.2020
 //                 primaries, the PQ curve of SMPTE ST 2084) in an A2R10G10B10 image, which is copied
 //                 into the framebuffer the graphics driver has retyped as HDR10
@@ -34,13 +35,20 @@
 // that average is within a band's step (u_deband.x) of the pixel, the pixel takes it, the farther
 // reach last. A little triangular noise (u_deband.y) then hides what steps are left. Edges and
 // detail differ from their surroundings by more than the step and are kept.
+//
+// The colour filter (u_cal.z: 0 off, 1 red-weak, 2 green-weak, 3 blue-weak, 4 greyscale), on the game's
+// picture only (the menus have their own colours, Settings > Interface), after debanding and before the HDR
+// encode, in the picture's encoded values as Porpoise has it. From Porpoise aa6ec1f (GPL-3.0-or-later),
+// its quad.frag: daltonising after Fidaner et al.: the picture taken to LMS, the deficiency simulated, and
+// what the viewer would miss moved into the channels they see well, so reds and greens, or blues and
+// yellows, stay apart. Greyscale: BT.601's luma.
 
 #ifdef FRAGMENT_SHADER
 
 layout(push_constant) uniform cb_final
 {
 	vec4 u_metrics; // x white nits, y highlights' peak nits, z 1 the layers are already linear, w 1 the game's picture is shown
-	vec4 u_cal;     // x the test screen (0 none, 1 highlights, 2 white level), y its nits
+	vec4 u_cal;     // x the test screen (0 none, 1 highlights, 2 white level), y its nits, z the colour filter
 	vec4 u_deband;  // x a band's step, y the dither, z the reach in texels, w 1 on (FINAL_PASS 1)
 };
 
@@ -80,11 +88,34 @@ vec3 deband(vec2 uv)
 	return clamp(r + noise, 0.0, 1.0);
 }
 
+vec3 colour_filter(vec3 c)
+{
+	const int mode = int(u_cal.z + 0.5);
+	if (mode <= 0 || mode > 4)
+		return c;
+	if (mode == 4)
+		return vec3(dot(c, vec3(0.299, 0.587, 0.114)));
+	const mat3 rgb2lms = mat3(17.8824, 3.45565, 0.0299566, 43.5161, 27.1554, 0.184309, 4.11935, 3.86714, 1.46709);
+	const mat3 lms2rgb = mat3(0.0809444479, -0.0102485335, -0.000365296938, -0.130504409, 0.0540193266, -0.00412161469,
+		0.116721066, -0.113614708, 0.693511405);
+	const vec3 lms = rgb2lms * c;
+	vec3 sim;
+	if (mode == 1)
+		sim = vec3(2.02344 * lms.y - 2.52581 * lms.z, lms.y, lms.z);
+	else if (mode == 2)
+		sim = vec3(lms.x, 0.494207 * lms.x + 1.24827 * lms.z, lms.z);
+	else
+		sim = vec3(lms.x, lms.y, -0.395913 * lms.x + 0.801109 * lms.y);
+	const vec3 err = c - lms2rgb * sim;
+	return clamp(c + vec3(0.0, err.r * 0.7 + err.g, err.r * 0.7 + err.b), 0.0, 1.0);
+}
+
 #if FINAL_PASS == 0
 
 void main()
 {
-	o_col0 = vec4(deband(v_tex), 1.0);
+	const vec3 picture = (u_deband.w > 0.5) ? deband(v_tex) : texelFetch(samp0, ivec2(gl_FragCoord.xy), 0).rgb;
+	o_col0 = vec4(colour_filter(picture), 1.0);
 }
 
 #else
@@ -148,7 +179,7 @@ void main()
 		o_col0 = vec4(pq(vec3(test)), 1.0); // grey: the same in BT.2020
 		return;
 	}
-	const vec3 picture = (u_deband.w > 0.5) ? deband(v_tex) : texelFetch(samp0, at, 0).rgb;
+	const vec3 picture = colour_filter((u_deband.w > 0.5) ? deband(v_tex) : texelFetch(samp0, at, 0).rgb);
 	const vec4 ui = texelFetch(samp1, at, 0);
 	const float white = max(u_metrics.x, 1.0);
 	float gain = 1.0;

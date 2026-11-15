@@ -13,6 +13,9 @@
 //    The test screen's patterns are checked code by code at their landmarks.
 //  - Debanding: FINAL_PASS 0 over gradients of 8-bit and of 16-bit colour's steps, and over hard edges:
 //    the steps must come out smaller, the edges kept.
+//  - The colour filter (u_cal.z, from Porpoise aa6ec1f): each choice in FINAL_PASS 0 (SDR, no debanding) against
+//    its maths done here in double precision, within a level of 255; and in FINAL_PASS 1 against the same filter
+//    taken through the HDR maths, within a code. Off leaves the picture as it was; the menus are never filtered.
 //  - ps5_hdr.h: the settings' choices and the test screen's steps.
 //   hdr_test <folder of the compiled shaders>
 #include <vulkan/vulkan.h>
@@ -170,14 +173,50 @@ static double nitsOfCode(double code)
 struct Push // cb_final
 {
 	float white, peak, linear, highlights;
-	float cal, level, unused0, unused1;
+	float cal, level, filter, unused1;
 	float step, dither, reach, deband;
 };
+
+// ps5_final.glsl's colour_filter, in double precision: c R, G, B in 0..1, in place.
+static void colourFilter(double c[3], int mode)
+{
+	if (mode <= 0 || mode > 4)
+		return;
+	if (mode == 4)
+	{
+		const double y = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+		c[0] = c[1] = c[2] = y;
+		return;
+	}
+	// (rows here; the shader's mat3 takes the same numbers as columns)
+	const double rgb2lms[3][3] = {{17.8824, 43.5161, 4.11935}, {3.45565, 27.1554, 3.86714}, {0.0299566, 0.184309, 1.46709}};
+	const double lms2rgb[3][3] = {{0.0809444479, -0.130504409, 0.116721066}, {-0.0102485335, 0.0540193266, -0.113614708},
+		{-0.000365296938, -0.00412161469, 0.693511405}};
+	double lms[3], sim[3], seen[3];
+	for (int i = 0; i < 3; i++)
+		lms[i] = rgb2lms[i][0] * c[0] + rgb2lms[i][1] * c[1] + rgb2lms[i][2] * c[2];
+	sim[0] = lms[0];
+	sim[1] = lms[1];
+	sim[2] = lms[2];
+	if (mode == 1)
+		sim[0] = 2.02344 * lms[1] - 2.52581 * lms[2];
+	else if (mode == 2)
+		sim[1] = 0.494207 * lms[0] + 1.24827 * lms[2];
+	else
+		sim[2] = -0.395913 * lms[0] + 0.801109 * lms[1];
+	for (int i = 0; i < 3; i++)
+		seen[i] = lms2rgb[i][0] * sim[0] + lms2rgb[i][1] * sim[1] + lms2rgb[i][2] * sim[2];
+	const double err[3] = {c[0] - seen[0], c[1] - seen[1], c[2] - seen[2]};
+	c[1] = std::clamp(c[1] + err[0] * 0.7 + err[1], 0.0, 1.0);
+	c[2] = std::clamp(c[2] + err[0] * 0.7 + err[2], 0.0, 1.0);
+	c[0] = std::clamp(c[0], 0.0, 1.0);
+}
 
 // The codes R, G, B for a picture pixel p and a menu pixel u (B, G, R, A bytes as stored; u premultiplied).
 static void expect(const uint8_t* p, const uint8_t* u, const Push& k, double out[3])
 {
-	const double pic[3] = {p[2] / 255.0, p[1] / 255.0, p[0] / 255.0};
+	double pic[3] = {p[2] / 255.0, p[1] / 255.0, p[0] / 255.0};
+	colourFilter(pic, static_cast<int>(k.filter + 0.5f));
 	const double ui[3] = {u[2] / 255.0, u[1] / 255.0, u[0] / 255.0}, ua = u[3] / 255.0;
 	const double white = std::max<double>(k.white, 1.0);
 	double gain = 1.0;
@@ -349,7 +388,11 @@ static int checkChoices()
 	const PS5Hdr::Deband low = PS5Hdr::DebandOf(1, 2160), high = PS5Hdr::DebandOf(2, 2160);
 	check(std::fabs(low.step * 255.0f - 2.0f) < 1e-4f && std::fabs(high.step * 255.0f - 5.0f) < 1e-4f && std::fabs(low.reach - 144.0f) < 1e-3f,
 		"debanding's numbers (2 and 5 levels, 32 lines of 480)");
-	std::printf("ps5_hdr.h: %s\n", bad ? "FAILED" : "PASS (the choices, the test screen's steps, debanding's numbers)");
+	check(PS5Hdr::FILTER_COUNT == 5 && std::strcmp(PS5Hdr::FILTER_CHOICES[0], "Off") == 0 &&
+			  std::strcmp(PS5Hdr::FILTER_CHOICES[4], "Greyscale") == 0,
+		"the colour filter's choices: Off, Red-weak, Green-weak, Blue-weak, Greyscale");
+	check(PS5Hdr::FilterOf(-1) == 0 && PS5Hdr::FilterOf(3) == 3 && PS5Hdr::FilterOf(5) == 0, "the colour filter's value checked");
+	std::printf("ps5_hdr.h: %s\n", bad ? "FAILED" : "PASS (the choices, the test screen's steps, debanding's numbers, the colour filter's choices)");
 	return bad;
 }
 
@@ -511,6 +554,10 @@ int main(int argc, char** argv)
 		{"white 80, highlights 4000", {80, 4000, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0}},
 		{"test screen: highlights at 600 nits", {203, 1000, 0, 1, 1, 600, 0, 0, 0, 0, 0, 0}},
 		{"test screen: white level 250 nits", {250, 1000, 0, 1, 2, 250, 0, 0, 0, 0, 0, 0}},
+		{"colour filter red-weak", {203, 1000, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0}},
+		{"colour filter green-weak", {203, 1000, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0}},
+		{"colour filter blue-weak", {203, 0, 0, 1, 0, 0, 3, 0, 0, 0, 0, 0}},
+		{"colour filter greyscale", {300, 2000, 0, 1, 0, 0, 4, 0, 0, 0, 0, 0}},
 	};
 	for (const auto& c : cases)
 	{
@@ -670,6 +717,82 @@ int main(int argc, char** argv)
 		}
 		std::printf("  HDR with debanding, a flat picture: at most %d codes from without it%s\n", worst, worst <= 3 ? "" : " FAIL");
 		failed += worst > 3;
+	}
+	// ---- The colour filter in SDR (FINAL_PASS 0, no debanding): each choice against its maths ----
+	{
+		// The test rows above (ramps, colours, mixed), and below them every 6-bit level of R, G and B.
+		std::vector<uint8_t> colours = pic;
+		for (uint32_t i = 0; i < 64 * 64 * 64 && 6 * W + i < W * H; i++)
+		{
+			uint8_t* p = &colours[(6 * W + i) * 4];
+			p[0] = static_cast<uint8_t>((i & 63) * 4);
+			p[1] = static_cast<uint8_t>(((i >> 6) & 63) * 4);
+			p[2] = static_cast<uint8_t>(((i >> 12) & 63) * 4);
+			p[3] = 255;
+		}
+		for (int mode = 0; mode < PS5Hdr::FILTER_COUNT; mode++)
+		{
+			const Push k{203, 1000, 0, 1, 0, 0, static_cast<float>(mode), 0, 0, 0, 0, 0};
+			const uint8_t* out = reinterpret_cast<const uint8_t*>(run(deband, k, colours, none));
+			int worst = 0, moved = 0;
+			for (uint32_t i = 0; i < W * H; i++)
+			{
+				const uint8_t* p = &colours[i * 4];
+				double c[3] = {p[2] / 255.0, p[1] / 255.0, p[0] / 255.0};
+				colourFilter(c, mode);
+				const int want[3] = {int(std::lround(c[2] * 255.0)), int(std::lround(c[1] * 255.0)), int(std::lround(c[0] * 255.0))};
+				for (int ch = 0; ch < 3; ch++)
+				{
+					worst = std::max(worst, std::abs(int(out[i * 4 + ch]) - want[ch]));
+					moved += out[i * 4 + ch] != p[ch];
+				}
+			}
+			// Off: nothing moves. Each filter moves something (a red against a green, a blue against a yellow).
+			const bool ok = worst <= 1 && (mode == 0 ? moved == 0 : moved > 0);
+			std::printf("  colour filter %-10s (SDR): at most %d levels from the maths, %d channels changed%s\n", PS5Hdr::FILTER_CHOICES[mode],
+				worst, moved, ok ? "" : " FAIL");
+			failed += !ok;
+		}
+		// Red-weak and green-weak: a pure red and a pure green that were alike to such a viewer stay apart, and the
+		// blue the filter puts in red tells them apart (what daltonising is for). Greyscale: grey.
+		double red[3] = {1, 0, 0}, green[3] = {0, 1, 0}, grey[3] = {0.2, 0.6, 0.9};
+		colourFilter(red, 1);
+		colourFilter(green, 1);
+		colourFilter(grey, 4);
+		const bool apart = red[2] > green[2] + 0.2 && grey[0] == grey[1] && grey[1] == grey[2];
+		std::printf("  colour filter: red-weak puts blue in red (%.2f against green's %.2f); greyscale grey%s\n", red[2], green[2],
+			apart ? "" : " FAIL");
+		failed += !apart;
+	}
+	// The menus are never filtered: opaque menus over the picture come out the same with each filter (HDR).
+	{
+		std::vector<uint8_t> pictureOnly(W * H * 4), menusOpaque(W * H * 4);
+		for (uint32_t i = 0; i < W * H; i++)
+		{
+			uint8_t* p = &pictureOnly[i * 4];
+			p[0] = 30;
+			p[1] = 60;
+			p[2] = 220;
+			p[3] = 255;
+			uint8_t* u = &menusOpaque[i * 4];
+			u[0] = static_cast<uint8_t>(i % 256);
+			u[1] = static_cast<uint8_t>((i / 3) % 256);
+			u[2] = static_cast<uint8_t>((i * 7) % 256);
+			u[3] = 255;
+		}
+		const Push off{203, 1000, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+		std::vector<uint32_t> a(W * H);
+		std::memcpy(a.data(), run(hdr, off, pictureOnly, menusOpaque), a.size() * 4);
+		int worst = 0;
+		for (int mode = 1; mode < PS5Hdr::FILTER_COUNT; mode++)
+		{
+			const Push on{203, 1000, 0, 1, 0, 0, static_cast<float>(mode), 0, 0, 0, 0, 0};
+			const uint32_t* b = run(hdr, on, pictureOnly, menusOpaque);
+			for (size_t i = 0; i < a.size(); i++)
+				worst = std::max(worst, a[i] == b[i] ? 0 : 1);
+		}
+		std::printf("  colour filter: the menus over the picture (HDR) %s%s\n", worst ? "changed" : "unchanged by every filter", worst ? " FAIL" : "");
+		failed += worst != 0;
 	}
 	std::printf("final passes on the PC: %s\n", failed ? "FAILED" : "PASS");
 	return failed ? 1 : 0;

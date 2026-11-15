@@ -17,6 +17,8 @@
 #include "ps5_keyboard.h"
 #include "ps5_services.h"
 #include "ps5_fixes_fetch.h"
+#include "ps5_launch.h"
+#include "vfs/ps5_socket.h"
 #include "ps5_pacing.h"
 #include "ps5_boot_step.h"
 #include "ps5_pgs.h"
@@ -2250,12 +2252,24 @@ int main(int argc, char* argv[])
 	// for USB drives, klog and the boot log.
 	PS5Platform::EarlyInit();
 	CrashHandler::Install();
+	// A socket written to after its far end closed must give an error, not end Crux2 with SIGPIPE
+	// (From Porpoise 4901f3c).
+	PS5Socket::IgnoreSigPipe();
 	ps5px_log("PCSX2 %s", GIT_REV);
 	// Which build this is: a log then says whether the eboot.bin that ran is the one just copied,
 	// and a crash is symbolised against the ELF of the build with this identity, no other.
 	ps5px_log("build: %s", ps5px_build_stamp());
 	ps5px_log("build identity: %s", ps5px_build_identity());
 	ReadTestRun();
+
+	// Launch arguments (ps5_launch.h): --rom <file> starts that game once the interface is up, and
+	// --exit-after-game closes Crux2 when it has been played. Others are left alone.
+	PS5Launch::Given() = PS5Launch::Parse(argc, argv);
+	for (int i = 1; i < argc && argv && argv[i]; i++)
+		ps5px_log("launch argument %d: %s", i, argv[i]);
+	if (!PS5Launch::Given().rom.empty())
+		ps5px_log("launch: the game %s is started straight away%s", PS5Launch::Given().rom.c_str(),
+			PS5Launch::Given().exit_after_game ? ", and Crux2 closes after it" : "");
 
 	// How late the console's sleeps wake, measured on a thread of its own while the rest starts
 	// (PS5Timing.h): the frame limiter's margin. The result is one "timing:" line.

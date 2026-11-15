@@ -51,6 +51,9 @@ struct Item
 	int64_t mtime = 0;
 };
 
+// False (with errno) when the folder could not be read whole: a listing cut short by a read error is
+// not the folder's end. (From Porpoise b6ea998, GPL-3.0-or-later: an incomplete copy must never pass
+// for a whole one, or the backup before it would be taken away for it.)
 bool ListFolder(const std::string& path, std::vector<Item>* items)
 {
 	items->clear();
@@ -69,17 +72,37 @@ bool ListFolder(const std::string& path, std::vector<Item>* items)
 		DIR* const dir = opendir(path.c_str());
 		if (!dir)
 			return false;
-		while (const struct dirent* const entry = readdir(dir))
+		int error = 0;
+		for (;;)
 		{
+			errno = 0;
+			const struct dirent* const entry = readdir(dir);
+			if (!entry)
+			{
+				error = errno;
+				break;
+			}
 			if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0)
 				continue;
 			struct stat st;
 			if (stat(Join(path, entry->d_name).c_str(), &st) != 0)
-				continue;
+			{
+				// (One that went while the folder was read, a state deleted meanwhile, is no failure.)
+				if (errno == ENOENT)
+					continue;
+				error = errno;
+				break;
+			}
 			items->push_back({entry->d_name, S_ISDIR(st.st_mode), S_ISDIR(st.st_mode) ? 0 : static_cast<uint64_t>(st.st_size),
 				static_cast<int64_t>(st.st_mtime)});
 		}
 		closedir(dir);
+		if (error != 0)
+		{
+			items->clear();
+			errno = error;
+			return false;
+		}
 	}
 	std::sort(items->begin(), items->end(), [](const Item& a, const Item& b) { return a.name < b.name; });
 	return true;
@@ -231,25 +254,34 @@ struct Found
 };
 
 // Every file under a folder, by its path inside it. What a transfer leaves when it is cut short
-// (".part") is no file of anyone's.
-void Collect(const std::string& root, const std::string& below, bool deep, std::vector<Found>* out)
+// (".part") is no file of anyone's. False (with errno, and `failed` the folder's path inside the root)
+// when a folder of it could not be read whole; one that is not there (no memory card yet, or a
+// folder deleted meanwhile) is an empty one.
+bool Collect(const std::string& root, const std::string& below, bool deep, std::vector<Found>* out, std::string* failed = nullptr)
 {
 	std::vector<Item> items;
 	if (!ListFolder(below.empty() ? root : Join(root, below), &items))
-		return;
+	{
+		if (errno == ENOENT)
+			return true;
+		if (failed)
+			*failed = below;
+		return false;
+	}
 	for (const Item& item : items)
 	{
 		const std::string relative = below.empty() ? item.name : below + "/" + item.name;
 		if (item.folder)
 		{
-			if (deep)
-				Collect(root, relative, deep, out);
+			if (deep && !Collect(root, relative, deep, out, failed))
+				return false;
 			continue;
 		}
 		if (item.name.size() > 5 && item.name.compare(item.name.size() - 5, 5, ".part") == 0)
 			continue;
 		out->push_back({relative, item.size, item.mtime});
 	}
+	return true;
 }
 
 bool EndsWith(const std::string& text, const char* end)
@@ -344,7 +376,8 @@ void Prune(const std::string& place, bool automatic, const std::string& made)
 	// (The newest first.)
 	for (const Snapshot& snapshot : snapshots)
 	{
-		if (snapshot.automatic != automatic || snapshot.name == made)
+		// (One whose backup.txt is there but could not be read now is left alone: it may be whole.)
+		if (snapshot.automatic != automatic || snapshot.name == made || snapshot.unreadable)
 			continue;
 		if (snapshot.complete && kept < keep)
 		{
@@ -438,7 +471,7 @@ time_t WhenOf(const std::string& name, bool* automatic)
 std::string CardsSignature(const std::string& memcards)
 {
 	std::vector<Found> files;
-	Collect(memcards, std::string(), true, &files);
+	(void)Collect(memcards, std::string(), true, &files); // (a folder that could not be read: another signature)
 	uint64_t hash = 1469598103934665603ull;
 	const auto mix = [&hash](const void* data, size_t size) {
 		const unsigned char* const bytes = static_cast<const unsigned char*>(data);
@@ -469,9 +502,21 @@ Result Backup(const Folders& folders, const std::string& place, bool states, boo
 		Found file;
 	};
 	std::vector<Source> sources;
+	// A folder of the console's that could not be read whole fails the backup before anything is
+	// written: a backup missing files would otherwise be finished as whole, and "each backup replaces
+	// the one before it" would take the good one before it away.
+	const auto unreadable = [&result](const std::string& folder, const std::string& below) {
+		const int error = errno;
+		result.ok = false;
+		result.message = "A folder on the console could not be read (" + (below.empty() ? folder : Join(folder, below)) + ": " +
+		                 std::strerror(error) + "). Nothing was backed up, and the backups there are as they were.";
+		return result;
+	};
 	{
 		std::vector<Found> cards;
-		Collect(folders.memcards, std::string(), true, &cards);
+		std::string failed;
+		if (!Collect(folders.memcards, std::string(), true, &cards, &failed))
+			return unreadable(folders.memcards, failed);
 		for (Found& file : cards)
 			sources.push_back({"memcards", Join(folders.memcards, file.relative), std::move(file)});
 	}
@@ -480,7 +525,9 @@ Result Backup(const Folders& folders, const std::string& place, bool states, boo
 	if (states && !automatic)
 	{
 		std::vector<Found> found;
-		Collect(folders.sstates, std::string(), false, &found);
+		std::string failed;
+		if (!Collect(folders.sstates, std::string(), false, &found, &failed))
+			return unreadable(folders.sstates, failed);
 		for (Found& file : found)
 		{
 			// (PCSX2 keeps what a slot held before as "<state>.backup": the slot's past, not saved again.)
@@ -615,7 +662,10 @@ bool List(const std::string& place, std::vector<Snapshot>* snapshots, std::strin
 			snapshot.name = item.name;
 			snapshot.path = Join(root, item.name);
 			std::string manifest;
-			if (ReadFile(Join(snapshot.path, "backup.txt"), &manifest) && IsManifest(manifest))
+			const bool read = ReadFile(Join(snapshot.path, "backup.txt"), &manifest);
+			if (!read && errno != ENOENT)
+				snapshot.unreadable = true;
+			if (read && IsManifest(manifest))
 			{
 				uint64_t cards = 0, states = 0, bytes = 0;
 				snapshot.complete = ReadNumber(manifest, "memory card files", &cards) && ReadNumber(manifest, "bytes", &bytes);
@@ -663,13 +713,20 @@ Result Restore(const Folders& folders, const Snapshot& snapshot, const Watch& wa
 	int card_files = 0, state_files = 0;
 	{
 		std::vector<Found> found;
-		Collect(Join(snapshot.path, "memcards"), std::string(), true, &found);
+		// (A backup's folder that cannot be read whole now is not restored in part.)
+		const auto unreadable = [&result]() {
+			result.message = "This backup could not be read whole now: nothing was changed on the console.";
+			return result;
+		};
+		if (!Collect(Join(snapshot.path, "memcards"), std::string(), true, &found))
+			return unreadable();
 		for (const Found& file : found)
 			targets.push_back({Join(Join(snapshot.path, "memcards"), file.relative), Join(folders.memcards, file.relative),
 				Join(Join(folders.replaced, "memcards"), file.relative)});
 		card_files = static_cast<int>(found.size());
 		found.clear();
-		Collect(Join(snapshot.path, "sstates"), std::string(), false, &found);
+		if (!Collect(Join(snapshot.path, "sstates"), std::string(), false, &found))
+			return unreadable();
 		for (const Found& file : found)
 			targets.push_back({Join(Join(snapshot.path, "sstates"), file.relative), Join(folders.sstates, file.relative),
 				Join(Join(folders.replaced, "sstates"), file.relative)});

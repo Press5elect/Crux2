@@ -16,4 +16,8 @@ namespace elevation
 // Each call launches one bundled helper; no persistent service is installed.
 [[nodiscard]] Status request(Capability capability,
                              const char *helper_path = "/app0/sandbox-elevator.elf") noexcept;
+// How many connections to the payload loader the last request() made (0: none was made). A loader
+// that is not listening yet is asked again for a few seconds (elevation.cpp), so more than one
+// means it came late, or, at the limit, never answered.
+[[nodiscard]] int attempts() noexcept;
 } // namespace elevation

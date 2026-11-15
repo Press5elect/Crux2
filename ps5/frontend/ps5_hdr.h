@@ -11,6 +11,8 @@
 //   HDRPeak   1000    the game's highlights raised up to this many nits (0: off; 400 to 4000)
 //   HDRWhite  203     white's nits (ITU-R BT.2408's reference), the menus' too (80 to 400)
 //   Deband    0       0 off, 1 low (32-bit colour's fine steps), 2 high (16-bit colour's wider ones)
+//   ColourFilter 0    the game's picture for colour blindness: 0 off, 1 red-weak, 2 green-weak,
+//                     3 blue-weak, 4 greyscale (SDR and HDR; the menus keep their own colours)
 // HDR is on only while the setting is on, the console's output reports HDR, and the graphics driver
 // took the framebuffers as HDR10; otherwise everything is drawn as before, SDR.
 
@@ -85,6 +87,14 @@ namespace PS5Hdr
 	{
 		return Deband{(setting >= 2 ? 5.0f : 2.0f) / 255.0f, 0.5f / 255.0f, 32.0f * static_cast<float>(height) / 480.0f};
 	}
+
+	/// The colour filter's choices, as Porpoise has them (From Porpoise aa6ec1f, GPL-3.0-or-later): the
+	/// setting's value is the place in this list. Red-weak and green-weak keep reds and greens apart,
+	/// blue-weak blues and yellows.
+	inline constexpr const char* FILTER_CHOICES[] = {"Off", "Red-weak", "Green-weak", "Blue-weak", "Greyscale"};
+	inline constexpr int FILTER_COUNT = static_cast<int>(sizeof(FILTER_CHOICES) / sizeof(FILTER_CHOICES[0]));
+	/// The filter a setting's value stands for (anything else: off).
+	inline int FilterOf(int value) { return (value > 0 && value < FILTER_COUNT) ? value : 0; }
 
 	// ---- defined in GSDeviceVK_PS5.cpp (vendor/pcsx2) ----
 

@@ -10,22 +10,65 @@
  * while a game runs (only the reader is active).
  */
 #include "ps5_vfs_internal.h"
+#include "ps5_socket.h"
+#include "ps5_vfs.h"
 
 #include <cctype>
 #include <smb2/smb2.h>
 
 #include <smb2/libsmb2.h>
+#include <smb2/libsmb2-dcerpc-srvsvc.h>
+#include <smb2/libsmb2-raw.h>
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <mutex>
+#include <poll.h>
+#include <strings.h>
 
 namespace ps5vfs {
 namespace {
 
 constexpr int TIMEOUT_SECONDS = 8;
+/* The plain TCP check of the server's port before libsmb2 connects (Porpoise 6ee2ad2). */
+constexpr int PORT_CHECK_MILLISECONDS = 5000;
+
+/* libsmb2's own sockets, as it makes them (smb2_fd_event_callbacks: called once the socket is
+ * made and its connect() started). libsmb2 makes them non-blocking with fcntl only, which does not
+ * take on the console: a read that waits for more than the server sent then waits for ever. Here
+ * they get FIONBIO and SO_NBIO as well, time limits for a read or write that blocks all the same,
+ * and no SIGPIPE. Only libsmb2's sockets come here: curl's and the emulated adapter's are left as
+ * they are.
+ * From Porpoise e6e0b64 (GPL-3.0-or-later), which patched libsmb2's socket.c to the same end; the
+ * title links the prebuilt libsmb2, so its fd hook does it instead. */
+void OnLibsmb2Socket(struct smb2_context*, t_socket fd, int command)
+{
+  if (command != SMB2_ADD_FD || fd < 0)
+    return;
+  PS5Socket::NoSigPipe(fd);
+  PS5Socket::SetTimeouts(fd, TIMEOUT_SECONDS);
+  const PS5Socket::NonBlocking done = PS5Socket::MakeNonBlocking(fd);
+  if (!done.ok())
+    Log("vfs: libsmb2's socket %d could not be made non-blocking (errno %d)", fd, errno);
+}
+
+/* "host[:port]" -> host and port (445 when none is given). */
+void SplitServer(const std::string& server, std::string* host, int* port)
+{
+  *host = server;
+  *port = 445;
+  const size_t colon = server.rfind(':');
+  if (colon != std::string::npos && server.find(':') == colon)
+  {
+    const int given = std::atoi(server.c_str() + colon + 1);
+    if (given > 0 && given < 65536)
+      *port = given;
+    host->resize(colon);
+  }
+}
 /* After a failed connection, further attempts are refused for this long: a share that is down
  * must not hold every file operation of a game list scan for its whole timeout. */
 constexpr double RETRY_AFTER_SECONDS = 15.0;
@@ -561,6 +604,29 @@ private:
      * second attempt speaks SMB 2.1, which does not. */
     const bool guest = IsGuestAccount();
     const std::string user = guest ? std::string("guest") : m_url.user;
+
+    /* A plain TCP check of the server's SMB port first, step by step in the log, five seconds at
+     * most: a server that is off, or a port that a firewall drops, fails here at once rather than
+     * in libsmb2's connect, which a socket that blocks does not bound. (Porpoise 6ee2ad2) */
+    {
+      std::string host;
+      int port = 445;
+      SplitServer(m_url.server, &host, &port);
+      const PS5Socket::Check check = PS5Socket::CheckPort(host, port, PORT_CHECK_MILLISECONDS);
+      Log("vfs: smb://%s: port check: %s", m_url.server.c_str(), check.steps.c_str());
+      if (!check.open)
+      {
+        Log("vfs: connecting to smb://%s/%s: %s", m_url.server.c_str(), m_url.share.c_str(),
+            !check.looked_up            ? "the server's name cannot be looked up (give its IP address)" :
+            check.error == ETIMEDOUT    ? "nothing answers on its SMB port within 5 s (is it on, and on this network?)" :
+            check.error == ECONNREFUSED ? "it refuses the SMB port (is file sharing on?)" :
+                                          std::strerror(check.error));
+        m_last_failure = MonotonicSeconds();
+        errno = EHOSTUNREACH;
+        return false;
+      }
+    }
+
     std::string first_error;
     for (int attempt = 0; attempt < (guest ? 2 : 1); attempt++)
     {
@@ -572,6 +638,7 @@ private:
       }
 
       smb2_set_timeout(context, TIMEOUT_SECONDS);
+      smb2_fd_event_callbacks(context, OnLibsmb2Socket, nullptr);
       smb2_set_security_mode(context, guest ? 0 : SMB2_NEGOTIATE_SIGNING_ENABLED);
       if (attempt == 1)
         smb2_set_version(context, SMB2_VERSION_0210);
@@ -678,3 +745,126 @@ std::unique_ptr<Backend> CreateSMBBackend(const char* url, std::string* error)
 }
 
 } // namespace ps5vfs
+
+/* ---- a server's shares (Settings > Folders: "Pick from the server's list") ----
+ * From Porpoise bc835d2 (GPL-3.0-or-later): its enumerate(), the shares of a server asked over
+ * IPC$ (srvsvc NetrShareEnum), on libsmb2's own event loop (this libsmb2 has no blocking call
+ * for it). */
+PS5SharesProblem::Problem ps5vfs_list_smb_shares(const std::string& server, const std::string& user_in,
+                                                 const std::string& password, std::vector<std::string>* shares,
+                                                 std::string* detail)
+{
+  using namespace ps5vfs;
+  using PS5SharesProblem::Problem;
+  shares->clear();
+  const auto failed = [&](const std::string& why) {
+    Log("vfs: the shares of %s: %s", server.c_str(), why.c_str());
+    if (detail)
+      *detail = why;
+    return PS5SharesProblem::Classify(why);
+  };
+  if (server.empty())
+    return Problem::NoServer;
+
+  std::string host;
+  int port = 445;
+  SplitServer(server, &host, &port);
+  const PS5Socket::Check check = PS5Socket::CheckPort(host, port, PORT_CHECK_MILLISECONDS);
+  Log("vfs: smb://%s: port check: %s", server.c_str(), check.steps.c_str());
+  if (!check.open)
+    return failed(!check.looked_up            ? "the server's name cannot be looked up" :
+                  check.error == ETIMEDOUT    ? "nothing answers on its SMB port within 5 s" :
+                  check.error == ECONNREFUSED ? "it refuses the SMB port" :
+                                                std::string("connect failed: ") + std::strerror(check.error));
+
+  const bool guest = user_in.empty() || (password.empty() && strcasecmp(user_in.c_str(), "guest") == 0);
+  std::string user = guest ? std::string("guest") : user_in, domain;
+  const size_t semi = user.find(';');
+  if (semi != std::string::npos)
+  {
+    domain = user.substr(0, semi);
+    user.erase(0, semi + 1);
+  }
+  std::string error;
+  for (int attempt = 0; attempt < (guest ? 2 : 1); attempt++)
+  {
+    struct smb2_context* const context = smb2_init_context();
+    if (!context)
+      return failed("out of memory");
+    smb2_set_timeout(context, TIMEOUT_SECONDS);
+    smb2_fd_event_callbacks(context, OnLibsmb2Socket, nullptr);
+    smb2_set_security_mode(context, guest ? 0 : SMB2_NEGOTIATE_SIGNING_ENABLED);
+    if (attempt == 1)
+      smb2_set_version(context, SMB2_VERSION_0210);
+    smb2_set_user(context, user.c_str());
+    smb2_set_password(context, password.c_str());
+    if (!domain.empty())
+      smb2_set_domain(context, domain.c_str());
+    const int connected = smb2_connect_share(context, server.c_str(), "IPC$", user.c_str());
+    if (connected != 0)
+    {
+      error += std::string(error.empty() ? "" : "; with SMB 2.1: ") + smb2_get_error(context);
+      smb2_destroy_context(context);
+      if (connected == -EACCES || connected == -EPERM)
+        continue;
+      break;
+    }
+
+    struct Answer
+    {
+      bool finished = false;
+      int status = 0;
+      std::vector<std::string>* shares = nullptr;
+    } answer;
+    answer.shares = shares;
+    const smb2_command_cb done = [](struct smb2_context* smb2, int status, void* data, void* private_data) {
+      Answer* const answer = static_cast<Answer*>(private_data);
+      answer->finished = true;
+      answer->status = status;
+      if (status != 0 || !data)
+        return;
+      struct srvsvc_NetrShareEnum_rep* const reply = static_cast<struct srvsvc_NetrShareEnum_rep*>(data);
+      const struct srvsvc_SHARE_INFO_1_CONTAINER& level = reply->ses.ShareInfo.Level1;
+      for (uint32_t i = 0; level.Buffer && i < level.EntriesRead; i++)
+      {
+        const struct srvsvc_SHARE_INFO_1& info = level.Buffer->share_info_1[i];
+        if ((info.type & 3) != SHARE_TYPE_DISKTREE || (info.type & SHARE_TYPE_HIDDEN) || !info.netname.utf8)
+          continue;
+        const std::string name = info.netname.utf8;
+        if (!name.empty() && name.back() != '$')
+          answer->shares->push_back(name);
+      }
+      smb2_free_data(smb2, data);
+    };
+    if (smb2_share_enum_async(context, SHARE_INFO_1, done, &answer) == 0)
+    {
+      const double deadline = MonotonicSeconds() + TIMEOUT_SECONDS;
+      while (!answer.finished && MonotonicSeconds() < deadline)
+      {
+        struct pollfd ready;
+        ready.fd = smb2_get_fd(context);
+        ready.events = static_cast<short>(smb2_which_events(context));
+        ready.revents = 0;
+        const int result = poll(&ready, 1, 100);
+        if (result < 0 && errno == EINTR)
+          continue;
+        if (smb2_service(context, result < 0 ? POLLERR : ready.revents) < 0)
+          break;
+      }
+    }
+    if (!answer.finished || answer.status != 0)
+      error = answer.finished ? std::string(smb2_get_error(context)) : std::string("no answer in time (Timeout)");
+    /* (No goodbye: a server slow to answer it would hold the page. A request still waiting is
+     * called back with its cancellation here, while `answer` lives.) */
+    smb2_destroy_context(context);
+    if (answer.finished && answer.status == 0)
+    {
+      std::sort(shares->begin(), shares->end());
+      Log("vfs: %s shares %zu folder(s)", server.c_str(), shares->size());
+      return Problem::None;
+    }
+    break;
+  }
+  shares->clear();
+  return failed(error.empty() ? std::string("the shares could not be listed") : error);
+}

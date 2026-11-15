@@ -755,6 +755,63 @@ index d1ce25b..7ebe768 100644
  #ifdef __APPLE__
  	gCRAnnotations.message = reinterpret_cast<size_t>(msg);
  	// Some macOS's seem to have issues displaying non-static `message`s, so throw it in here too
+diff --git a/common/Image.cpp b/common/Image.cpp
+index aa96c64..00e993d 100644
+--- a/common/Image.cpp
++++ b/common/Image.cpp
+@@ -9,6 +9,9 @@
+ #include "StringUtil.h"
+ 
+ #include <common/FastJmp.h>
++#ifdef __PROSPERO__
++#include "../../../ps5/frontend/ps5_image_header.h" // Crux2: a picture's size from its header, before it is decoded (common has no include path to ps5/frontend)
++#endif
+ #include <jpeglib.h>
+ #include <png.h>
+ #include <webp/decode.h>
+@@ -125,6 +128,20 @@ bool RGBA8Image::SaveToFile(const char* filename, u8 quality) const
+ 	return false;
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2: From Porpoise 35e1dab (GPL-3.0-or-later): a picture of more than 8192 pixels on a side is
++// refused before it is decoded (covers, backgrounds, pictures: everything that loads through here),
++// not decoded until the title runs out of memory. ps5_image_header.h.
++static bool PS5RefuseHugePicture(const char* filename, const PS5ImageHeader::Size& size)
++{
++	if (!size.TooLarge())
++		return false;
++	Console.ErrorFmt("Refused {} picture '{}': {}x{} pixels, more than {} on a side", PS5ImageHeader::KindName(size.kind),
++		Path::GetFileName(filename), size.width, size.height, PS5ImageHeader::MAX_SIDE);
++	return true;
++}
++#endif
++
+ bool RGBA8Image::LoadFromFile(const char* filename, std::FILE* fp)
+ {
+ 	const std::string_view extension(Path::GetExtension(filename));
+@@ -134,6 +151,10 @@ bool RGBA8Image::LoadFromFile(const char* filename, std::FILE* fp)
+ 		Console.ErrorFmt("Unknown extension '{}'", extension);
+ 		return false;
+ 	}
++#ifdef __PROSPERO__
++	if (PS5RefuseHugePicture(filename, PS5ImageHeader::FromFile(fp)))
++		return false;
++#endif
+ 
+ 	return handler->file_loader(this, filename, fp);
+ }
+@@ -147,6 +168,10 @@ bool RGBA8Image::LoadFromBuffer(const char* filename, const void* buffer, size_t
+ 		Console.ErrorFmt("Unknown extension '{}'", extension);
+ 		return false;
+ 	}
++#ifdef __PROSPERO__
++	if (PS5RefuseHugePicture(filename, PS5ImageHeader::FromBuffer(buffer, buffer_size)))
++		return false;
++#endif
+ 
+ 	return handler->buffer_loader(this, buffer, buffer_size);
+ }
 diff --git a/common/Semaphore.cpp b/common/Semaphore.cpp
 index 8dc2f79..2214e97 100644
 --- a/common/Semaphore.cpp
@@ -1122,6 +1179,66 @@ index 0c70b8a..55abeab 100644
  	}
  
  	void xImpl_DwordShift::operator()(const xIndirectVoid& dest, const xRegister16or32or64& from, const xRegisterCL& /* clreg */) const
+diff --git a/pcsx2/Achievements.cpp b/pcsx2/Achievements.cpp
+index dd2e91c..e1b442e 100644
+--- a/pcsx2/Achievements.cpp
++++ b/pcsx2/Achievements.cpp
+@@ -35,6 +35,11 @@
+ #include "fmt/format.h"
+ #include "rc_client.h"
+ 
++#ifdef __PROSPERO__
++// PS5 (Crux2): unlocks as the console's own trophy notifications (ps5/frontend/ps5_notify.h).
++#include "ps5_notify.h"
++#endif
++
+ #include <algorithm>
+ #include <array>
+ #include <cstdarg>
+@@ -1095,6 +1100,10 @@ void Achievements::ClientLoadGameCallback(int result, const char* error_message,
+ 
+ 	UpdateGameSummary();
+ 	DisplayAchievementSummary();
++#ifdef __PROSPERO__
++	// (The console drops the picture of a notification sent in a game's first seconds.)
++	PS5Notify::AchievementsGameLoaded();
++#endif
+ 
+ 	Host::OnAchievementsRefreshed();
+ }
+@@ -1212,6 +1221,19 @@ void Achievements::HandleUnlockEvent(const rc_client_event_t* event)
+ 
+ 		std::string badge_path = GetAchievementBadgePath(cheevo, cheevo->state);
+ 
++#ifdef __PROSPERO__
++		// PS5: a trophy notification of the console's, with the trophy sound and the badge (by its
++		// address: the console fetches it). PCSX2's own over the game only when the console's cannot
++		// be shown, or [Achievements] ConsoleNotifications is off.
++		bool console_shown = false;
++		{
++			char badge_url[512] = "";
++			if (rc_client_achievement_get_image_url(cheevo, RC_CLIENT_ACHIEVEMENT_STATE_UNLOCKED, badge_url, sizeof(badge_url)) != RC_OK)
++				badge_url[0] = '\0';
++			console_shown = PS5Notify::AchievementUnlocked(title, cheevo->description ? cheevo->description : "", badge_url);
++		}
++		if (!console_shown)
++#endif
+ 		MTGS::RunOnGSThread(
+ 			[title = std::move(title), summary = std::string(cheevo->description), badge_path = std::move(badge_path), id = cheevo->id]() {
+ 				ImGuiFullscreen::AddNotification(fmt::format("achievement_unlock_{}", id), EmuConfig.Achievements.NotificationsDuration,
+@@ -1235,6 +1257,12 @@ void Achievements::HandleGameCompleteEvent(const rc_client_event_t* event)
+ 				s_game_summary.num_unlocked_achievements),
+ 			TRANSLATE_PLURAL_STR("Achievements", "%n points", "Mastery popup", s_game_summary.points_unlocked));
+ 
++#ifdef __PROSPERO__
++		// PS5: the console's platinum trophy notification, with the game's picture.
++		if (PS5Notify::AchievementsMastered(title, message, s_game_icon_url))
++			return;
++#endif
++
+ 		MTGS::RunOnGSThread([title = std::move(title), message = std::move(message), icon = s_game_icon]() {
+ 			if (ImGuiManager::InitializeFullscreenUI())
+ 			{
 diff --git a/pcsx2/CDVD/CDVD.cpp b/pcsx2/CDVD/CDVD.cpp
 index 3b6ab2e..31de0a9 100644
 --- a/pcsx2/CDVD/CDVD.cpp
@@ -2386,7 +2503,7 @@ index 4c8ce81..8233eb4 100644
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index 21adcf1..b07161e 100644
+index 21adcf1..623c6fa 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -9,9 +9,12 @@
@@ -2463,7 +2580,7 @@ index 21adcf1..b07161e 100644
  		BITFIELD_END
  
  		RecompilerOptions Recompiler;
-@@ -875,6 +923,11 @@ struct Pcsx2Config
+@@ -875,6 +923,12 @@ struct Pcsx2Config
  		GSDumpCompressionMethod GSDumpCompression = GSDumpCompressionMethod::Zstandard;
  		GSHardwareDownloadMode HWDownloadMode = GSHardwareDownloadMode::Enabled;
  		GSCASMode CASMode = DEFAULT_CAS_MODE;
@@ -2472,10 +2589,11 @@ index 21adcf1..b07161e 100644
 +		u8 FrameGenQuality = 1; // PS5: optical flow: 0 performance, 1 balanced, 2 quality
 +		bool BlackFrameInsertion = false; // PS5: at twice the game's rate, every second refresh black
 +		bool FrameGenSkipVideos = true; // PS5: no made pictures while a game plays a video
++		bool FrameGenSteady30 = false; // PS5: the game's pictures taken two vsyncs apart at the most (ps5_framegen_pacer.h)
  		u8 Dithering = 2;
  		u8 MaxAnisotropy = 0;
  		u8 TVShader = 0;
-@@ -940,6 +993,8 @@ struct Pcsx2Config
+@@ -940,6 +994,8 @@ struct Pcsx2Config
  
  		std::string Adapter;
  		std::string HWDumpDirectory;
@@ -2484,7 +2602,7 @@ index 21adcf1..b07161e 100644
  		std::string SWDumpDirectory;
  
  		GSOptions();
-@@ -1533,11 +1588,15 @@ namespace EmuFolders
+@@ -1533,11 +1589,15 @@ namespace EmuFolders
  #define CHECK_VU_SIGN_OVERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0SignOverflow : EmuConfig.Cpu.Recompiler.vu1SignOverflow)
  #define CHECK_VU_UNDERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0Underflow : EmuConfig.Cpu.Recompiler.vu1Underflow)
  
@@ -2630,6 +2748,41 @@ index 3beb36d..1d8cc35 100644
  		addrinfo hints{0};
  		hints.ai_family = AF_INET;
  		addrinfo* result = nullptr;
+diff --git a/pcsx2/DEV9/Sessions/UDP_Session/UDP_Common.cpp b/pcsx2/DEV9/Sessions/UDP_Session/UDP_Common.cpp
+index a5fd815..a91c717 100644
+--- a/pcsx2/DEV9/Sessions/UDP_Session/UDP_Common.cpp
++++ b/pcsx2/DEV9/Sessions/UDP_Session/UDP_Common.cpp
+@@ -73,6 +73,30 @@ namespace Sessions::UDP_Common
+ 				endpoint.sin_port = htons(port.value());
+ 
+ 			ret = bind(client, reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint));
++#ifdef __PROSPERO__
++			// PS5: the console refuses a title some ports, those of the high range among them
++			// (EACCES). The same port 32768 lower when it is 49152 or above, else any port the
++			// console picks: the game's server and the other players see the port the router gives
++			// it either way. From Porpoise 73d76c3 (GPL-3.0-or-later).
++			if (ret == SOCKET_ERROR && errno == EACCES && port.has_value() && port.value() != 0)
++			{
++				const u16 wanted = port.value();
++				u16 tries[2] = {0, 0};
++				int count = 0;
++				if (wanted >= 49152)
++					tries[count++] = static_cast<u16>(wanted - 32768);
++				tries[count++] = 0;
++				for (int i = 0; i < count && ret == SOCKET_ERROR; i++)
++				{
++					endpoint.sin_port = htons(tries[i]);
++					ret = bind(client, reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint));
++					const int bindErrno = errno;
++					Console.Warning("DEV9: UDP: port %u refused by the console; port %u instead: %s", wanted, tries[i],
++						ret == SOCKET_ERROR ? "refused too" : "bound");
++					errno = bindErrno;
++				}
++			}
++#endif
+ 
+ 			if (ret == SOCKET_ERROR)
+ 				Console.Error("DEV9: UDP: Failed to bind socket. Error: %d",
 diff --git a/pcsx2/DEV9/net.cpp b/pcsx2/DEV9/net.cpp
 index ba1b418..23c96f6 100644
 --- a/pcsx2/DEV9/net.cpp
@@ -3308,10 +3461,20 @@ index 89d0504..77d5c7c 100644
  
  }	// End Namespace COP1
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
-index a0b988f..714ef82 100644
+index a0b988f..9eafd06 100644
 --- a/pcsx2/GS/GS.cpp
 +++ b/pcsx2/GS/GS.cpp
-@@ -53,6 +53,11 @@
+@@ -6,6 +6,9 @@
+ #include "ImGui/FullscreenUI.h"
+ #include "ImGui/ImGuiManager.h"
+ #include "GS/GS.h"
++#ifdef __PROSPERO__
++#include "ps5_shots.h"
++#endif
+ #include "GS/GSCapture.h"
+ #include "GS/GSExtra.h"
+ #include "GS/GSGL.h"
+@@ -53,6 +56,11 @@
  
  #include "fmt/format.h"
  
@@ -3323,7 +3486,7 @@ index a0b988f..714ef82 100644
  #include <fstream>
  
  Pcsx2Config::GSOptions GSConfig;
-@@ -178,6 +183,9 @@ static void CloseGSDevice(bool clear_state)
+@@ -178,6 +186,9 @@ static void CloseGSDevice(bool clear_state)
  	if (!g_gs_device)
  		return;
  
@@ -3333,7 +3496,7 @@ index a0b988f..714ef82 100644
  	ImGuiManager::Shutdown(clear_state);
  	g_gs_device->Destroy();
  	g_gs_device.reset();
-@@ -357,6 +365,12 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
+@@ -357,6 +368,12 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
  			CloseGSDevice(true);
  	}
  
@@ -3346,7 +3509,7 @@ index a0b988f..714ef82 100644
  	if (!res)
  	{
  		Host::ReportErrorAsync("Error",
-@@ -374,6 +388,9 @@ void GSclose()
+@@ -374,6 +391,9 @@ void GSclose()
  	if (GSCapture::IsCapturing())
  		GSCapture::EndCapture();
  
@@ -3356,7 +3519,7 @@ index a0b988f..714ef82 100644
  	CloseGSRenderer();
  	CloseGSDevice(true);
  	Host::ReleaseRenderWindow();
-@@ -382,6 +399,10 @@ void GSclose()
+@@ -382,6 +402,10 @@ void GSclose()
  void GSreset(bool hardware_reset)
  {
  	g_gs_renderer->Reset(hardware_reset);
@@ -3367,7 +3530,7 @@ index a0b988f..714ef82 100644
  
  	// Restart video capture if it's been started.
  	// Otherwise we get a buildup of audio frames from the CPU thread.
-@@ -397,6 +418,10 @@ void GSreset(bool hardware_reset)
+@@ -397,6 +421,10 @@ void GSreset(bool hardware_reset)
  
  void GSgifSoftReset(u32 mask)
  {
@@ -3378,7 +3541,7 @@ index a0b988f..714ef82 100644
  	g_gs_renderer->SoftReset(mask);
  }
  
-@@ -408,6 +433,13 @@ void GSwriteCSR(u32 csr)
+@@ -408,6 +436,13 @@ void GSwriteCSR(u32 csr)
  void GSInitAndReadFIFO(u8* mem, u32 size)
  {
  	GL_PERF("Init and read FIFO %u qwc", size);
@@ -3392,7 +3555,7 @@ index a0b988f..714ef82 100644
  	g_gs_renderer->InitReadFIFO(mem, size);
  	g_gs_renderer->ReadFIFO(mem, size);
  }
-@@ -419,21 +451,49 @@ void GSReadLocalMemoryUnsync(u8* mem, u32 qwc, u64 BITBLITBUF, u64 TRXPOS, u64 T
+@@ -419,21 +454,49 @@ void GSReadLocalMemoryUnsync(u8* mem, u32 qwc, u64 BITBLITBUF, u64 TRXPOS, u64 T
  
  void GSgifTransfer(const u8* mem, u32 size)
  {
@@ -3442,7 +3605,7 @@ index a0b988f..714ef82 100644
  	g_gs_renderer->Transfer<2>(const_cast<u8*>(mem), size);
  }
  
-@@ -451,11 +511,29 @@ void GSvsync(u32 field, bool registers_written)
+@@ -451,11 +514,29 @@ void GSvsync(u32 field, bool registers_written)
  	// Do not move the flush into the VSync() method. It's here because EE transfers
  	// get cleared in HW VSync, and may be needed for a buffered draw (FFX FMVs).
  	g_gs_renderer->Flush(GSState::VSYNC);
@@ -3472,7 +3635,7 @@ index a0b988f..714ef82 100644
  	if (mode == FreezeAction::Save)
  	{
  		return g_gs_renderer->Freeze(data, false);
-@@ -482,12 +560,27 @@ int GSfreeze(FreezeAction mode, freezeData* data)
+@@ -482,12 +563,27 @@ int GSfreeze(FreezeAction mode, freezeData* data)
  
  void GSQueueSnapshot(const std::string& path, u32 gsdump_frames)
  {
@@ -3500,7 +3663,7 @@ index a0b988f..714ef82 100644
  	if (g_gs_renderer)
  		g_gs_renderer->StopGSDump();
  }
-@@ -559,6 +652,18 @@ void GSGameChanged()
+@@ -559,6 +655,18 @@ void GSGameChanged()
  	if (GSIsHardwareRenderer())
  		GSTextureReplacements::GameChanged();
  
@@ -3519,7 +3682,7 @@ index a0b988f..714ef82 100644
  	if (!VMManager::HasValidVM() && GSCapture::IsCapturing())
  		GSCapture::EndCapture();
  }
-@@ -772,6 +877,21 @@ void GSgetStats(SmallStringBase& info)
+@@ -772,6 +880,21 @@ void GSgetStats(SmallStringBase& info)
  				(int)std::ceil(pm.Get(GSPerfMon::TextureCopiesROV)),
  				(int)std::ceil(pm.Get(GSPerfMon::TextureUploads)));
  		}
@@ -3541,7 +3704,7 @@ index a0b988f..714ef82 100644
  	}
  }
  
-@@ -1027,6 +1147,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
+@@ -1027,6 +1150,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
  	s_fh = NULL;
  }
  
@@ -3604,6 +3767,20 @@ index a0b988f..714ef82 100644
  #else
  
  #include <sys/mman.h>
+@@ -1226,7 +1405,13 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
+ 	[](s32 pressed) {
+ 		if (!pressed)
+ 		{
++#ifdef __PROSPERO__
++			// PS5 (Crux2): its own shot of the game's picture, also the game's picture of play when it
++			// has none (ps5/frontend/ps5_shots.h).
++			PS5Shots::Take();
++#else
+ 			MTGS::RunOnGSThread([]() { GSQueueSnapshot(std::string(), 0); });
++#endif
+ 		}
+ 	}},
+ 	{"ToggleVideoCapture", TRANSLATE_NOOP("Hotkeys", "Graphics"), TRANSLATE_NOOP("Hotkeys", "Toggle Video Capture"),
 diff --git a/pcsx2/GS/GSDump.cpp b/pcsx2/GS/GSDump.cpp
 index 2fdb1ac..4a208ff 100644
 --- a/pcsx2/GS/GSDump.cpp
@@ -4560,7 +4737,7 @@ index 421f8ea..b0a9f11 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc..ec9726c 100644
+index 35ab6fc..66e9442 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -4584,7 +4761,7 @@ index 35ab6fc..ec9726c 100644
  #include <array>
  #include <deque>
  #include <thread>
-@@ -59,7 +66,145 @@ GSRenderer::GSRenderer()
+@@ -59,7 +66,148 @@ GSRenderer::GSRenderer()
  	s_last_draw_rect = GSVector4::zero();
  }
  
@@ -4684,7 +4861,10 @@ index 35ab6fc..ec9726c 100644
 +		return 1;
 +	}
 +
-+	m_fg_pacer.Vsync(fresh);
++	// Steady 30 may hold a new picture back a vsync, or take a newer one in its place: frame
++	// generation is handed the game's picture when the pacer takes one, not when it comes.
++	m_fg_pacer.steady30 = GSConfig.FrameGenSteady30;
++	fresh = m_fg_pacer.Vsync(fresh);
 +	if (fresh)
 +	{
 +		m_fg_own++;
@@ -4730,7 +4910,7 @@ index 35ab6fc..ec9726c 100644
  
  void GSRenderer::Reset(bool hardware_reset)
  {
-@@ -81,6 +226,26 @@ void GSRenderer::UpdateRenderFixes()
+@@ -81,6 +229,26 @@ void GSRenderer::UpdateRenderFixes()
  
  bool GSRenderer::Merge(int field)
  {
@@ -4757,7 +4937,7 @@ index 35ab6fc..ec9726c 100644
  	GSVector2i fs(0, 0);
  	GSTexture* tex[3] = { nullptr, nullptr, nullptr };
  	float tex_scale[3] = { 0.0f, 0.0f, 0.0f };
-@@ -444,7 +609,13 @@ static GSVector4i CalculateDrawSrcRect(const GSTexture* src, const GSVector2i re
+@@ -444,7 +612,13 @@ static GSVector4i CalculateDrawSrcRect(const GSTexture* src, const GSVector2i re
  {
  	const GSVector2i size(src->GetSize());
  	const GSVector2 scale = GSVector2(size.x, size.y) / GSVector2(real_size.x, real_size.y).max(GSVector2(0.1f, 0.1f));
@@ -4771,7 +4951,7 @@ index 35ab6fc..ec9726c 100644
  	const int left = static_cast<int>(static_cast<float>(GSConfig.Crop[0] * scale.x) * upscale);
  	const int top = static_cast<int>(static_cast<float>(GSConfig.Crop[1] * scale.y) * upscale);
  	const int right =  size.x - static_cast<int>(static_cast<float>(GSConfig.Crop[2] * scale.x) * upscale);
-@@ -604,7 +775,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -604,7 +778,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  	const bool fb_sprite_frame = (fb_sprite_blits > 0);
  
  	bool skip_frame = false;
@@ -4786,7 +4966,7 @@ index 35ab6fc..ec9726c 100644
  	{
  		bool is_unique_frame;
  		switch (PerformanceMetrics::GetInternalFPSMethod())
-@@ -633,6 +810,10 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -633,6 +813,10 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  
  	const bool blank_frame = !Merge(field);
  
@@ -4797,7 +4977,7 @@ index 35ab6fc..ec9726c 100644
  	m_last_draw_n = s_n;
  	m_last_transfer_n = s_transfer_n;
  	m_background_blurred = false;
-@@ -668,18 +849,43 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -668,18 +852,43 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  				GetVideoMode() == GSVideoMode::SDTV_480P);
  			s_last_draw_rect = draw_rect;
  
@@ -4844,7 +5024,7 @@ index 35ab6fc..ec9726c 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -691,6 +897,108 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -691,6 +900,108 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			}
  		}
  
@@ -4953,7 +5133,7 @@ index 35ab6fc..ec9726c 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -709,8 +1017,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +1020,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -4967,7 +5147,7 @@ index 35ab6fc..ec9726c 100644
  	}
  
  	// snapshot
-@@ -774,6 +1087,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -774,6 +1090,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  					(m_dump_frames == 1) ? TRANSLATE_SV("GS", "single frame") : TRANSLATE_SV("GS", "multi-frame"), compression_str,
  					Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -4983,7 +5163,7 @@ index 35ab6fc..ec9726c 100644
  		}
  
  		const bool internal_resolution = (GSConfig.ScreenshotSize >= GSScreenshotSize::InternalResolution);
-@@ -804,7 +1126,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -804,7 +1129,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			Host::AddKeyedOSDMessage("GSDump",
  				fmt::format(TRANSLATE_FS("GS", "Saved GS dump to '{}'."), Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -5002,7 +5182,7 @@ index 35ab6fc..ec9726c 100644
  		}
  		else if (!last)
  		{
-@@ -960,6 +1293,15 @@ std::string GSGetBaseVideoFilename()
+@@ -960,6 +1296,15 @@ std::string GSGetBaseVideoFilename()
  
  void GSRenderer::StopGSDump()
  {
@@ -5018,7 +5198,7 @@ index 35ab6fc..ec9726c 100644
  	m_snapshot = {};
  	m_dump_frames = 0;
  }
-@@ -1000,7 +1342,11 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1345,11 @@ void GSRenderer::PresentCurrentFrame()
  			GetVideoMode() == GSVideoMode::SDTV_480P);
  		s_last_draw_rect = draw_rect;
  		const bool refresh_blur = !m_background_blurred;
@@ -5030,7 +5210,7 @@ index 35ab6fc..ec9726c 100644
  		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
  	}
  
-@@ -1011,9 +1357,20 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1011,9 +1360,20 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
@@ -5631,7 +5811,7 @@ index a4d9256..f67dcf8 100644
  	struct TargetHeightElem
  	{
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
-index 77a28df..0b3229c 100644
+index 77a28df..eccb4d0 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 @@ -1,6 +1,9 @@
@@ -5644,7 +5824,144 @@ index 77a28df..0b3229c 100644
  #include "common/AlignedMalloc.h"
  #include "common/Buffer.h"
  #include "common/Console.h"
-@@ -412,9 +415,19 @@ void GSTextureReplacements::ReloadReplacementMap()
+@@ -20,10 +23,12 @@
+ #include "GS/Renderers/HW/GSTextureReplacements.h"
+ #include "VMManager.h"
+ 
++#include <algorithm>
+ #include <cinttypes>
+ #include <condition_variable>
+ #include <cstring>
+ #include <deque>
++#include <list>
+ #include <functional>
+ #include <mutex>
+ #include <unordered_map>
+@@ -157,8 +162,114 @@ namespace GSTextureReplacements
+ 	static std::condition_variable s_worker_thread_cv;
+ 	static std::deque<std::pair<std::function<void()>, bool>> s_worker_thread_queue;
+ 	static bool s_worker_thread_running = false;
++
++	// From Porpoise 7971daf (GPL-3.0-or-later): the decoded replacements are held to a budget.
++	// Without one, a big pack precached in full (Crux2's default) filled the title's memory over a
++	// long session and the system closed it. Past the budget the least recently used are let go;
++	// one asked for again is read from the pack again. What is let go is only the processor's copy:
++	// the graphics device's textures made from it (CreateReplacementTexture copies the data) are the
++	// texture cache's own and stay. A replacement loaded but not yet handed to the texture cache
++	// (still in s_pending_async_load_textures) is never let go, or its texture would never arrive.
++	// All of it under s_replacement_texture_cache_mutex.
++	static constexpr u64 REPLACEMENT_BUDGET_MAX = u64(2) << 30;
++	static constexpr u64 REPLACEMENT_BUDGET_MIN = u64(256) << 20;
++	/// What is kept free for the rest of the title (guest memory is already taken; the graphics
++	/// device's pool, the disc read into memory and the interface are not).
++	static constexpr u64 REPLACEMENT_HEADROOM = u64(5) << 29; // 2.5 GiB
++	static u64 s_replacement_budget = REPLACEMENT_BUDGET_MAX;
++	static u64 s_replacement_cache_bytes = 0;
++	static u64 s_replacement_evictions = 0;
++	static bool s_precache_full = false;
++	static std::list<TextureName> s_replacement_lru; ///< front: the most recently used
++	static std::unordered_map<TextureName, std::list<TextureName>::iterator> s_replacement_lru_pos;
++
++	static u64 ReplacementBytes(const ReplacementTexture& rtex);
++	static void ComputeReplacementBudget();
++	static void ClearReplacementCacheLocked();
++	static void TouchReplacement(const TextureName& name);
++	static const ReplacementTexture& InsertReplacement(const TextureName& name, ReplacementTexture&& rtex);
++	static void EvictReplacementsToBudget(const TextureName* keep);
+ }; // namespace GSTextureReplacements
+ 
++u64 GSTextureReplacements::ReplacementBytes(const ReplacementTexture& rtex)
++{
++	u64 bytes = rtex.data.size();
++	for (const ReplacementTexture::MipData& mip : rtex.mips)
++		bytes += mip.data.size();
++	return bytes;
++}
++
++void GSTextureReplacements::ComputeReplacementBudget()
++{
++	// The largest free run of the title's memory less the headroom, between 256 MiB and 2 GiB.
++	const u64 available = GetAvailablePhysicalMemory();
++	const u64 spare = (available > REPLACEMENT_HEADROOM) ? (available - REPLACEMENT_HEADROOM) : 0;
++	s_replacement_budget = std::clamp(spare, REPLACEMENT_BUDGET_MIN, REPLACEMENT_BUDGET_MAX);
++	Console.WriteLn("Texture replacements: up to %llu MiB of decoded textures kept in memory (%llu MiB free); "
++					"the least recently used are let go past that and read again when asked for",
++		static_cast<unsigned long long>(s_replacement_budget >> 20), static_cast<unsigned long long>(available >> 20));
++}
++
++void GSTextureReplacements::ClearReplacementCacheLocked()
++{
++	s_replacement_texture_cache.clear();
++	s_replacement_lru.clear();
++	s_replacement_lru_pos.clear();
++	s_replacement_cache_bytes = 0;
++	s_replacement_evictions = 0;
++	s_precache_full = false;
++}
++
++void GSTextureReplacements::TouchReplacement(const TextureName& name)
++{
++	const auto it = s_replacement_lru_pos.find(name);
++	if (it != s_replacement_lru_pos.end())
++		s_replacement_lru.splice(s_replacement_lru.begin(), s_replacement_lru, it->second);
++}
++
++const GSTextureReplacements::ReplacementTexture& GSTextureReplacements::InsertReplacement(const TextureName& name, ReplacementTexture&& rtex)
++{
++	const auto [it, inserted] = s_replacement_texture_cache.emplace(name, std::move(rtex));
++	if (inserted)
++	{
++		s_replacement_cache_bytes += ReplacementBytes(it->second);
++		s_replacement_lru.push_front(name);
++		s_replacement_lru_pos.emplace(name, s_replacement_lru.begin());
++		EvictReplacementsToBudget(&name);
++	}
++	else
++	{
++		TouchReplacement(name);
++	}
++	return it->second;
++}
++
++void GSTextureReplacements::EvictReplacementsToBudget(const TextureName* keep)
++{
++	auto it = s_replacement_lru.end();
++	while (s_replacement_cache_bytes > s_replacement_budget && it != s_replacement_lru.begin())
++	{
++		--it;
++		const TextureName& name = *it;
++		if ((keep && name == *keep) || s_pending_async_load_textures.find(name) != s_pending_async_load_textures.end())
++			continue;
++
++		const auto cit = s_replacement_texture_cache.find(name);
++		if (cit != s_replacement_texture_cache.end())
++		{
++			s_replacement_cache_bytes -= ReplacementBytes(cit->second);
++			s_replacement_texture_cache.erase(cit);
++		}
++		s_replacement_lru_pos.erase(name);
++		it = s_replacement_lru.erase(it);
++		if (s_replacement_evictions++ == 0)
++		{
++			Console.WriteLn("Texture replacements: %llu MiB in memory, the least recently used are let go from now on",
++				static_cast<unsigned long long>(s_replacement_budget >> 20));
++		}
++	}
++}
++
+ TextureName GSTextureReplacements::CreateTextureName(const GSTextureCache::HashCacheKey& hash, u32 miplevel)
+ {
+ 	TextureName name;
+@@ -402,7 +513,7 @@ void GSTextureReplacements::ReloadReplacementMap()
+ 		s_replacement_textures_without_clut_hash.clear();
+ 
+ 		std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
+-		s_replacement_texture_cache.clear();
++		ClearReplacementCacheLocked();
+ 		s_pending_async_load_textures.clear();
+ 		s_async_loaded_textures.clear();
+ 	}
+@@ -412,9 +523,19 @@ void GSTextureReplacements::ReloadReplacementMap()
  		return;
  
  	const std::string texture_dir = GetGameTextureDirectory();
@@ -5664,6 +5981,105 @@ index 77a28df..0b3229c 100644
  
  	FileSystem::FindResultsArray files;
  
+@@ -481,6 +602,10 @@ void GSTextureReplacements::ReloadReplacementMap()
+ 
+ 	if (!s_replacement_texture_filenames.empty())
+ 	{
++		{
++			std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
++			ComputeReplacementBudget();
++		}
+ 		if (GSConfig.PrecacheTextureReplacements)
+ 			PrecacheReplacementTextures();
+ 
+@@ -562,6 +687,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
+ 		if (it != s_replacement_texture_cache.end())
+ 		{
+ 			// replacement is cached, can immediately upload to host GPU
++			TouchReplacement(name);
+ 			*alpha_minmax = it->second.alpha_minmax;
+ 			return CreateReplacementTexture(it->second, mipmap);
+ 		}
+@@ -586,7 +712,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
+ 
+ 		// insert into cache
+ 		std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
+-		const ReplacementTexture& rtex = s_replacement_texture_cache.emplace(name, std::move(replacement.value())).first->second;
++		const ReplacementTexture& rtex = InsertReplacement(name, std::move(replacement.value()));
+ 
+ 		// and upload to gpu
+ 		*alpha_minmax = rtex.alpha_minmax;
+@@ -751,6 +877,17 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+ 
+ 	s_pending_async_load_textures.emplace(name, cache_only);
+ 	QueueWorkerThreadItem([name, filename, mipmap]() {
++		// A precache that reached the budget reads no more: the rest load when the game asks.
++		{
++			std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
++			auto it = s_pending_async_load_textures.find(name);
++			if (it != s_pending_async_load_textures.end() && it->second && s_precache_full)
++			{
++				s_pending_async_load_textures.erase(it);
++				return;
++			}
++		}
++
+ 		// actually load the file, this is what will take the time
+ 		std::optional<ReplacementTexture> replacement(LoadReplacementTexture(filename, !mipmap));
+ 
+@@ -770,7 +907,21 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+ 		// insert into the cache and queue for later injection
+ 		if (replacement.has_value())
+ 		{
+-			s_replacement_texture_cache.emplace(name, std::move(replacement.value()));
++			// A precache stops at the budget instead of letting go of what it loaded first.
++			if (it->second && s_replacement_cache_bytes + ReplacementBytes(*replacement) > s_replacement_budget)
++			{
++				if (!s_precache_full)
++				{
++					s_precache_full = true;
++					Console.WriteLn("Texture replacements: precaching stopped at the budget (%llu MiB, %zu of %zu textures); "
++									"the rest load when the game asks for them",
++						static_cast<unsigned long long>(s_replacement_cache_bytes >> 20), s_replacement_texture_cache.size(),
++						s_replacement_texture_filenames.size());
++				}
++				s_pending_async_load_textures.erase(it);
++				return;
++			}
++			InsertReplacement(name, std::move(replacement.value()));
+ 			s_async_loaded_textures.emplace_back(name, mipmap);
+ 		}
+ 		else
+@@ -784,6 +935,7 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+ void GSTextureReplacements::PrecacheReplacementTextures()
+ {
+ 	std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
++	s_precache_full = false;
+ 
+ 	// predict whether the requests will come with mipmaps
+ 	// TODO: This will be wrong for hw mipmap games like Jak.
+@@ -806,7 +958,7 @@ void GSTextureReplacements::ClearReplacementTextures()
+ 	s_replacement_textures_without_clut_hash.clear();
+ 
+ 	std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
+-	s_replacement_texture_cache.clear();
++	ClearReplacementCacheLocked();
+ 	s_pending_async_load_textures.clear();
+ 	s_async_loaded_textures.clear();
+ }
+@@ -878,8 +1030,12 @@ void GSTextureReplacements::ProcessAsyncLoadedTextures()
+ 		GSTexture* tex = CreateReplacementTexture(it->second, mipmap);
+ 		if (tex)
+ 			g_texture_cache->InjectHashCacheTexture(HashCacheKeyFromTextureName(name), tex, it->second.alpha_minmax);
++		TouchReplacement(name);
+ 	}
+ 	s_async_loaded_textures.clear();
++
++	// What was held back while it waited for the texture cache may go now (Crux2's budget).
++	EvictReplacementsToBudget(nullptr);
+ }
+ 
+ void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash, const GIFRegTEX0& TEX0,
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 index 567d2ca..ae45877 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
@@ -7143,10 +7559,10 @@ index 4230238..93215d2 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..d20cc9d
+index 0000000..93ecaa2
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1751 @@
+@@ -0,0 +1,1758 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -8376,6 +8792,7 @@ index 0000000..d20cc9d
 +	u32 tick = 0;
 +	bool want_hdr = false;
 +	int deband = 0;
++	int filter = 0; // the colour filter on the game's picture (ps5_hdr.h, FilterOf)
 +	float white = PS5Hdr::DEFAULT_WHITE, peak = PS5Hdr::DEFAULT_PEAK;
 +	bool asked_once = false, asked = false; // the setting last acted on
 +	bool hdr_on = false;                    // the framebuffers are HDR10: each frame is drawn for them
@@ -8471,12 +8888,16 @@ index 0000000..d20cc9d
 +		f.white = static_cast<float>(PS5Hdr::WhiteOf(Host::GetBaseIntSettingValue("PS5", "HDRWhite", PS5Hdr::DEFAULT_WHITE)));
 +		f.peak = static_cast<float>(PS5Hdr::PeakOf(Host::GetBaseIntSettingValue("PS5", "HDRPeak", PS5Hdr::DEFAULT_PEAK)));
 +		f.deband = std::clamp(Host::GetBaseIntSettingValue("PS5", "Deband", 0), 0, 2);
++		const int filter = PS5Hdr::FilterOf(Host::GetBaseIntSettingValue("PS5", "ColourFilter", 0));
++		if (filter != f.filter)
++			ps5px_log("picture: colour filter %s", PS5Hdr::FILTER_CHOICES[filter]);
++		f.filter = filter;
 +	}
 +	if (s_cal.step == 2)
 +		f.white = static_cast<float>(PS5Hdr::WhiteOf(s_cal.white)); // the menus show the level being chosen
 +
 +	// The passes, the first time either is asked for.
-+	if (!f.prepared && (f.want_hdr || f.deband != 0) && m_swap_chain)
++	if (!f.prepared && (f.want_hdr || f.deband != 0 || f.filter != 0) && m_swap_chain)
 +	{
 +		f.prepared = true;
 +		f.format = m_swap_chain->GetTextureFormat();
@@ -8514,9 +8935,9 @@ index 0000000..d20cc9d
 +			}
 +			vkDestroyShaderModule(m_device, vs, nullptr);
 +		}
-+		ps5px_log("picture: debanding's pass %s", f.deband_pass != VK_NULL_HANDLE ? "made" :
-+			source.has_value() ? "could not be made by the graphics driver: debanding stays off" :
-+								 "is not in the resources (shaders/vulkan/ps5_final.glsl): debanding stays off");
++		ps5px_log("picture: debanding's and the colour filter's pass %s", f.deband_pass != VK_NULL_HANDLE ? "made" :
++			source.has_value() ? "could not be made by the graphics driver: debanding and the colour filter stay off" :
++								 "is not in the resources (shaders/vulkan/ps5_final.glsl): debanding and the colour filter stay off");
 +
 +		// HDR: the driver's calls, a 10-bit target, its pass, and the menus' pipeline for their layer.
 +		VkFormatProperties props = {};
@@ -8627,7 +9048,8 @@ index 0000000..d20cc9d
 +{
 +	PS5Final& f = Final();
 +	f.layer_now = false;
-+	const bool deband = f.deband != 0 && f.deband_pass != VK_NULL_HANDLE;
++	// (FINAL_PASS 0 debands, filters the colours, or both.)
++	const bool deband = (f.deband != 0 || f.filter != 0) && f.deband_pass != VK_NULL_HANDLE;
 +	if (!f.hdr_on && f.ui)
 +	{
 +		// (The layers HDR alone needs, given back when it goes off: at 4K about 33 MB each. Destroyed once the
@@ -8656,7 +9078,7 @@ index 0000000..d20cc9d
 +		// (Without its layers a frame is drawn as before: SDR, not debanded. HDR10 framebuffers would show it
 +		// wrongly, so HDR is given up.)
 +		f.layers_failed = true;
-+		ps5px_log("picture: the final passes' %dx%d layers could not be made: debanding and HDR output stay off", w, h);
++		ps5px_log("picture: the final passes' %dx%d layers could not be made: debanding, the colour filter and HDR output stay off", w, h);
 +		if (f.hdr_on)
 +		{
 +			WaitForGPUIdle();
@@ -8689,9 +9111,10 @@ index 0000000..d20cc9d
 +	const bool deband = f.deband != 0 && f.deband_pass != VK_NULL_HANDLE;
 +	const PS5Hdr::Deband db = PS5Hdr::DebandOf(f.deband, h);
 +	const bool cal = f.hdr_on && s_cal.step != 0;
-+	// ps5_final.glsl's cb_final: u_metrics, u_cal, u_deband.
++	// ps5_final.glsl's cb_final: u_metrics, u_cal (z: the colour filter), u_deband.
 +	const float constants[12] = {f.white, f.peak, 0.0f, 1.0f,
-+		cal ? static_cast<float>(s_cal.step) : 0.0f, cal ? static_cast<float>(s_cal.step == 1 ? s_cal.peak : s_cal.white) : 0.0f, 0.0f, 0.0f,
++		cal ? static_cast<float>(s_cal.step) : 0.0f, cal ? static_cast<float>(s_cal.step == 1 ? s_cal.peak : s_cal.white) : 0.0f,
++		static_cast<float>(f.filter), 0.0f,
 +		db.step, db.dither, db.reach, deband ? 1.0f : 0.0f};
 +
 +	// The picture's layer, finished.
@@ -12112,7 +12535,7 @@ index 255b6ea..be7ca63 100644
 +#endif
  } // namespace Patch
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 51c34b9..0fc7f9c 100644
+index 51c34b9..25c93ff 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
 @@ -537,6 +537,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
@@ -12160,7 +12583,7 @@ index 51c34b9..0fc7f9c 100644
  
  	Recompiler.LoadSave(wrap);
  }
-@@ -837,6 +846,11 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
+@@ -837,6 +846,12 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
  		OpEqu(GSDumpCompression) &&
  		OpEqu(HWDownloadMode) &&
  		OpEqu(CASMode) &&
@@ -12169,10 +12592,11 @@ index 51c34b9..0fc7f9c 100644
 +		OpEqu(FrameGenQuality) &&
 +		OpEqu(BlackFrameInsertion) &&
 +		OpEqu(FrameGenSkipVideos) &&
++		OpEqu(FrameGenSteady30) &&
  		OpEqu(Dithering) &&
  		OpEqu(MaxAnisotropy) &&
  		OpEqu(SWExtraThreads) &&
-@@ -904,6 +918,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
+@@ -904,6 +919,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
  		OpEqu(Adapter) &&
  
  		OpEqu(HWDumpDirectory) &&
@@ -12181,7 +12605,7 @@ index 51c34b9..0fc7f9c 100644
  		OpEqu(SWDumpDirectory));
  }
  
-@@ -1071,7 +1087,28 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1071,7 +1088,29 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  	SettingsWrapIntEnumEx(GSDumpCompression, "GSDumpCompression");
  	SettingsWrapIntEnumEx(HWDownloadMode, "HWDownloadMode");
  	SettingsWrapIntEnumEx(CASMode, "CASMode");
@@ -12192,6 +12616,7 @@ index 51c34b9..0fc7f9c 100644
 +	SettingsWrapBitfieldEx(FrameGenQuality, "FrameGenerationQuality");
 +	SettingsWrapEntryEx(BlackFrameInsertion, "BlackFrameInsertion");
 +	SettingsWrapEntryEx(FrameGenSkipVideos, "FrameGenerationSkipVideos");
++	SettingsWrapEntryEx(FrameGenSteady30, "FrameGenerationSteady30");
 +	if (wrap.IsLoading())
 +	{
 +		FrameGenMethod = std::min<u8>(FrameGenMethod, 2);
@@ -12210,7 +12635,7 @@ index 51c34b9..0fc7f9c 100644
  	SettingsWrapBitfieldEx(Dithering, "dithering_ps2");
  	SettingsWrapBitfieldEx(MaxAnisotropy, "MaxAnisotropy");
  	SettingsWrapBitfieldEx(SWExtraThreads, "extrathreads");
-@@ -1124,6 +1161,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1124,6 +1163,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  
  	SettingsWrapEntry(Adapter);
  	SettingsWrapEntry(HWDumpDirectory);
@@ -12219,7 +12644,7 @@ index 51c34b9..0fc7f9c 100644
  	if (!HWDumpDirectory.empty() && !Path::IsAbsolute(HWDumpDirectory))
  		HWDumpDirectory = Path::Combine(EmuFolders::DataRoot, HWDumpDirectory);
  	SettingsWrapEntry(SWDumpDirectory);
-@@ -1369,7 +1408,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
+@@ -1369,7 +1410,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
  			LoadIPHelper(Mask, maskStr);
  			LoadIPHelper(Gateway, gatewayStr);
  			LoadIPHelper(DNS1, dns1Str);
@@ -12631,6 +13056,66 @@ index a618605..79e4e9a 100644
  	// PCSX2 Controller Settings - Hotkeys
  
  	// PCSX2 Controller Settings - Hotkeys - General
+diff --git a/pcsx2/USB/usb-lightgun/guncon2.cpp b/pcsx2/USB/usb-lightgun/guncon2.cpp
+index ad40a8d..c0b64f4 100644
+--- a/pcsx2/USB/usb-lightgun/guncon2.cpp
++++ b/pcsx2/USB/usb-lightgun/guncon2.cpp
+@@ -17,6 +17,7 @@
+ #include "common/Console.h"
+ #include "common/StringUtil.h"
+ 
++#include <atomic>
+ #include <tuple>
+ 
+ namespace usb_lightgun
+@@ -368,11 +369,32 @@ namespace usb_lightgun
+ 		Console.Warning(fmt::format("(GunCon2) No automatic config found for '{}'.", serial));
+ 	}
+ 
++	// Crux2: a port's own pointer (SetPortPointer), set from the input source's thread and read on
++	// the emulator's.
++	static std::atomic<bool> s_port_pointer_active[2] = {};
++	static std::atomic<float> s_port_pointer_x[2] = {}, s_port_pointer_y[2] = {};
++
++	void SetPortPointer(u32 port, bool active, float window_x, float window_y)
++	{
++		if (port >= 2)
++			return;
++		s_port_pointer_x[port].store(window_x, std::memory_order_relaxed);
++		s_port_pointer_y[port].store(window_y, std::memory_order_relaxed);
++		s_port_pointer_active[port].store(active, std::memory_order_release);
++	}
++
++	static std::pair<float, float> PortPointerPosition(u32 port)
++	{
++		if (port < 2 && s_port_pointer_active[port].load(std::memory_order_acquire))
++			return {s_port_pointer_x[port].load(std::memory_order_relaxed), s_port_pointer_y[port].load(std::memory_order_relaxed)};
++		return InputManager::GetPointerAbsolutePosition(0);
++	}
++
+ 	std::tuple<s16, s16> GunCon2State::CalculatePosition()
+ 	{
+ 		float pointer_x, pointer_y;
+ 		const auto& [window_x, window_y] =
+-			(has_relative_binds) ? GetAbsolutePositionFromRelativeAxes() : InputManager::GetPointerAbsolutePosition(0);
++			(has_relative_binds) ? GetAbsolutePositionFromRelativeAxes() : PortPointerPosition(port);
+ 		GSTranslateWindowToDisplayCoordinates(window_x, window_y, &pointer_x, &pointer_y);
+ 
+ 		s16 pos_x, pos_y;
+diff --git a/pcsx2/USB/usb-lightgun/guncon2.h b/pcsx2/USB/usb-lightgun/guncon2.h
+index c8be522..2b10ac2 100644
+--- a/pcsx2/USB/usb-lightgun/guncon2.h
++++ b/pcsx2/USB/usb-lightgun/guncon2.h
+@@ -20,4 +20,9 @@ namespace usb_lightgun
+ 		std::span<const InputBindingInfo> Bindings(u32 subtype) const override;
+ 		std::span<const SettingInfo> Settings(u32 subtype) const override;
+ 	};
++
++	/// Crux2: a pointer of its own for the GunCon in one USB port (0 or 1), in window pixels, as
++	/// InputManager's pointer 0 is. While one is set for a port, that port's GunCon aims with it
++	/// instead of pointer 0 (a second player's gun); active false gives the port pointer 0 again.
++	void SetPortPointer(u32 port, bool active, float window_x = 0.0f, float window_y = 0.0f);
+ } // namespace usb_lightgun
 diff --git a/pcsx2/USB/usb-mic/usb-mic.cpp b/pcsx2/USB/usb-mic/usb-mic.cpp
 index 337046a..aa0b04b 100644
 --- a/pcsx2/USB/usb-mic/usb-mic.cpp

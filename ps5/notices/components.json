@@ -1163,13 +1163,44 @@
 		},
 		{
 			"id": "porpoise-aim",
-			"name": "Project Porpoise's aim (src/porpoise_aim.cpp: the motion fusion, the pointer's geometry, the grip levelling and the pointer's smoothing), for aiming the GunCon 2 with a PlayStation Move (ps5/frontend/ps5_move_logic.h)",
+			"name": "Project Porpoise's aim and controller code: src/porpoise_aim.cpp (the motion fusion, the pointer's geometry, the grips and their levelling, the edge easing and the pointer's smoothing) and its use in src/porpoise_pad.cpp (centring, the grip read when centring, the screen measured from two corners), for aiming the GunCon 2 with a DualSense or a PlayStation Move (ps5/frontend/ps5_aim_logic.h, ps5_move_logic.h); the adaptive trigger's weapon effect (porpoise_pad.cpp) and the stick sensitivity curve (porpoise_core.cpp), in ps5/frontend/ps5_input_source_logic.h; FreeBSD's ugen USB ioctls as spelt out in src/porpoise_ugen.hpp and the bounded transfer teardown of src/porpoise_usbhid.cpp (its pull requests 36 and 37), in ps5/frontend/ps5_ugen.h",
 			"licence": "GPL-3.0-or-later",
 			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise)",
-			"modifications": "the functions used copied unchanged, made inline in a header (ps5/frontend/ps5_move_logic.h, PorpoiseAim), with their notice",
+			"modifications": "porpoise_aim.cpp's functions copied unchanged, made inline in a header (ps5/frontend/ps5_aim_logic.h, PorpoiseAim), with their notice; the rest rewritten for a GunCon 2 and PCSX2's USB pads (a light gun's recentring and screen measurement, R2 as the trigger's click, the curve without its dead zone, ugen behind Crux2's USB pad transport)",
 			"texts": {},
 			"artifacts": [
 				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "61f38f6079a3011abba88e8f4f1cb0ddc0ed27a8"
+			}
+		},
+		{
+			"id": "porpoise",
+			"name": "Project Porpoise's network code: sockets made non-blocking with FIONBIO and the console's SO_NBIO, with read and write time limits (its e6e0b64), the TCP check of a server's port before connecting (6ee2ad2), the computers found on the network on SMB's and NFS's ports, a server's shares and exports listed and a share's test with the kind of failure (35c039c, bc835d2, src/porpoise_netfs.cpp), a refused UDP port bound lower (73d76c3), and the name server question, its test and public DNS for a name the console's name server answers 0.0.0.0 (src/porpoise_dns.cpp, 901f30a, 18d12f1, 7026d66); in ps5/frontend/vfs/ps5_socket.h, ps5_share_problem.h, ps5_vfs.cpp, ps5_vfs_smb.cpp and ps5_vfs_nfs.cpp, ps5/frontend/ps5_shares.cpp, ps5/frontend/ps5_net.cpp and PCSX2's DEV9/Sessions/UDP_Session/UDP_Common.cpp",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise)",
+			"modifications": "the DNS question and its answer's reading copied with small changes (a port for the tests); the rest rewritten for Crux2's virtual file layer and the prebuilt libsmb2 (its socket hook in place of a patch to libsmb2's socket.c), PCSX2's UDP sessions and Crux2's settings pages",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "7026d66bc6cb962d829bfa2709eac3b87f9d9ec9"
+			}
+		},
+		{
+			"id": "porpoise-system",
+			"name": "Project Porpoise's system code: the console's rich notifications (src/porpoise_notify.cpp, 1679c95) and their relay payload (tools/notify-relay/notify_relay.c), after PS5SX2's design (ps5/coreorbis/orbis-shims/ProsperoNotify.cpp and notify-relay, by Spyros), in ps5/frontend/ps5_notify.cpp and ps5/elevation/notify-relay/notify_relay.c; the launch arguments (src/porpoise_forward.hpp, 839dfda, fcb4fd0) in ps5/frontend/ps5_launch.h; the recommended settings per game, fetched once a day (src/ui_recommend.hpp, 35e1dab, 1880404) in ps5/frontend/ps5_recommend.cpp; screenshots (src/porpoise_shots.cpp) in ps5/frontend/ps5_shots.cpp; a folder's read error taken as a failure (its pull request 38, b6ea998) in ps5/frontend/ps5_backup.cpp; and the payload loader asked again for a few seconds (8452ecb, 69f569f) in ps5/elevation/elevation.cpp",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise); the notification design Spyros (PS5SX2)",
+			"modifications": "the notification JSON, its queue and the relay payload copied with small changes (Crux2's names, its marker, libSceNotification found while the title runs instead of imported, the relay read from the title folder instead of built in); the launch argument parsing copied with small changes; the rest rewritten for PCSX2 (its achievements, its per-game settings, its screenshot hotkey and snapshot) and Crux2's backups and elevation client",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin",
+				"notify-relay.elf"
 			],
 			"source": {
 				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",

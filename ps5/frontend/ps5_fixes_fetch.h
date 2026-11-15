@@ -63,6 +63,12 @@ bool SafePath(const std::string& path);
 /// The SHA-256 of some bytes, as 64 lower-case hex digits.
 std::string Sha256Hex(const void* data, size_t size);
 
+/// A whole file written beside its place and then put there, never renamed onto the old one (which
+/// is moved aside first and put back if the new one does not go in): the file holds exactly these
+/// bytes afterwards, or the one that was there is as it was. (Also the recommended settings',
+/// ps5_recommend.cpp.)
+bool WriteOverSafely(const std::string& path, const void* data, size_t size);
+
 /// At start, when Settings > PlayStation 5 > "Game fixes from GitHub at start" ([PS5]
 /// FixesAtStart, on by default) says so: Sync() on a thread of its own, once a run, from
 /// Press5elect/Crux2's main branch ([PS5] UpdateRepository names another). Fixes that came apply to

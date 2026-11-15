@@ -22,6 +22,9 @@
 #   - the threads' self-reported processor times (common/PS5ThreadTimes.h), with the thread
 #     sanitizer: readings from another thread never go back;
 #   - a quick tap held for the game at least 50 ms (frontend/ps5_input_source_logic.h, TapHold);
+#   - the GunCon 2's steady motion aim (frontend/ps5_aim_logic.h) over a made-up controller, the
+#     sticks' response curve and R2's click (ps5_input_source_logic.h);
+#   - USB pads through /dev/ugen (frontend/ps5_ugen.h): the transfers over a made-up device node;
 #   - the updater (frontend/ps5_update.cpp, tests/update): a check, a download and an install
 #     over a made-up GitHub, developer builds, the files a new version dropped;
 #   - the memory card held in memory (frontend/ps5_card_image.h): random saves on the image and
@@ -89,10 +92,32 @@ echo "== frame generation's figures (frontend/ps5_pacing.h, FrameGenFigures)"
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/pacing/framegen_figures_test.cpp" -o "$work/framegen_figures_test"
 "$work/framegen_figures_test" || status=1
 
+echo "== frame generation's Steady 30 (frontend/ps5_framegen_pacer.h)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/pacing/steady30_test.cpp" -o "$work/steady30_test"
+"$work/steady30_test" || status=1
+
+echo "== a picture's size from its header, huge ones refused before decoding (frontend/ps5_image_header.h)"
+mkdir -p "$work/image"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/image/image_header_test.cpp" -o "$work/image_header_test"
+"$work/image_header_test" "$work/image" || status=1
+
 echo "== PlayStation Move light gun (Move Management's loopback stream, a stand-in producer)"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -pthread -I "$frontend" "$tests/move/move_test.cpp" -o "$work/move_test"
 "$work/move_test" || status=1
+
+echo "== the GunCon 2's steady motion aim, the sticks' curve, R2's click (a made-up controller turned)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/aim/aim_test.cpp" -o "$work/aim_test"
+"$work/aim_test" || status=1
+
+echo "== USB pads through ugen nodes (a made-up FreeBSD USB stack)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -pthread -I "$frontend" "$tests/usbpad/ugen_test.cpp" "$frontend/ps5_usbpad.cpp" \
+	-o "$work/ugen_test"
+"$work/ugen_test" 2> >(grep -v '^usb pads:' >&2) || status=1
 
 echo "== profile folding"
 # shellcheck disable=SC2086
@@ -195,11 +220,64 @@ c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/vfs_stall_t
     -o "$work/vfs_stall_test"
 "$work/vfs_stall_test" || status=1
 
+echo "== network shares set up on the console, the sockets helper, and the name server test"
+# frontend/ps5_shares.cpp without the layer (PS5_SHARES_HOST_TEST); vfs/ps5_socket.h's non-blocking
+# sockets and port check on 127.0.0.1; ps5_net.cpp's name server test and its public DNS for a name
+# the console's name server answers 0.0.0.0, against a made-up name server (tests/net).
+mkdir -p "$work/net-shares"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -DPS5_SHARES_HOST_TEST -I "$frontend" "$tests/net/shares_test.cpp" \
+    "$frontend/ps5_shares.cpp" -o "$work/shares_test"
+"$work/shares_test" "$work/net-shares" || status=1
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/net/dns_test.cpp" "$frontend/ps5_net.cpp" -lpthread \
+    -o "$work/dns_test"
+"$work/dns_test" > "$work/dns_test.log" || { cat "$work/dns_test.log"; status=1; }
+tail -1 "$work/dns_test.log"
+
 echo "== the boot log kept in memory"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/logs/memory_log_test.cpp" "$frontend/ps5_logs.cpp" \
     "$frontend/ps5_backup.cpp" "$frontend/vfs/ps5_vfs.cpp" -lpthread -o "$work/memory_log_test"
 "$work/memory_log_test" "$work" || status=1
+
+echo "== backups that meet a folder they cannot read (frontend/ps5_backup.cpp)"
+# Read errors made at the link (opendir, readdir and stat wrapped): the backup fails and the one
+# before it is kept (tests/backup/backup_errors_test.cpp).
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/backup/backup_errors_test.cpp" "$frontend/ps5_backup.cpp" \
+    "$frontend/vfs/ps5_vfs.cpp" -lpthread -Wl,--wrap=opendir,--wrap=readdir,--wrap=stat -o "$work/backup_errors_test"
+"$work/backup_errors_test" "$work/backup-errors" || status=1
+
+echo "== the elevation helper asked again for a few seconds (ps5/elevation/elevation.cpp)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$ps5/elevation" "$tests/elevation/elevation_retry_test.cpp" \
+    "$ps5/elevation/elevation.cpp" -o "$work/elevation_retry_test"
+"$work/elevation_retry_test" || status=1
+
+echo "== launch arguments (frontend/ps5_launch.h: --rom, --exit-after-game)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/launch/launch_test.cpp" -o "$work/launch_test"
+"$work/launch_test" || status=1
+
+echo "== the console's trophy notifications (frontend/ps5_notify.cpp, a stand-in payload loader)"
+mkdir -p "$work/notify"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -pthread -DCRUX2_NOTIFY_TEST -I "$frontend" "$tests/notify/notify_test.cpp" \
+    "$frontend/ps5_notify.cpp" -o "$work/notify_test"
+"$work/notify_test" "$work/notify" 2> "$work/notify_test.log" || { cat "$work/notify_test.log"; status=1; }
+
+echo "== recommended settings per game (frontend/ps5_recommend.cpp, ps5/recommended.ini)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -DCRUX2_FIXES_TEST -DCRUX2_RECOMMEND_TEST -I "$frontend" \
+    "$tests/recommend/recommend_test.cpp" "$frontend/ps5_recommend.cpp" "$frontend/ps5_fixes_fetch.cpp" -o "$work/recommend_test"
+"$work/recommend_test" "$work/recommend" "$ps5/recommended.ini" 2> "$work/recommend_test.log" ||
+    { cat "$work/recommend_test.log"; status=1; }
+
+echo "== Crux2's own screenshots (frontend/ps5_shots.h)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/shots/shots_test.cpp" -o "$work/shots_test"
+"$work/shots_test" || status=1
 
 echo "== game fixes from GitHub"
 # The list fetched, kept, refused, withdrawn and not reached (frontend/ps5_fixes_fetch.cpp), over a

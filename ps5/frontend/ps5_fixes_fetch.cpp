@@ -309,6 +309,11 @@ std::string Sha256Hex(const void* data, size_t size)
 	return sha.Hex();
 }
 
+bool WriteOverSafely(const std::string& path, const void* data, size_t size)
+{
+	return WriteOver(path, data, size);
+}
+
 bool SafePath(const std::string& path)
 {
 	if (path.empty() || path.size() > 160)

@@ -340,6 +340,9 @@ cp "$ca_bundle" "$app/resources/cacert.pem"
 
 # USB drives: the helper the title sends to the payload loader (tools/build-elevator.sh).
 cp "$(bash "$ps5/tools/build-elevator.sh")" "$app/sandbox-elevator.elf"
+# Achievement pop-ups: the relay sent through the payload loader when the title cannot send the
+# console's notification itself (ps5/elevation/notify-relay, tools/build-notify-relay.sh).
+cp "$(bash "$ps5/tools/build-notify-relay.sh")" "$app/notify-relay.elf"
 
 # What a user fills. (network.cfg is not among them: the title writes its template on the first
 # run, so copying a newer build over the folder never replaces the shares a user entered.)

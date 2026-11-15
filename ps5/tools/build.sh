@@ -199,7 +199,7 @@ digest=$( {
     echo "$pcsx2_revision"
     git -C "$root/vendor/pcsx2" diff HEAD | sha256sum
     (cd "$ps5" && { find cmake common elevation frontend package pgs src sce_sys patches -type f -print0
-        printf '%s\0' tools/build-parallel-gs.sh tools/build.sh tools/build-deps.sh tools/build-elevator.sh tools/build-profile-runtime.sh tools/link-title.sh tools/make-symbols.py tools/setup-sdk.sh tools/fetch-pcsx2.sh
+        printf '%s\0' tools/build-parallel-gs.sh tools/build.sh tools/build-deps.sh tools/build-elevator.sh tools/build-notify-relay.sh tools/build-profile-runtime.sh tools/link-title.sh tools/make-symbols.py tools/setup-sdk.sh tools/fetch-pcsx2.sh
         } | LC_ALL=C sort -z | xargs -0 sha256sum)
     echo "$sdk_revision $vulkan_revision $archive_digest"
     sha256sum "$PS5PX_PGS_OBJECT" | cut -d ' ' -f 1

@@ -124,7 +124,21 @@ namespace PS5Net
 	/// console's resolver is not known to take several at once), answers are kept for a minute,
 	/// and a game's repeated question while the first is still being asked gets the same answer.
 	/// Returns 0, or getaddrinfo's error code.
+	/// (A name the console's own name server answers with 0.0.0.0, which a name server that
+	/// filters gives for a name it blocks, is asked of public DNS: 1.1.1.1, then 8.8.8.8.)
 	int Resolve(const char* name, std::uint8_t address[4]);
+
+	/// One question for a name to a name server ("45.7.228.197"), asked up to three times while
+	/// nothing answers (0.6 s each), for Settings > Network's test. Blocks for up to about six
+	/// seconds. From Porpoise (GPL-3.0-or-later).
+	struct NameServerTest
+	{
+		int result = -1; ///< 1: it gave an address; 0: it answered without one; -1: no answer
+		int ms = 0; ///< how long it took
+		std::string address; ///< the address it gave
+		std::string why; ///< for 0 and -1: what it said ("no such name"), or what went wrong
+	};
+	NameServerTest TestNameServer(const std::string& server, const std::string& name);
 
 	// ---- for the PC tests ---------------------------------------------------------------------
 
@@ -154,6 +168,11 @@ namespace PS5Net
 		};
 
 		void SetProbes(const Probes& probes);
+
+		/// The port name servers are asked on (53), and the public ones asked when the console's
+		/// answers 0.0.0.0 (1.1.1.1 and 8.8.8.8).
+		void SetNameServerPort(std::uint16_t port);
+		void SetPublicNameServers(const std::vector<std::string>& servers);
 
 		/// Forgets kept name answers and the status (between tests).
 		void Reset();

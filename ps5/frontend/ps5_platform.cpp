@@ -548,8 +548,9 @@ void PS5Platform::EarlyInit()
   if (!s_wants_usb)
     ps5px_log("USB drives: off ([PS5] USBDrives in inis/PCSX2.ini, or usb-off.txt)");
   else
-    ps5px_log("USB drives: sandbox elevation %s (status %u)%s", ElevationStatusText(s_elevation_status),
-              static_cast<unsigned>(s_elevation_status), s_elevated ? "" : "; continuing inside the sandbox");
+    ps5px_log("USB drives: sandbox elevation %s (status %u, %d connection attempt(s) to port 9021)%s",
+              ElevationStatusText(s_elevation_status), static_cast<unsigned>(s_elevation_status), elevation::attempts(),
+              s_elevated ? "" : "; continuing inside the sandbox");
 
   if (!found)
   {

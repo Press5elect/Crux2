@@ -78,3 +78,14 @@ item is done or something new is learned; delete what no longer applies.
 - `PS5PX_PGO_SPLIT` stays off: measured worse on the console (2026-10-12).
 - The RSQRT.S negative-zero change was not made: a console capture showed the existing behaviour
   was right.
+
+## Found while integrating the Porpoise ports
+
+- `ps5/tests/ps2ftp/run-ps2ftp-tests.sh` (not part of run-host-tests.sh) fails 4 of 13 checks on the
+  PC, the same before and after the networking changes: not looked into.
+- Before the Light gun choice, nothing in the interface plugged a GunCon 2 in, and
+  `PS5InputSource::SetGunCon2Defaults` had no caller: the light gun worked only through a hand-edited
+  ini. The choice now does both; check on the console that a light-gun game sees the gun.
+- The ugen code (raw USB) comes from Porpoise's open pull requests (pr36, pr37), not its main branch;
+  the notices entry names main's revision.
+

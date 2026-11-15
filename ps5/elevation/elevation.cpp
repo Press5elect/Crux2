@@ -34,7 +34,17 @@ extern "C"
     int sceNetSetsockopt(int socket, int level, int option, const void *value, std::uint32_t size);
     int sceNetSocket(const char *name, int domain, int type, int protocol);
     int sceNetSocketClose(int socket);
+    int sceKernelUsleep(unsigned int microseconds);
 }
+
+// From Porpoise 8452ecb and 69f569f (GPL-3.0-or-later): the payload loader may not be listening yet
+// the instant the title starts (a cold start from the home screen, a loader still coming up), so a
+// connection that is refused is tried again, every quarter of a second for four seconds, before the
+// title gives up and stays in its sandbox. Only the connection is tried again: once the helper has
+// been sent, its answer is final.
+constexpr int connect_tries = 16;
+constexpr unsigned int connect_pause_us = 250'000;
+int s_attempts = 0;
 
 bool send_all(int socket, const void *data, std::size_t size) noexcept
 {
@@ -79,7 +89,7 @@ elevation::Status exchange(int socket, const elevation::wire::Message &request) 
     return reply.status;
 }
 
-elevation::Status submit(int socket, int helper, const elevation::wire::Message &request) noexcept
+elevation::Status submit(int socket, int helper, const elevation::wire::Message &request, bool *connected) noexcept
 {
     using elevation::Status;
     // SceNet uses integer microseconds and its own timeout options, not BSD timeval.
@@ -99,6 +109,7 @@ elevation::Status submit(int socket, int helper, const elevation::wire::Message 
                                 {0}};
     if (sceNetConnect(socket, &address, sizeof(address)) < 0)
         return Status::transport_error;
+    *connected = true;
 
     std::array<std::uint8_t, 4096> buffer{};
     for (;;)
@@ -127,10 +138,25 @@ elevation::Status elevation::request(Capability capability, const char *helper_p
     const int helper = sceKernelOpen(helper_path, O_RDONLY, 0);
     if (helper < 0)
         return Status::unavailable;
-    const int socket = sceNetSocket("sandbox_elevator", 2, 1, 6);
-    const auto result = socket < 0 ? Status::transport_error : submit(socket, helper, message);
-    if (socket >= 0)
+    auto result = Status::transport_error;
+    for (s_attempts = 1;; ++s_attempts)
+    {
+        // (A socket whose connection was refused is not used again: each try has a new one.)
+        const int socket = sceNetSocket("sandbox_elevator", 2, 1, 6);
+        if (socket < 0)
+            break;
+        bool connected = false;
+        result = submit(socket, helper, message, &connected);
         (void)sceNetSocketClose(socket);
+        if (connected || s_attempts >= connect_tries)
+            break;
+        (void)sceKernelUsleep(connect_pause_us);
+    }
     (void)sceKernelClose(helper);
     return result;
+}
+
+int elevation::attempts() noexcept
+{
+    return s_attempts;
 }

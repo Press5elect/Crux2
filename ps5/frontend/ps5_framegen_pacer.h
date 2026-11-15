@@ -35,15 +35,46 @@ struct Pacer
 	uint32_t stays[HISTORY] = {}; ///< the last pictures' stays, newest at `next - 1`
 	uint32_t kept = 0, next = 0;
 
+	/// Steady 30 (frame generation's settings, off by default). From Porpoise 14fdbae
+	/// (GPL-3.0-or-later): the game's pictures are taken two vsyncs apart at the most often, the
+	/// newest then, so a game that swings between 30 and 60 a second is shown at an even 30 that
+	/// frame generation makes 60 (or 120), instead of going between made and its own pictures.
+	/// A game at 30 or slower is taken as it comes. The caller sets it; Reset leaves it alone.
+	bool steady30 = false;
+	bool held = false; ///< Steady 30: a new picture came that is not taken yet
+
 	void Reset()
 	{
 		period = 1;
 		since = 0;
 		gap = 0;
 		kept = next = 0;
+		held = false;
 	}
 
-	/// A vsync of the game; `fresh`: it brought a new picture.
+	/// A vsync of the game; `fresh`: it brought a new picture. Returns whether a new picture is
+	/// taken at this vsync (the newest the game has): `fresh` itself, unless Steady 30 holds it
+	/// back to the next vsync or lets a newer one take its place. The caller hands frame
+	/// generation the game's picture only when this is true.
+	bool Vsync(bool fresh)
+	{
+		if (steady30)
+		{
+			held = held || fresh;
+			// (gap 0: the first vsync after a reset, nothing to keep apart from)
+			fresh = held && (gap == 0 || gap >= 2);
+			if (fresh)
+				held = false;
+		}
+		else
+		{
+			held = false;
+		}
+		Advance(fresh);
+		return fresh;
+	}
+
+	/// The vsync as the rate is told by: `fresh`, a picture taken.
 	///
 	/// Up to v1.0.17 the period was the stay of the picture before alone, so a game at 30 a second
 	/// that once showed a picture for one vsync or for three (which they do, loading or dropping a
@@ -54,7 +85,7 @@ struct Pacer
 	/// change how the ones after it are made, and a game that hands pictures over unevenly (one, then
 	/// three vsyncs, a console log of a game below full speed showed it) is still taken at its real
 	/// rate, two, not at one (which made one picture where three were wanted at 120 Hz).
-	void Vsync(bool fresh)
+	void Advance(bool fresh)
 	{
 		if (fresh)
 		{

@@ -35,7 +35,36 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   with a count on the screen, and a read stuck for 2 s is said on the screen.
 - Changed: an exit, a restart or a state load waits for the writes still under way, with a bar.
 - Changed: settings are written when the menus close, and at a game's start, quit and crash.
-- (Work in progress: more items are being added; the lead fills them in.)
+- Added: a light gun choice (Settings > Controllers > Light gun): one GunCon 2 in USB port 1, or two
+  in ports 1 and 2, with their buttons set up. Before, a GunCon 2 could only be plugged in by
+  editing the settings file.
+- Added: steady motion aim for the GunCon 2 (from Porpoise): the same pointing gives the same place,
+  no drift, R3 held a moment recentres, the screen measured by pointing at two corners, a second
+  gun aimed by player 2's controller. The aim as before is a choice ("Like a mouse").
+- Added: R2 clicks like a trigger for the light gun (Off / Light / Firm), and stick response curves
+  per stick (Linear, as before, by default).
+- Added: USB pads through the console's raw USB devices when its USB library can't be used.
+- Added: network shares set up on the console again (Settings > Folders): servers found on the
+  network (SMB and NFS), a server's shares or exports listed, an address on a number pad, and a
+  test that says what went wrong. SMB checks the server's port before connecting, and the shares'
+  sockets now really don't block on the PS5.
+- Added: a test for the name server set by hand, and public DNS asked when the console's answers
+  0.0.0.0. A UDP port the console refuses a game is bound lower.
+- Added: achievements unlocked as the console's trophy pop-ups, with the trophy sound (on by
+  default; PCSX2's own notice when the console's can't be shown).
+- Added: Crux2's own screenshots with Options + Square (the game's picture, no menus), in snaps/;
+  the first becomes the game's picture of play when it has none.
+- Added: launch arguments `--rom <file>` and `--exit-after-game`.
+- Added: settings tested on a PS5 for a game, downloaded from the repository once a day (none yet),
+  in the game's own options.
+- Added: Steady 30 for frame generation (off), and a colour filter on the game's picture for colour
+  blindness (off).
+- Changed: texture packs are held within a memory budget (at most 2 GiB); the least recently used
+  textures are let go and read again when needed.
+- Fixed: a backup that could not read a file was written as complete, and with "replace older"
+  the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
+  are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't
+  answer at once.
 
 ## v1.0.18 (2026-10-31)
 

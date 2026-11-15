@@ -77,7 +77,7 @@ Everything is in the title's folder, `/data/homebrew/PPSA99249/` (which the titl
 | `games/` | Your games |
 | `memcards/` | Memory cards (PCSX2 makes two 8 MB cards the first time a game starts; with "A memory card for each game", one named by each game's serial) |
 | `sstates/` | Save states (`<serial> (<CRC>).auto.p2s`: the one saved by itself; `.undo.p2s`: the game before the last load) |
-| `snaps/` | GS dumps and the last frame of a test run (screenshots are the console's own: the Create button) |
+| `snaps/` | GS dumps, the last frame of a test run, and Crux2's screenshots (Options + Square in a game, in `snaps/<serial>/`; the console's Create button still works too) |
 | `covers/` | Cover pictures |
 | `pictures/` | Each game's title screen and a picture of it being played (`<serial>.title.png`, `<serial>.snap.png`), fetched from libretro's collection |
 | `about/` | What is known of each disc, looked up on Wikipedia and Wikidata |

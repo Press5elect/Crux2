@@ -995,6 +995,10 @@ Page graphicsPage(int layer, bool forGame)
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(fg(toggle("No frame generation during videos", "Turns frame generation off while the game plays a video.", GS, "FrameGenerationSkipVideos", true)));
+	rows.push_back(fg(toggle("Steady 30",
+		"Takes the game's pictures two vsyncs apart at the most, so a game that goes between 30 and 60 a second is shown at an even 30 "
+		"that frame generation makes 60 (120 at 120 Hz). For games that cannot hold 60.",
+		GS, "FrameGenerationSteady30", false)));
 	{
 		Option o = toggle("Show the movement",
 			"For checking frame generation, not for playing: the made frames show what AMD FSR 3 optical flow decided for "

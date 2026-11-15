@@ -66,6 +66,13 @@ int ps5vfs_mount_ftp(const char* mount_point, unsigned port, const char* remote_
  * 1000 when the file has none); user and password are not used for NFS. # and ; start comments.
  * Returns the number of shares mounted, or -1 when the file cannot be read. */
 int ps5vfs_load_network_config(const char* config_path);
+/* (A "#@ name = ..." line just above a path line names that share's mount, /smb/<name made
+ * safe>, as Settings > Folders writes it; a comment to anything else.) */
+
+/* A mount point taken away ("/smb/nas"): its backend is kept alive (a read under way ends), for
+ * the shares the settings change. Returns 0, or -1 when there is no such mount. (Crux2 v1.0.19,
+ * from OGBox 0.0.3.) */
+int ps5vfs_unmount(const char* mount_point);
 
 /* The mount points, one per call: index 0.. until NULL. */
 const char* ps5vfs_mount_point(unsigned index);
@@ -169,6 +176,27 @@ void ps5vfs_wake_mounts(std::vector<std::string> preferred);
  * read; *file is the file). For the tests. */
 std::string ps5vfs_wake_file(const std::string& mount_point, const std::vector<std::string>& preferred);
 size_t ps5vfs_wake_one(const std::string& mount_point, const std::vector<std::string>& preferred, std::string* file);
+
+/* The network.cfg ps5vfs_load_network_config read ("" none yet), and for each of its path lines
+ * in their order the mount point it got ("" when it was not mounted): so the shares the settings
+ * show are the mounts made at the start (ps5_shares.cpp). */
+std::string ps5vfs_network_config_path();
+std::vector<std::string> ps5vfs_network_config_mounts();
+
+#include "ps5_share_problem.h"
+
+/* A share tried, not mounted: connected (with the port check first) and its folder listed.
+ * url as ps5vfs_mount_smb or ps5vfs_mount_nfs take it. detail: what the layer and the library
+ * wrote down meanwhile (for the log); entries: the names at the share's top. Blocks for up to
+ * about 20 s: call it from a thread of its own. (Porpoise bc835d2's test.) */
+PS5SharesProblem::Problem ps5vfs_test_share(const std::string& url, std::string* detail, size_t* entries);
+
+/* The shares of an SMB server ("192.168.1.10" or "host:port") that hold files (no IPC$, no
+ * hidden "name$" ones), sorted; and the folders an NFS server exports (its MOUNT service). A
+ * user "" or "guest" asks as a guest. Block for up to about 15 s. (Porpoise bc835d2's enumerate.) */
+PS5SharesProblem::Problem ps5vfs_list_smb_shares(const std::string& server, const std::string& user, const std::string& password,
+                                                 std::vector<std::string>* shares, std::string* detail);
+PS5SharesProblem::Problem ps5vfs_list_nfs_exports(const std::string& server, std::vector<std::string>* exports, std::string* detail);
 #endif
 
 #endif /* PS5PX_VFS_H */
