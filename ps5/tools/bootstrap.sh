@@ -44,7 +44,9 @@ done
 vulkan=${PS5_VULKAN_DIR:-$parent/PS5_Vulkan}
 # The PS5_Vulkan revision Crux2 is built with (its link recipe, native tool, libc.prx, packaging and
 # the PS5 Mesa revision RADV is built from); check-sources.sh reads it here.
-vulkan_revision=f410e67a0241b3e8edcdbcd2a9b285dfc4a412ed
+# 7f492b4 (2026-11-10): since f410e67, only gpu-broker and Windows Zink work and a RADV smoke test;
+# the link recipe, the native tool, libc.prx, the packaging and the Mesa pin (1ba9874) are as they were.
+vulkan_revision=7f492b4c6f67a4e8c8c67a4272cfeef22abea9cc
 mesa=${PS5_MESA_FORK:-$parent/PS5_Mesa}
 sdk_fork=${PS5_PAYLOAD_SDK_FORK:-$parent/PS5_PayloadSDK}
 problems=0
