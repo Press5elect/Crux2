@@ -71,6 +71,8 @@ settings pages, grouped as PCSX2's settings window groups them), `bp_quick.cpp` 
 their door to PCSX2: it stands in for `FullscreenUI` and adds the PS5 rows to the pages
 (`extraRows("library" | "interface" | "motion" | "output" | "picture" | "saves" | "system" |
 "network" | "controllers")`). `ps5/tests/bigpicture/preview.cpp` runs the same screens on a PC.
+`settings-inventory.json` (every settings row, made from the code) and `settings-text.yaml` (their
+words, and the revamp's areas) are the revamp's records ([`settings-inventory.md`](settings-inventory.md)).
 
 ## The build's output
 

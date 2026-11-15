@@ -440,6 +440,12 @@ const GameInfo& settingsGame();
 bool settingsFocus(const char* page, const char* row = nullptr);
 /// The settings of all games, and of one game, as pages of options (bp_options.cpp).
 std::vector<Page> settingsPages(bool forGame);
+/// The "This game" page the open game's settings begin with (bp_settings.cpp), for the settings
+/// inventory (ps5/tests/bigpicture/inventory).
+Page settingsSummaryPage();
+/// The library's views, by the number [UI] View keeps (bp_library.cpp).
+extern const char* const* const libraryViewNames;
+extern const int LibraryViewCount;
 
 // A game's title without its dump's tags, and the discs of one game (bp_library.cpp).
 std::string cleanTitle(const std::string& name);

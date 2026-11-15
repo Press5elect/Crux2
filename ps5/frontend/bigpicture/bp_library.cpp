@@ -3056,6 +3056,9 @@ void drawDiscs(ImDrawList* dl, Game* focused)
 // lively ("Less" motion): the mark and the name, still.
 } // namespace
 
+const char* const* const libraryViewNames = viewNames;
+const int LibraryViewCount = ViewCount;
+
 // ----------------------------------------------------- what the others ask
 
 int librarySource()

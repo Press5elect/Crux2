@@ -40,12 +40,14 @@ the host memory test. CI has neither, so it skips those two.
 | HDR and debanding | the last passes before the screen (`tests/hdr`) |
 | downsampling and SMAA | `ps5_aa.h`'s decisions; `ps5_aa.glsl`'s passes on lavapipe against double precision, SMAA on staircases (`tests/aa`) |
 | settings lock | `check-settings-lock.py`: no setting read through Host while the settings' lock is held |
+| settings: nothing lost | `bigpicture/inventory/run-inventory-test.sh`: the console's settings rows made on the PC against the baseline and `settings-text.yaml` ([`settings-inventory.md`](settings-inventory.md)) |
 
 ## The interface: `ps5/tests/bigpicture/run-bigpicture-tests.sh`
 
 ```bash
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row changed every way, 2 x 60,000 random steps
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp shots   # a PNG of each screen in /tmp/crux2-bp/shots
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp inventory   # the no-loss test of the settings (settings-inventory.md)
 ```
 
 The first argument is the work folder: give a path outside the repository (a bare `crawl` makes a

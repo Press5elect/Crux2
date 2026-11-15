@@ -42,6 +42,10 @@
 #     on a software Vulkan driver against the maths in double precision;
 #   - the interface's and host's sources: no setting read through Host while the settings' lock
 #     is held (check-settings-lock.py; such a read ends the title);
+#   - the settings' no-loss test (bigpicture/inventory/run-inventory-test.sh): every row of the
+#     settings made by the console's own code (bp_options.cpp, bp_pcsx2.cpp) on the PC, against the
+#     baseline settings-inventory.json (no option, layout or skin gone or changed) and against
+#     settings-text.yaml (every row has its words there, no stale one);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
 #     reads from a real Samba and a real FTP server when they are installed).
 #
@@ -319,6 +323,14 @@ bash "$tests/aa/run-aa-tests.sh" "$work/aa" || status=1
 
 echo "== no setting read through Host while the settings' lock is held"
 python3 "$tests/check-settings-lock.py" || status=1
+
+echo "== the settings: nothing lost (the inventory against its baseline, settings-text.yaml complete)"
+# clang++ whatever CXX is (PCSX2's headers, as the interface's tests build them); needs vendor/pcsx2.
+if command -v clang++ > /dev/null && [[ -f $pcsx2/pcsx2/Host.cpp ]]; then
+    bash "$tests/bigpicture/inventory/run-inventory-test.sh" "$work/inventory" || status=1
+else
+    echo "skipped: no clang++ or no vendor/pcsx2 (ps5/tools/fetch-pcsx2.sh)"
+fi
 
 [[ $status == 0 ]] && echo "all host tests passed" || echo "host tests FAILED"
 exit $status

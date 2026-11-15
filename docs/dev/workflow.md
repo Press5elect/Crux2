@@ -24,7 +24,9 @@ These are the owner's standing rules. They hold for every session and every agen
    releases unless the owner asks. **Never publish a release without being asked.**
 4. **No game titles** in commit messages, release notes, changelog entries or any published text:
    serials and IDs only (`SLUS-12345`). **No model identifiers** in anything pushed (commits, notes,
-   comments, docs). Chat with the owner may name games. (Open question for the owner: the
+   comments, docs). Chat with the owner may name games. Exception (the owner's decision of
+   2026-11-15): a setting's description taken word for word from PCSX2 keeps the games it names, in
+   the code, `settings-text.yaml` and the inventory. (Open question for the owner: the
    attribution trailers sessions are told to add, and that past commits carry, name a model.)
 5. **PCSX2 is a pinned revision plus one patch.** `vendor/pcsx2` is gitignored: it is PCSX2 at the
    revision in `ps5/tools/fetch-pcsx2.sh`, with `ps5/patches/pcsx2/ps5.patch` applied. Edit the
@@ -100,4 +102,5 @@ These are the owner's standing rules. They hold for every session and every agen
 | `ps5/tools/deploy.sh`, `ps5/tools/run.sh [game]` | Upload what changed over FTP; a test run on the console with klog ([`debugging.md`](debugging.md#test-runs)) |
 | `ps5/tools/merge-profiles.sh` | PGO profiles merged ([`building.md`](building.md#profile-guided-builds)) |
 | `ps5/tests/run-host-tests.sh` | The host tests (CI runs them) |
-| `ps5/tests/bigpicture/run-bigpicture-tests.sh <dir> [crawl\|shots\|all]` | The interface on the PC |
+| `ps5/tests/bigpicture/run-bigpicture-tests.sh <dir> [crawl\|shots\|inventory\|all]` | The interface on the PC; `inventory`: no setting lost |
+| `ps5/tools/settings-inventory.py check\|bless\|show`, `ps5/tools/settings-text.py make\|check\|bake` | The settings inventory and its baseline; `settings-text.yaml` ([`settings-inventory.md`](settings-inventory.md)) |

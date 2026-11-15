@@ -634,6 +634,11 @@ void leaveSettings()
 
 } // namespace
 
+Page settingsSummaryPage()
+{
+	return summaryPage();
+}
+
 bool settingsFocus(const char* page, const char* row)
 {
 	if (st.cats.empty() || st.madeFor != be->pagesGeneration() || st.madeLevel != options().level)

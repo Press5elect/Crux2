@@ -4,19 +4,21 @@
 # Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 # Crux2 - the interface on a PC (ps5/tests/bigpicture/preview.cpp).
 #
-#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|all]
+#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|all]
 #
 # Builds the interface's screens with PCSX2's own ImGui (and FreeType, as the title has it) and
 # the preview's Backend. "crawl" (the default): with the address and undefined-behaviour
 # sanitizers, every settings row changed in every way, then 60,000 steps of random buttons across
 # all screens, twice with different seeds. "shots": optimised, a picture of each screen (PNG, in
-# <work folder>/shots), which is what one looks at after a change to a screen. "all": both.
+# <work folder>/shots), which is what one looks at after a change to a screen. "inventory": the
+# no-loss test of the settings (inventory/run-inventory-test.sh: every option of the baseline still
+# there, settings-text.yaml complete). "all": the three.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ps5=$(cd "$here/../.." && pwd)
 root=$(cd "$ps5/.." && pwd)
-work=${1:?usage: run-bigpicture-tests.sh <work folder> [crawl|shots|all]}
+work=${1:?usage: run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|all]}
 what=${2:-crawl}
 imgui="$root/vendor/pcsx2/3rdparty/imgui"
 front="$ps5/frontend/bigpicture"
@@ -48,6 +50,11 @@ build() { # build NAME FLAGS...
 }
 
 status=0
+if [[ $what == inventory || $what == all ]]; then
+    echo "== the settings inventory: nothing lost"
+    bash "$here/inventory/run-inventory-test.sh" "$work/inventory" || status=1
+    [[ $what == inventory ]] && exit $status
+fi
 if [[ $what == crawl || $what == all ]]; then
     echo "== the interface, with the sanitizers"
     build asan -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer

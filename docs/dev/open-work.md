@@ -65,9 +65,17 @@ item is done or something new is learned; delete what no longer applies.
   constant Z, and LRPS2's native taps for an indexed read of a scaled target. The rest of that work
   is in history (2bf2d08 and before) and would have to be brought back.
 - From the reverted v1.0.19 work: Settings > Debug > Logs, network shares in Settings > Folders,
-  the boot log writer thread, the safety save in memory, the USB headset, CJK names,
-  `settings-text.yaml`: all out of the tree now. b075fe1's boot log in memory overlaps with the
+  the boot log writer thread, the safety save in memory, the USB headset, CJK names: all out of
+  the tree now (`settings-text.yaml` is back, made again from the code: the interface revamp's
+  phase 1, [`settings-inventory.md`](settings-inventory.md)). b075fe1's boot log in memory overlaps with the
   v1.0.19 log settings; reconcile before restoring either.
+- The interface revamp: phase 1 (the inventory, the no-loss test, `settings-text.yaml`) is in;
+  phase 2 (Crux2's descriptions rewritten in PCSX2's voice, PCSX2's taken word for word) and phase 3
+  (the eight areas on the screen, the interface reading `bp_settings_text.h`) are not. 60 rows' area
+  or section is a guess (`ps5/tools/settings-text.py doubtful`), for the owner. About 18 of today's
+  descriptions (game fixes and a few graphics fixes, copied from PCSX2) name games; phase 2 should
+  word them without. The inventory does not see rows of states its fakes do not make (a typed cheat,
+  saved controller profiles, backups on the drive, multitap ports, a share being changed).
 - Porpoise ports in progress (networking, input/aim, texture-pack memory cap, steady 30,
   colour-blind filter, trophy pop-ups, launch arguments, recommended settings, backups,
   screenshots): see the Unreleased changelog as they land.
