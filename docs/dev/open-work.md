@@ -63,7 +63,8 @@ item is done or something new is learned; delete what no longer applies.
   ini. The choice now does both; check on the console that a light-gun game sees the gun.
 - The ugen code (raw USB) comes from Porpoise's open pull requests (pr36, pr37), not its main branch;
   the notices entry names main's revision.
-- The recomp kit's three runner files (`crux2recomp/ps5/runner/`) come from kit v1.6.4, older than the
+- The recomp kit's three runner files (PS5_Crux2Recomp's `ps5/runner/`, pushed 2026-11-15 on its branch
+  `claude/ecstatic-goldberg-sc4qgv`) come from kit v1.6.4, older than the
   runner and Vendetta patches in `crux2recomp/ps5/patches/ps2recomp/` (rebased for PS2Recomp e563698).
   The kit is made and its tools start, but no module has been made with it since: check one game on
   Windows and Linux before a release ships it.
