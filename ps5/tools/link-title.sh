@@ -102,7 +102,7 @@ done < <(find "$work/3rdparty" -name '*.a' | sort)
 # define every function twice.)
 port_archives=()
 for name in archive smb2 nfs curl ssl crypto psl plutosvg plutovg freetype brotlidec brotlicommon png16 webpdemux webpmux webp \
-        sharpyuv jpeg shaderc shaderc_util glslang SPIRV SPIRV-Tools-opt SPIRV-Tools ryml c4core lz4 zstd bz2; do
+        sharpyuv jpeg shaderc shaderc_util glslang SPIRV SPIRV-Tools-opt SPIRV-Tools ryml c4core lz4 zstd bz2 vpx; do
     [[ -f $ports/lib/lib$name.a ]] || { echo "missing: $ports/lib/lib$name.a (ps5/tools/build-deps.sh)" >&2; exit 2; }
     port_archives+=("$ports/lib/lib$name.a")
 done
@@ -319,6 +319,10 @@ rm -rf "$app/resources"
 cp -r "$root/vendor/pcsx2/bin/resources" "$app/resources"
 cp -r "$ps5/package/resources/." "$app/resources/"
 rm -rf "$app/resources/shaders/dx11" "$app/resources/shaders/opengl"
+# The startup video and its sound (frontend/ps5_intro.cpp; made by ps5/art/intro). Optional: a title
+# folder without them starts with the start-up animation, so they are not in the resource manifest.
+mkdir -p "$app/resources/intro"
+cp "$ps5/art/intro/intro.ivf" "$ps5/art/intro/intro.ogg" "$app/resources/intro/"
 # PCSX2's collection of game patches (widescreen, no-interlacing) is not packaged: its
 # repository states no licence, so a package that may be passed on leaves it out (README, "Game
 # patches": anyone adds it to resources/ themselves). WITH_PATCHES=1 packages it, for a folder

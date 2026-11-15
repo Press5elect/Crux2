@@ -1012,6 +1012,8 @@ namespace
 		bool startup_began = false;
 		std::chrono::steady_clock::time_point startup_at;
 		bool startup_given = false;
+		// The startup video plays in the start-up sound's place (IntroComing).
+		bool intro = false;
 
 		// The music: what the reading thread is asked to do.
 		bool background_enabled = true;
@@ -1091,7 +1093,11 @@ namespace
 		const bool yours = make(own, "startup.wav");
 		const bool have = yours || make(builtin, "the start-up sound");
 		const std::lock_guard<std::mutex> lock(s.mutex);
-		if (have)
+		if (have && s.intro)
+		{
+			UIAUDIO_LOG("start-up sound ready (%.2f s), not played: the startup video's plays in its place", made.seconds);
+		}
+		else if (have)
 		{
 			UIAUDIO_LOG("start-up sound ready: %.2f s, peak %.2f", made.seconds, static_cast<double>(made.peak));
 			s.mixer.setStartup(std::move(stereo));
@@ -1401,6 +1407,45 @@ void PlayStartup()
 	State& s = S();
 	{
 		const std::lock_guard<std::mutex> lock(s.mutex);
+		if (s.intro)
+			return; // (the startup video's sound is played by PlayIntro)
+		s.startup_began = true;
+		s.startup_at = std::chrono::steady_clock::now();
+		s.startup_given = true;
+		s.mixer.playStartup(0.0);
+	}
+	s.wake.notify_all();
+}
+
+void IntroComing()
+{
+	State& s = S();
+	const std::lock_guard<std::mutex> lock(s.mutex);
+	if (!s.intro)
+	{
+		s.intro = true;
+		s.mixer.setStartup(nullptr);
+		UIAUDIO_LOG("the startup video plays: its sound in the start-up sound's place");
+	}
+}
+
+void SetIntroSound(std::shared_ptr<const std::vector<s16>> stereo)
+{
+	State& s = S();
+	{
+		const std::lock_guard<std::mutex> lock(s.mutex);
+		s.intro = true;
+		s.mixer.setStartup(std::move(stereo));
+	}
+	s.wake.notify_all();
+}
+
+void PlayIntro()
+{
+	State& s = S();
+	{
+		const std::lock_guard<std::mutex> lock(s.mutex);
+		s.intro = true;
 		s.startup_began = true;
 		s.startup_at = std::chrono::steady_clock::now();
 		s.startup_given = true;

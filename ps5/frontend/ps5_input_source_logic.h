@@ -5,8 +5,8 @@
 //
 // Everything here is plain arithmetic over what a controller reported and when, so the PC tests
 // (ps5/tests/input) hold it to account: the held combination that asks to leave the game, the
-// double buzz that confirms it, the pressure a face button reports when R2 sets it, and the
-// pointer the motion sensor aims with.
+// double buzz that confirms it, the pressure a face button reports when R2 sets it, the
+// pointer the motion sensor aims with, and the minimum hold that keeps a quick tap.
 
 #pragma once
 
@@ -258,4 +258,56 @@ namespace PS5InputLogic
 		const float dt = static_cast<float>(current_us - previous_us) * 1e-6f;
 		return (dt > 0.1f) ? fallback_s : dt;
 	}
+
+	// ---------------------------------------------------------------- quick taps
+
+	/// A press shorter than a frame held long enough for the game to see it. The pad service
+	/// keeps every reading since the last poll, and the source passes each one to InputManager in
+	/// order; the game reads the pad's state once in its frame, so a press that went down and up
+	/// between two of its reads was seen by nobody. Each button the game is given stays down for
+	/// at least the minimum hold from the reading it went down in; a release that comes during
+	/// the hold is given when the hold ends (Update with what is held now, also on a poll with
+	/// no new readings). Buttons held longer are let go at once, as before.
+	class TapHold
+	{
+	public:
+		static constexpr uint64_t MIN_HOLD_US = 50000; // three frames of a game at 60, one and a half at 30
+
+		/// down: the buttons held in this reading (bit n: button n). min_hold_us: 0 gives them
+		/// as they are (no game running). The buttons the game gets.
+		uint32_t Update(uint32_t down, uint64_t now_us, uint64_t min_hold_us = MIN_HOLD_US)
+		{
+			const uint32_t went_down = down & ~m_down;
+			uint32_t out = down;
+			for (uint32_t bit = 0; bit < 32; bit++)
+			{
+				const uint32_t mask = 1u << bit;
+				if (went_down & mask)
+					m_since_us[bit] = now_us;
+				else if ((m_out & mask) && !(down & mask) && now_us - m_since_us[bit] < min_hold_us)
+					out |= mask; // let go too soon: still down for the game
+			}
+			m_down = down;
+			m_out = out;
+			return out;
+		}
+
+		/// The same buttons as the last reading, later: what the game gets now.
+		uint32_t Tick(uint64_t now_us, uint64_t min_hold_us = MIN_HOLD_US) { return Update(m_down, now_us, min_hold_us); }
+
+		/// What the game was given last.
+		uint32_t Given() const { return m_out; }
+
+		/// Nothing held (the controller went away).
+		void Reset()
+		{
+			m_down = 0;
+			m_out = 0;
+		}
+
+	private:
+		uint32_t m_down = 0; // the last reading's buttons
+		uint32_t m_out = 0; // what the game was given last
+		uint64_t m_since_us[32] = {}; // when each button last went down
+	};
 } // namespace PS5InputLogic

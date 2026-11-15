@@ -27,6 +27,9 @@
 
 #include <algorithm>
 #include <ctime>
+#include <functional>
+#include <list>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <unistd.h>
@@ -63,6 +66,161 @@ namespace
 			   status < 0 ? "no connection (the network, the name or the certificate)" : "the server's answer";
 	}
 } // namespace
+
+namespace PS5Covers
+{
+namespace
+{
+	/// Pictures of libretro's collection asked for several at a time (one at a time, a list of a few
+	/// hundred games took many minutes: each picture is a round trip or two). Each picture goes the
+	/// way it went alone: from the address its first request went to, from the plain host when
+	/// GitHub gives no answer at all (and every picture after it), and at most one link followed (a
+	/// name that stands for another picture). What is done with a picture that came, or did not, is
+	/// the caller's, on its own thread, one at a time.
+	class Pool
+	{
+	public:
+		static constexpr size_t IN_FLIGHT = 3;
+		using Done = std::function<void(s32 status, std::vector<u8>& body)>;
+
+		Pool(HTTPDownloader* http, ProgressCallback* progress, const char* raw, const char* plain, const char* what, bool log_first)
+			: m_http(http), m_progress(progress), m_raw(raw), m_plain(plain), m_base(raw), m_what(what), m_log_first(log_first)
+		{
+			m_http->SetMaxActiveRequests(static_cast<u32>(IN_FLIGHT));
+		}
+		~Pool()
+		{
+			// (Normally nothing is left: the callers wait for every picture. The answers still to
+			// come are written into what is here, so it goes after them.)
+			if (!m_ones.empty())
+				m_http->WaitForAllRequests();
+		}
+
+		/// `folder` is beside the name in the collection (a link is in the same folder).
+		void Start(std::string folder, std::string name, Done done)
+		{
+			std::unique_ptr<One> one = std::make_unique<One>();
+			one->folder = std::move(folder);
+			one->name = std::move(name);
+			one->base = m_base;
+			one->done = std::move(done);
+			Ask(one.get());
+			m_ones.push_back(std::move(one));
+		}
+		size_t Active() const { return m_ones.size(); }
+		bool Full() const { return m_ones.size() >= IN_FLIGHT; }
+		bool FromPlain() const { return m_base == m_plain; }
+
+		/// The answers that came: each picture's next request asked, or its `done` called.
+		void Poll()
+		{
+			m_http->PollRequests();
+			std::vector<std::unique_ptr<One>> arrived;
+			for (auto it = m_ones.begin(); it != m_ones.end();)
+			{
+				if ((*it)->arrived)
+				{
+					arrived.push_back(std::move(*it));
+					it = m_ones.erase(it);
+				}
+				else
+				{
+					++it;
+				}
+			}
+			if (arrived.empty())
+			{
+				usleep(2000);
+				return;
+			}
+			for (std::unique_ptr<One>& one : arrived)
+			{
+				if (Step(one.get()))
+					m_ones.push_back(std::move(one));
+			}
+		}
+
+		/// Until every picture asked for is done.
+		void Drain()
+		{
+			while (!m_ones.empty())
+				Poll();
+		}
+
+	private:
+		struct One
+		{
+			std::string folder, name;
+			const char* base = nullptr;
+			int hop = 0;
+			bool retried = false, arrived = false;
+			s32 status = 0;
+			std::vector<u8> body;
+			Done done;
+		};
+
+		void Ask(One* one)
+		{
+			one->arrived = false;
+			one->status = 0;
+			one->body.clear();
+			m_http->CreateRequest(std::string(one->base) + PS5Cheats::EncodePath(one->folder + one->name),
+				[one](s32 status, const std::string&, HTTPDownloader::Request::Data data) {
+					one->status = status;
+					one->body = std::move(data);
+					one->arrived = true;
+				},
+				m_progress);
+		}
+
+		/// True when the picture asked again (it stays in the pool).
+		bool Step(One* one)
+		{
+			const bool cancelled = m_progress->IsCancelled();
+			if (one->status < 0 && one->base == m_raw && !one->retried && one->status != HTTPDownloader::HTTP_STATUS_CANCELLED && !cancelled)
+			{
+				// GitHub is not to be had: libretro's own server, for this and the rest.
+				if (m_base == m_raw)
+				{
+					ps5px_log("%s: raw.githubusercontent.com: %s; trying thumbnails.libretro.com", m_what, StatusText(one->status));
+					m_base = m_plain;
+				}
+				one->base = m_plain;
+				one->retried = true;
+				Ask(one);
+				return true;
+			}
+			if (!cancelled && m_log_first)
+			{
+				m_log_first = false;
+				ps5px_log("%s: first request: status %d, %zu bytes, from %s", m_what, one->status, one->body.size(),
+					one->base == m_raw ? "raw.githubusercontent.com" : "thumbnails.libretro.com");
+			}
+			const std::string link = (!cancelled && one->status == 200 && one->hop == 0) ? LinkTarget(one->body.data(), one->body.size()) : std::string();
+			if (!link.empty())
+			{
+				one->name = link;
+				one->hop = 1;
+				one->base = m_base;
+				one->retried = false;
+				Ask(one);
+				return true;
+			}
+			one->done(one->status, one->body);
+			return false;
+		}
+
+		HTTPDownloader* m_http;
+		ProgressCallback* m_progress;
+		const char* m_raw;
+		const char* m_plain;
+		const char* m_base;
+		const char* m_what;
+		bool m_log_first;
+		std::list<std::unique_ptr<One>> m_ones;
+	};
+} // namespace
+} // namespace PS5Covers
 
 // ------------------------------------------------------------------------------------- covers
 
@@ -175,95 +333,82 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 	http->SetTimeout(12.0f);
 	FileSystem::WriteStringToFile(running_path.c_str(), "A cover download is running. If this file is still here when Crux2 starts, the download ended the title.\n");
 
-	const char* base = RAW_BASE;
 	int saved = 0, unmatched = 0, skipped = 0, failed = 0, unreachable = 0;
-	bool logged_first = false;
+	bool lost = false;
 	std::string none_new;
 	progress->SetProgressRange(static_cast<u32>(missing.size()));
-	for (size_t i = 0; i < missing.size() && !progress->IsCancelled(); i++)
+	// Three games asked for at a time; what came for each is handled as it comes, as it was when
+	// they were asked for one by one.
+	Pool pool(http.get(), progress, RAW_BASE, PLAIN_BASE, "covers", true);
+	size_t next = 0;
+	while (true)
 	{
-		const Missing& m = missing[i];
-		progress->SetProgressValue(static_cast<u32>(i));
-		const std::string none_line = NoMatchLine(m.serial, m.stem);
-		if (none.count(none_line) != 0)
+		while (!pool.Full() && next < missing.size() && !progress->IsCancelled() && !lost)
 		{
-			skipped++;
-			continue;
-		}
-		Game game;
-		game.file_stem = m.stem;
-		game.title = m.title;
-		game.title_en = m.title_en;
-		game.region = m.region;
-		const Match match = index->Find(game);
-		if (match.index < 0)
-		{
-			unmatched++;
-			none_new += none_line + "\n";
-			continue;
-		}
-
-		std::string name = index->Name(match.index) + ".png";
-		std::vector<u8> body;
-		s32 status = 0;
-		// (At most one link is followed: a name that stands for another picture.)
-		for (int hop = 0; hop < 2; hop++)
-		{
-			status = Get(http.get(), std::string(base) + PS5Cheats::EncodePath(name), &body, progress);
-			if (status < 0 && base == RAW_BASE && status != HTTPDownloader::HTTP_STATUS_CANCELLED && !progress->IsCancelled())
+			const size_t i = next++;
+			const Missing& m = missing[i];
+			progress->SetProgressValue(static_cast<u32>(i));
+			const std::string none_line = NoMatchLine(m.serial, m.stem);
+			if (none.count(none_line) != 0)
 			{
-				// GitHub is not to be had: libretro's own server, for this and the rest.
-				ps5px_log("covers: raw.githubusercontent.com: %s; trying thumbnails.libretro.com", StatusText(status));
-				base = PLAIN_BASE;
-				status = Get(http.get(), std::string(base) + PS5Cheats::EncodePath(name), &body, progress);
+				skipped++;
+				continue;
 			}
-			if (progress->IsCancelled())
-				break;
-			if (!logged_first)
+			Game game;
+			game.file_stem = m.stem;
+			game.title = m.title;
+			game.title_en = m.title_en;
+			game.region = m.region;
+			const Match match = index->Find(game);
+			if (match.index < 0)
 			{
-				logged_first = true;
-				ps5px_log("covers: first request: status %d, %zu bytes, from %s", status, body.size(), base == RAW_BASE ? "raw.githubusercontent.com" : "thumbnails.libretro.com");
+				unmatched++;
+				none_new += none_line + "\n";
+				continue;
 			}
-			const std::string link = (status == 200) ? LinkTarget(body.data(), body.size()) : std::string();
-			if (link.empty())
-				break;
-			name = link;
+			pool.Start(std::string(), index->Name(match.index) + ".png", [&, i, none_line](s32 status, std::vector<u8>& body) {
+				const Missing& m = missing[i];
+				if (progress->IsCancelled())
+					return;
+				if (status == 200 && IsPNG(body.data(), body.size()))
+				{
+					const std::string path = Path::Combine(EmuFolders::Covers, m.serial + ".png");
+					if (FileSystem::WriteBinaryFile(path.c_str(), body.data(), body.size()))
+					{
+						PS5Platform::MakePublic(path.c_str(), false);
+						saved++;
+						unreachable = 0;
+					}
+					else
+					{
+						ps5px_log("covers: %s could not be written", path.c_str());
+						failed++;
+					}
+				}
+				else if (status < 0)
+				{
+					// No connection: three in a row, and the rest is left for the next time (the
+					// games asked for already are let finish).
+					failed++;
+					if (++unreachable >= 3 && !lost)
+					{
+						ps5px_log("covers: stopping: %s, three times in a row", StatusText(status));
+						s_unreachable_at = std::time(nullptr);
+						lost = true;
+					}
+				}
+				else
+				{
+					// The list names a picture the server does not have (any more): not asked for again.
+					ps5px_log("covers: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
+					failed++;
+					none_new += none_line + "\n";
+				}
+			});
 		}
-		if (progress->IsCancelled())
+		if (pool.Active() == 0)
 			break;
-		if (status == 200 && IsPNG(body.data(), body.size()))
-		{
-			const std::string path = Path::Combine(EmuFolders::Covers, m.serial + ".png");
-			if (FileSystem::WriteBinaryFile(path.c_str(), body.data(), body.size()))
-			{
-				PS5Platform::MakePublic(path.c_str(), false);
-				saved++;
-				unreachable = 0;
-			}
-			else
-			{
-				ps5px_log("covers: %s could not be written", path.c_str());
-				failed++;
-			}
-		}
-		else if (status < 0)
-		{
-			// No connection: three in a row, and the rest is left for the next time.
-			failed++;
-			if (++unreachable >= 3)
-			{
-				ps5px_log("covers: stopping: %s, three times in a row", StatusText(status));
-				s_unreachable_at = std::time(nullptr);
-				break;
-			}
-		}
-		else
-		{
-			// The list names a picture the server does not have (any more): not asked for again.
-			ps5px_log("covers: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
-			failed++;
-			none_new += none_line + "\n";
-		}
+		pool.Poll();
 	}
 	if (!none_new.empty() || again)
 	{
@@ -275,7 +420,7 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 	FileSystem::DeleteFilePath(running_path.c_str());
 	ps5px_log("covers: %zu game(s) without a cover: %d saved, %d not in libretro's collection, %d not asked for again, %d failed%s", missing.size(), saved,
 		unmatched, skipped, failed, progress->IsCancelled() ? " (stopped: a scan or a game took over)" : "");
-	if (unreachable >= 3 || (saved == 0 && failed > 0 && unmatched + skipped == 0))
+	if (lost || (saved == 0 && failed > 0 && unmatched + skipped == 0))
 		*summary = saved > 0 ? fmt::format("{} cover(s) downloaded; then the connection was lost.", saved) :
 							   std::string("The covers could not be downloaded: no connection (crux2-boot.log has the reason).");
 	else if (saved > 0)
@@ -378,61 +523,25 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 	http->SetTimeout(12.0f);
 	FileSystem::WriteStringToFile(running_path.c_str(), "A download of pictures is running. If this file is still here when Crux2 starts, the download ended the title.\n");
 
-	const char* base = RAW;
 	int saved = 0, games_with = 0, unmatched = 0, skipped = 0, unreachable = 0;
 	std::string none_new;
 	bool lost = false;
 	progress->SetProgressRange(static_cast<u32>(missing.size()));
-	for (size_t i = 0; i < missing.size() && !progress->IsCancelled() && !lost; i++)
+	// Three games asked for at a time, each game's title screen and then its picture of play.
+	struct Asked
 	{
-		const Missing& m = missing[i];
-		progress->SetProgressValue(static_cast<u32>(i));
-		const std::string none_line = NoMatchLine(m.serial, m.stem);
-		if (none.count(none_line) != 0)
-		{
-			skipped++;
-			continue;
-		}
-		Game game;
-		game.file_stem = m.stem;
-		game.title = m.title;
-		game.title_en = m.title_en;
-		game.region = m.region;
-		const Match match = index->Find(game);
-		if (match.index < 0)
-		{
-			unmatched++;
-			none_new += none_line + "\n";
-			continue;
-		}
-
+		size_t game = 0;
+		std::string name, none_line;
 		int got = 0;
 		bool answered = true;
-		for (int which = 0; which < 2 && !progress->IsCancelled(); which++)
-		{
-			std::string name = std::string(kinds[which]) + index->Name(match.index) + ".png";
-			std::vector<u8> body;
-			s32 status = 0;
-			// (At most one link is followed: a name that stands for another picture.)
-			for (int hop = 0; hop < 2; hop++)
-			{
-				status = Get(http.get(), std::string(base) + PS5Cheats::EncodePath(name), &body, progress);
-				if (status < 0 && base == RAW && status != HTTPDownloader::HTTP_STATUS_CANCELLED && !progress->IsCancelled())
-				{
-					ps5px_log("pictures: raw.githubusercontent.com: %s; trying thumbnails.libretro.com", StatusText(status));
-					base = PLAIN;
-					status = Get(http.get(), std::string(base) + PS5Cheats::EncodePath(name), &body, progress);
-				}
-				if (progress->IsCancelled())
-					break;
-				const std::string link = (status == 200) ? LinkTarget(body.data(), body.size()) : std::string();
-				if (link.empty())
-					break;
-				// (A link is beside the file that holds it.)
-				name = std::string(kinds[which]) + link;
-			}
+	};
+	Pool pool(http.get(), progress, RAW, PLAIN, "pictures", false);
+	std::function<void(std::shared_ptr<Asked>, int)> ask;
+	ask = [&](std::shared_ptr<Asked> asked, int which) {
+		pool.Start(kinds[which], asked->name, [&, asked, which](s32 status, std::vector<u8>& body) {
 			if (progress->IsCancelled())
-				break;
+				return;
+			const Missing& m = missing[asked->game];
 			if (status == 200 && IsPNG(body.data(), body.size()))
 			{
 				const std::string path = PicturePath(m.serial, which);
@@ -440,7 +549,7 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 				{
 					PS5Platform::MakePublic(path.c_str(), false);
 					saved++;
-					got++;
+					asked->got++;
 					unreachable = 0;
 				}
 				else
@@ -450,21 +559,61 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 			}
 			else if (status < 0)
 			{
-				answered = false;
-				if (++unreachable >= 3)
+				asked->answered = false;
+				if (++unreachable >= 3 && !lost)
 				{
 					ps5px_log("pictures: stopping: %s, three times in a row", StatusText(status));
 					lost = true;
-					break;
 				}
 			}
+			if (which == 0 && !lost)
+			{
+				ask(asked, 1);
+				return;
+			}
+			if (which == 0)
+				asked->answered = false; // its picture of play not asked for: not settled
+			if (asked->got > 0)
+				games_with++;
+			else if (asked->answered)
+				none_new += asked->none_line + "\n"; // the collection has neither: not asked for again
+		});
+	};
+	size_t next = 0;
+	while (true)
+	{
+		while (!pool.Full() && next < missing.size() && !progress->IsCancelled() && !lost)
+		{
+			const size_t i = next++;
+			const Missing& m = missing[i];
+			progress->SetProgressValue(static_cast<u32>(i));
+			const std::string none_line = NoMatchLine(m.serial, m.stem);
+			if (none.count(none_line) != 0)
+			{
+				skipped++;
+				continue;
+			}
+			Game game;
+			game.file_stem = m.stem;
+			game.title = m.title;
+			game.title_en = m.title_en;
+			game.region = m.region;
+			const Match match = index->Find(game);
+			if (match.index < 0)
+			{
+				unmatched++;
+				none_new += none_line + "\n";
+				continue;
+			}
+			std::shared_ptr<Asked> asked = std::make_shared<Asked>();
+			asked->game = i;
+			asked->name = index->Name(match.index) + ".png";
+			asked->none_line = none_line;
+			ask(std::move(asked), 0);
 		}
-		if (progress->IsCancelled())
+		if (pool.Active() == 0)
 			break;
-		if (got > 0)
-			games_with++;
-		else if (answered)
-			none_new += none_line + "\n"; // the collection has neither: not asked for again
+		pool.Poll();
 	}
 	if (!none_new.empty() || (again && serial.empty()))
 	{

@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Press5elect
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
+# Crux2 - the tests that run on a PC (ps5/tests/run-host-tests.sh), with gcc and with clang, under
+# the address, undefined-behaviour and thread sanitizers. The title itself is built on the build
+# machine. PCSX2's tree is fetched (ps5/tools/fetch-pcsx2.sh: the updater's test takes its
+# rapidjson, which is newer than Ubuntu's); the SDK fork is not, so the host memory test (which
+# needs it) is skipped, as is the virtual file layer's (it needs a libsmb2 built for the PC).
+name: Host tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    name: host tests (${{ matrix.cc }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        # libzip for the updater's test; binutils' nm and Python come with the image.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libzip-dev pkg-config
+      - name: Fetch PCSX2 at the pinned revision
+        run: bash ps5/tools/fetch-pcsx2.sh
+      - name: Let the thread sanitizer map its memory
+        # The runners' kernels randomise more address bits than the thread sanitizer allows.
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Run the tests
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: bash ps5/tests/run-host-tests.sh

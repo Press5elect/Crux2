@@ -1,0 +1,9 @@
+# What making the video leaves here (README.md, one level up): not committed.
+node_modules/
+package.json
+package-lock.json
+logo.png
+video.mp4
+audio.wav
+s_*.png
+vp9*.log

@@ -36,6 +36,8 @@
 
 extern "C" int sceKernelDebugOutText(int channel, const char* text);
 extern "C" int sceKernelUsleep(unsigned microseconds);
+// The settings not yet written (ps5_host.cpp): once, without the settings' lock.
+extern "C" int ps5px_settings_flush_at_crash(void);
 
 // The first byte of the program's image (the linker script places it).
 extern "C" const char __executable_start[] __attribute__((weak));
@@ -285,6 +287,9 @@ void ReportEnding(const char* what, void* caller, const uintptr_t* frame)
   Line("==== end of the report ====");
   if (const int fd = ps5px_log_fd(); fd >= 0)
     fsync(fd);
+  // The settings changed and not yet written (a menu still open), last: what is above is out first.
+  if (ps5px_settings_flush_at_crash())
+    Line("(the settings changed in the menus were written)");
 }
 } // namespace
 
@@ -445,6 +450,9 @@ void CrashHandler::CrashSignalHandler(int signal, siginfo_t* siginfo, void* ctx)
   Line("==== end of the report ====");
   if (const int fd = ps5px_log_fd(); fd >= 0)
     fsync(fd);
+  // The settings changed and not yet written (a menu still open), last: what is above is out first.
+  if (ps5px_settings_flush_at_crash())
+    Line("(the settings changed in the menus were written)");
 
   // Back to the console: returning re-executes the faulting instruction with the default action
   // in place, and the console closes the title with its own error screen.

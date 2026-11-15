@@ -11,9 +11,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 namespace PS5Logs
 {
@@ -31,6 +36,100 @@ struct Files
 /// so nothing of a long line is lost. A file that is not there: no lines. Only the file's last
 /// `bytes` are read, so a log of any size costs the same.
 std::vector<std::string> Tail(const std::string& path, size_t most = 400, size_t width = 150, size_t bytes = 256 * 1024);
+/// The same of a log's text (a boot log kept in memory).
+std::vector<std::string> TailText(const std::string& text, size_t most = 400, size_t width = 150);
+
+/// The boot log kept in memory (from OGBox 0.0.7; Settings > Debug > Log > Boot log, "Only when
+/// something goes wrong", the default): the session's first HEAD bytes kept whole and its last
+/// HISTORY bytes after them, written to the file only when something goes wrong (ps5px_log_keep:
+/// a crash, a fatal error, a game that did not start, 15 s without a new frame, "Save the log").
+/// Fixed storage, and WriteOut is safe in a signal handler (write() and snprintf on the stack), for
+/// the crash report. No lock of its own: the caller has one.
+template <size_t HEAD, size_t HISTORY>
+class MemoryLog
+{
+public:
+	void Put(const char* data, size_t n)
+	{
+		if (m_head_length < HEAD)
+		{
+			const size_t k = std::min(n, HEAD - m_head_length);
+			std::memcpy(m_head + m_head_length, data, k);
+			m_head_length += k;
+			data += k;
+			n -= k;
+		}
+		if (n > HISTORY)
+		{
+			m_lost += n - HISTORY;
+			data += n - HISTORY;
+			n = HISTORY;
+		}
+		if (m_length + n > HISTORY)
+		{
+			const size_t drop = m_length + n - HISTORY;
+			m_first = (m_first + drop) % HISTORY;
+			m_length -= drop;
+			m_lost += drop;
+		}
+		size_t at = (m_first + m_length) % HISTORY;
+		for (size_t done = 0; done < n;)
+		{
+			const size_t k = std::min(n - done, HISTORY - at);
+			std::memcpy(m_history + at, data + done, k);
+			done += k;
+			at = (at + k) % HISTORY;
+		}
+		m_length += n;
+	}
+
+	/// What it holds, as the file would get it (the note of the lines let go included).
+	std::string Text() const
+	{
+		std::string out(m_head, m_head_length);
+		if (m_lost)
+		{
+			char note[128];
+			const int k = std::snprintf(note, sizeof(note), "[log: %llu bytes of lines from the middle of the session not kept]\n", m_lost);
+			if (k > 0)
+				out.append(note, std::min(static_cast<size_t>(k), sizeof(note) - 1));
+		}
+		const size_t first = std::min(m_length, HISTORY - m_first);
+		out.append(m_history + m_first, first);
+		out.append(m_history, m_length - first);
+		return out;
+	}
+
+	/// Into the file (`why`: said at its top), and emptied.
+	void WriteOut(int fd, const char* why)
+	{
+		if (fd < 0)
+			return;
+		char note[256];
+		int k = std::snprintf(note, sizeof(note), "[log: kept in memory until now, written because %s]\n", why ? why : "it was asked for");
+		if (k > 0)
+			(void)!write(fd, note, std::min(static_cast<size_t>(k), sizeof(note) - 1));
+		(void)!write(fd, m_head, m_head_length);
+		if (m_lost)
+		{
+			k = std::snprintf(note, sizeof(note), "[log: %llu bytes of lines from the middle of the session not kept]\n", m_lost);
+			if (k > 0)
+				(void)!write(fd, note, std::min(static_cast<size_t>(k), sizeof(note) - 1));
+		}
+		const size_t first = std::min(m_length, HISTORY - m_first);
+		(void)!write(fd, m_history + m_first, first);
+		(void)!write(fd, m_history, m_length - first);
+		m_head_length = m_first = m_length = 0;
+		m_lost = 0;
+	}
+
+private:
+	char m_head[HEAD];
+	size_t m_head_length = 0;
+	char m_history[HISTORY];
+	size_t m_first = 0, m_length = 0; // the oldest byte of the history, and how many
+	unsigned long long m_lost = 0;    // bytes between the head and the history let go
+};
 
 /// How the run before this one ended, from its log.
 struct Ending

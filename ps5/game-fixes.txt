@@ -1,0 +1,2 @@
+# Crux2 game fixes 1
+# <sha256> <bytes> <path below game-fixes/>: written by ps5/tools/game-fixes-index.py

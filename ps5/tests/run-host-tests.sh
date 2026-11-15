@@ -10,6 +10,8 @@
 # undefined-behaviour sanitizer (and the address sanitizer where the test maps no memory of its
 # own), and run:
 #   - the libc stand-ins of frontend/ps5_libc.c, each against the PC's own libc;
+#   - the quick menu's entries and their order (frontend/bigpicture/bp_quick_layout.h), and frame
+#     generation's figures for the on-screen display and the log (frontend/ps5_pacing.h);
 #   - the game list's letter jumps (frontend/ps5_letter_jump.h): the order, the groups, and where
 #     L2 and R2 land on sorted and unsorted lists;
 #   - the profiler's folding (frontend/ps5_profile_fold.h): symbols.txt read and refused, the
@@ -19,6 +21,9 @@
 #     end under the sampler; plain, and with the address and thread sanitizers;
 #   - the threads' self-reported processor times (common/PS5ThreadTimes.h), with the thread
 #     sanitizer: readings from another thread never go back;
+#   - a quick tap held for the game at least 50 ms (frontend/ps5_input_source_logic.h, TapHold);
+#   - the updater (frontend/ps5_update.cpp, tests/update): a check, a download and an install
+#     over a made-up GitHub, developer builds, the files a new version dropped;
 #   - the memory card held in memory (frontend/ps5_card_image.h): random saves on the image and
 #     on a copy, the file compared with the copy after each flush;
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
@@ -36,6 +41,7 @@
 #   LIBSMB2_PREFIX       a libsmb2 built for the PC; without it the virtual file layer is skipped
 #   PS5_PAYLOAD_SDK_FORK the SDK fork's checkout, for the platform layer's headers
 #                        (default ../PS5_PayloadSDK)
+#   CC, CXX              the compilers (default cc and c++; the host memory test is clang's)
 
 set -euo pipefail
 
@@ -49,6 +55,14 @@ work=${VFS_TEST_DIR:-$(mktemp -d)}
 mkdir -p "$work"
 status=0
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+# The compilers: CC and CXX when given (the CI runs the tests with gcc and with clang), and every
+# warning of the tests' own code an error.
+CC=${CC:-cc}
+CXX=${CXX:-c++}
+export CC CXX
+cc() { command "$CC" -Werror "$@"; }
+c++() { command "$CXX" -Werror "$@"; }
+echo "== compilers: $("$CC" --version | head -n 1); $("$CXX" --version | head -n 1)"
 
 echo "== libc stand-ins"
 # shellcheck disable=SC2086
@@ -64,6 +78,21 @@ echo "== letter jumps"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/letter_jump_test.cpp" -o "$work/letter_jump_test"
 "$work/letter_jump_test" || status=1
+
+echo "== the quick menu's entries and their order (frontend/bigpicture/bp_quick_layout.h)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend/bigpicture" "$tests/bigpicture/quick_layout_test.cpp" -o "$work/quick_layout_test"
+"$work/quick_layout_test" || status=1
+
+echo "== frame generation's figures (frontend/ps5_pacing.h, FrameGenFigures)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/pacing/framegen_figures_test.cpp" -o "$work/framegen_figures_test"
+"$work/framegen_figures_test" || status=1
+
+echo "== PlayStation Move light gun (Move Management's loopback stream, a stand-in producer)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -pthread -I "$frontend" "$tests/move/move_test.cpp" -o "$work/move_test"
+"$work/move_test" || status=1
 
 echo "== profile folding"
 # shellcheck disable=SC2086
@@ -126,6 +155,20 @@ echo "== thread times"
 c++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=thread -pthread -I "$ps5/common" "$tests/thread_times_test.cpp" -o "$work/thread_times_test"
 "$work/thread_times_test" || status=1
 
+echo "== quick taps held for the game"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/input/tap_hold_test.cpp" -o "$work/tap_hold_test"
+"$work/tap_hold_test" || status=1
+
+echo "== the updater (developer builds, the files a new version dropped)"
+# libzip: the PC's (pkg-config) or PCSX2's copy built once; rapidjson: the PC's or PCSX2's.
+if [[ -f $pcsx2/3rdparty/rapidjson/include/rapidjson/document.h || -f /usr/include/rapidjson/document.h ]] &&
+    { pkg-config --exists libzip 2>/dev/null || [[ -d $pcsx2/3rdparty/libzip ]]; }; then
+    bash "$tests/update/run-update-tests.sh" "$work/update" || status=1
+else
+    echo "skipped (needs libzip and rapidjson: the PC's, or vendor/pcsx2's)"
+fi
+
 echo "== host memory"
 if [[ -f $pcsx2/common/HostSys.h && -f $sdk_fork/platform/include/ps5platform/shm.h ]]; then
     clang++ -std=c++20 -O1 -g -Wall -Wno-unknown-pragmas -Wno-unused-parameter -fsanitize=undefined \
@@ -144,6 +187,29 @@ if [[ -n ${LIBSMB2_PREFIX:-} ]]; then
 else
     echo "== virtual file layer: skipped (set LIBSMB2_PREFIX to a libsmb2 built for the PC)"
 fi
+
+echo "== virtual file layer alone: a read held (the share that stops answering), the shares woken"
+# (No network backend: they are stubbed in the test.)
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/vfs_stall_test.cpp" "$frontend/vfs/ps5_vfs.cpp" -lpthread \
+    -o "$work/vfs_stall_test"
+"$work/vfs_stall_test" || status=1
+
+echo "== the boot log kept in memory"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/logs/memory_log_test.cpp" "$frontend/ps5_logs.cpp" \
+    "$frontend/ps5_backup.cpp" "$frontend/vfs/ps5_vfs.cpp" -lpthread -o "$work/memory_log_test"
+"$work/memory_log_test" "$work" || status=1
+
+echo "== game fixes from GitHub"
+# The list fetched, kept, refused, withdrawn and not reached (frontend/ps5_fixes_fetch.cpp), over a
+# stand-in for the network; and ps5/game-fixes.txt current.
+bash "$tests/fixes/run-fixes-tests.sh" "$work/fixes" || status=1
+
+echo "== HDR output and debanding (the last passes before the screen)"
+# ps5_final.glsl compiled as the device does and run on lavapipe against the maths in double precision,
+# and ps5_hdr.h's choices (run-hdr-tests.sh: says what is missing when glslang or a driver is not there).
+bash "$tests/hdr/run-hdr-tests.sh" "$work/hdr" || status=1
 
 echo "== no setting read through Host while the settings' lock is held"
 python3 "$tests/check-settings-lock.py" || status=1

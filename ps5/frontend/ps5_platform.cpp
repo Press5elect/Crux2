@@ -7,6 +7,7 @@
 #include "ps5_priority.h"
 
 #include "ps5_open_up.h"
+#include "ps5_logs.h"
 
 #include "platform.h"
 #include "ps5_vfs.h"
@@ -28,6 +29,7 @@
 #include <ctime>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
@@ -205,7 +207,153 @@ constexpr char NETWORK_CFG_TEMPLATE[] =
   "# uid = 1000\n"
   "# gid = 1000\n";
 
+// ---- the boot log kept in memory (from OGBox 0.0.7) -----------------------------------------
+//
+// [PS5] LogMode in inis/PCSX2.ini (Settings > Debug > Log > Boot log, read here by hand: the log
+// starts long before the settings are loaded): "always" writes every line to crux2-boot.log as it
+// is logged, as before; anything else (the default) keeps the session's lines in memory (its first
+// 512 KiB and its last 8 MiB) and writes them only when something goes wrong (ps5px_log_keep: a
+// crash, a fatal error, a game that did not start, 15 s without a new frame while a game runs, the
+// log page's "Save the log"); from then on the session's lines go to the file as before. A file
+// named log-always.txt (or watchdog.txt, whose watchdog looks at the file growing) in the title
+// folder is "always" too. Fixed storage: the crash report writes it out from a signal handler.
+std::atomic<bool> s_log_memory{false};
+pthread_mutex_t s_log_lock = PTHREAD_MUTEX_INITIALIZER;
+PS5Logs::MemoryLog<size_t(512) << 10, size_t(8) << 20> s_memory_log;
+int s_pipe_read = -1; // standard error's pipe, read by a thread of its own while the log is in memory
+
+// A piece of the boot log, by the way the log goes now.
+void LogWrite(const char* data, size_t length)
+{
+  if (s_log_memory.load(std::memory_order_acquire))
+  {
+    pthread_mutex_lock(&s_log_lock);
+    if (s_log_memory.load(std::memory_order_relaxed))
+    {
+      s_memory_log.Put(data, length);
+      pthread_mutex_unlock(&s_log_lock);
+      return;
+    }
+    pthread_mutex_unlock(&s_log_lock);
+  }
+  if (s_log_fd >= 0)
+    (void)!write(s_log_fd, data, length);
+}
+
+// Standard error's pipe into the boot log: the graphics driver's messages are kept with the rest.
+void* LogPipeMain(void*)
+{
+  char buffer[16384];
+  for (;;)
+  {
+    const ssize_t got = read(s_pipe_read, buffer, sizeof(buffer));
+    if (got > 0)
+      LogWrite(buffer, static_cast<size_t>(got));
+    else if (got == 0 || (errno != EINTR && errno != EAGAIN))
+      break;
+  }
+  return nullptr;
+}
+
+// Whether inis/PCSX2.ini's [PS5] LogMode is "always" (read by hand, as ReadWantsUSB is).
+bool ReadLogAlways(const char* title_dir)
+{
+  char path[256];
+  std::snprintf(path, sizeof(path), "%s/inis/PCSX2.ini", title_dir);
+  FILE* const fp = std::fopen(path, "r");
+  if (!fp)
+    return false;
+  bool always = false, in_section = false;
+  char line[512];
+  while (std::fgets(line, sizeof(line), fp))
+  {
+    const std::string_view text = StringUtil::StripWhitespace(std::string_view(line));
+    if (!text.empty() && text.front() == '[')
+    {
+      in_section = (text == "[PS5]");
+      continue;
+    }
+    const size_t equals = text.find('=');
+    if (!in_section || equals == std::string_view::npos)
+      continue;
+    if (StringUtil::StripWhitespace(text.substr(0, equals)) == "LogMode")
+      always = (StringUtil::StripWhitespace(text.substr(equals + 1)) == "always");
+  }
+  std::fclose(fp);
+  return always;
+}
+
+// "15 s without a new frame while a game runs": the frames told by the interface
+// (ps5px_log_frame), looked at once a second by a thread of its own.
+std::atomic<int64_t> s_frame_ms{0};
+std::atomic<bool> s_frame_game{false};
+
+int64_t MonotonicMs()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+void* FrameWatchMain(void*)
+{
+  while (s_log_memory.load(std::memory_order_acquire))
+  {
+    sceKernelUsleep(1000000);
+    if (s_frame_game.load(std::memory_order_acquire) && MonotonicMs() - s_frame_ms.load(std::memory_order_acquire) >= 15000)
+      ps5px_log_keep("15 s went by without a new frame while a game ran");
+  }
+  return nullptr;
+}
+
 } // namespace
+
+// The memory log into the file now, and the session's lines to the file from here on.
+extern "C" int ps5px_log_keep(const char* why)
+{
+  if (!s_log_memory.load(std::memory_order_acquire) || s_log_fd < 0)
+    return 0;
+  pthread_mutex_lock(&s_log_lock);
+  const bool was = s_log_memory.exchange(false, std::memory_order_acq_rel);
+  if (was)
+    s_memory_log.WriteOut(s_log_fd, why);
+  pthread_mutex_unlock(&s_log_lock);
+  if (!was)
+    return 0;
+  fsync(s_log_fd);
+  ps5px_log("boot log: written to the file from here on (%s)", why ? why : "asked");
+  return 1;
+}
+
+extern "C" int ps5px_log_in_memory(void)
+{
+  return s_log_memory.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+bool PS5Platform::LogInMemory(std::string* text)
+{
+  if (!s_log_memory.load(std::memory_order_acquire))
+    return false;
+  pthread_mutex_lock(&s_log_lock);
+  const bool still = s_log_memory.load(std::memory_order_relaxed);
+  if (still)
+    *text = s_memory_log.Text();
+  pthread_mutex_unlock(&s_log_lock);
+  return still;
+}
+
+extern "C" void ps5px_log_frame(int game_running)
+{
+  s_frame_ms.store(MonotonicMs(), std::memory_order_release);
+  s_frame_game.store(game_running != 0, std::memory_order_release);
+  static std::atomic<bool> s_watching{false};
+  if (s_log_memory.load(std::memory_order_acquire) && !s_watching.exchange(true))
+  {
+    pthread_t watcher;
+    if (pthread_create(&watcher, nullptr, &FrameWatchMain, nullptr) == 0)
+      pthread_detach(watcher);
+  }
+}
 
 extern "C" const char* ps5px_title_dir(void)
 {
@@ -217,8 +365,18 @@ extern "C" const char* ps5px_ca_bundle(void)
   return s_ca_bundle;
 }
 
+// (The crash report's: a boot log kept in memory goes into the file first, the report after it. A
+// signal handler can't wait for another thread's lock: one that is held is written over.)
 extern "C" int ps5px_log_fd(void)
 {
+  if (s_log_fd >= 0 && s_log_memory.load(std::memory_order_acquire))
+  {
+    const bool locked = pthread_mutex_trylock(&s_log_lock) == 0;
+    if (s_log_memory.exchange(false, std::memory_order_acq_rel))
+      s_memory_log.WriteOut(s_log_fd, "Crux2 stopped (the crash report follows)");
+    if (locked)
+      pthread_mutex_unlock(&s_log_lock);
+  }
   return s_log_fd;
 }
 
@@ -239,7 +397,7 @@ extern "C" void ps5px_log(const char* format, ...)
   {
     length = std::snprintf(line, sizeof(line), "[%8.3f] %s\n", now_seconds() - s_start_time, text);
     if (length > 0)
-      (void)!write(s_log_fd, line, std::min<size_t>(static_cast<size_t>(length), sizeof(line) - 1));
+      LogWrite(line, std::min<size_t>(static_cast<size_t>(length), sizeof(line) - 1));
   }
 }
 
@@ -272,6 +430,7 @@ extern "C" void ps5_title_fatal(const char* message)
     s_in_fatal = true;
     ps5px_log("FATAL: %s", message ? message : "(no message)");
     ps5px_notify(message ? message : "A fatal error stopped the emulator.");
+    ps5px_log_keep("a fatal error stopped Crux2");
     if (s_log_fd >= 0)
       fsync(s_log_fd);
   }
@@ -325,12 +484,43 @@ void PS5Platform::EarlyInit()
   MakePublic(log_path, false);
   MakePublic(previous_path, false);
 
+  // Kept in memory unless the settings say "always" (above, s_log_memory): one line in the file says
+  // so, the rest only if something goes wrong.
+  const bool log_always = ReadLogAlways(s_title_dir) || HasFlagFile("log-always.txt") || HasFlagFile("watchdog.txt");
+  if (s_log_fd >= 0 && !log_always)
+  {
+    static constexpr char NOTE[] = "[log: this session's log is kept in memory and written here only if something goes wrong "
+                                   "(Settings > Debug > Log > Boot log)]\n";
+    (void)!write(s_log_fd, NOTE, sizeof(NOTE) - 1);
+    s_log_memory.store(true, std::memory_order_release);
+  }
+
   // Standard error goes into the boot log, each line written as it is printed: what the graphics
   // driver says before a stop is then in the file. (The console refuses dup2 onto descriptor 2 to a
-  // title, so the stream is moved to a second descriptor of the file; both append.)
+  // title, so the stream is moved to a second descriptor of the file; both append.) Kept in memory:
+  // through a pipe a thread of its own reads into the log (and into the file once it is written).
   if (s_log_fd >= 0)
   {
-    const int second = open(log_path, O_WRONLY | O_APPEND);
+    int second = -1;
+    int pipe_fds[2] = {-1, -1};
+    if (s_log_memory.load(std::memory_order_acquire) && pipe(pipe_fds) == 0)
+    {
+      s_pipe_read = pipe_fds[0];
+      pthread_t reader;
+      if (pthread_create(&reader, nullptr, &LogPipeMain, nullptr) == 0)
+      {
+        pthread_detach(reader);
+        second = pipe_fds[1];
+      }
+      else
+      {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        s_pipe_read = -1;
+      }
+    }
+    if (second < 0)
+      second = open(log_path, O_WRONLY | O_APPEND);
     FILE* const stream = (second >= 0) ? fdopen(second, "a") : nullptr;
     if (stream)
     {
@@ -352,6 +542,9 @@ void PS5Platform::EarlyInit()
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S UTC", tm);
   ps5px_log("Crux2 (%s) starts, %s", TITLE_ID, when);
   ps5px_log("title folder: %s", s_title_dir);
+  ps5px_log("boot log: %s", s_log_memory.load(std::memory_order_acquire)
+            ? "kept in memory, written only if something goes wrong (Settings > Debug > Log > Boot log)"
+            : "written as it goes");
   if (!s_wants_usb)
     ps5px_log("USB drives: off ([PS5] USBDrives in inis/PCSX2.ini, or usb-off.txt)");
   else

@@ -18,6 +18,9 @@
 #   PS5_CLANG        the host clang the compiler wrappers drive (default: clang)
 #   PS5PX_VERSION    the version this build is made as ("v0.2.1"), shown on the About page and
 #                    under the mark over a running game; none by default
+#   PS5PX_RELEASE    1: a release build. Made so from a clean tree only; any other build is a
+#                    developer build, shown as "v1.0.18 - developer build", whose updater offers
+#                    that version's release
 #   PS5PX_PGO        profile-guided optimisation. Unset: "use" when the profile is there (the
 #                    standard build), otherwise "off".
 #                      use          compiles with the counts merged into PS5PX_PGO_PROFILE
@@ -176,6 +179,17 @@ mesa_revision=$(sed -n 's/^revision: //p' "$radv_provenance" 2>/dev/null || true
 archive_digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
 radv_note=
 [[ $archive == "$vulkan/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a" ]] || radv_note=" (not PS5_Vulkan's release archive: $(basename "$(dirname "$(dirname "$archive")")"))"
+# A release is asked for (PS5PX_RELEASE=1) and made from a clean tree; any other build is a
+# developer build, and says so beside the version (ps5_build_stamp.cpp).
+release=0
+tree_changes=$(git -C "$root" status --porcelain 2>/dev/null || echo unknown)
+if [[ ${PS5PX_RELEASE:-0} == 1 ]]; then
+    if [[ -z $tree_changes ]]; then
+        release=1
+    else
+        echo "build.sh: PS5PX_RELEASE=1 but the tree has changes: a developer build" >&2
+    fi
+fi
 digest=$( {
     echo "$pcsx2_revision"
     git -C "$root/vendor/pcsx2" diff HEAD | sha256sum
@@ -184,7 +198,7 @@ digest=$( {
         } | LC_ALL=C sort -z | xargs -0 sha256sum)
     echo "$sdk_revision $vulkan_revision $archive_digest"
     sha256sum "$PS5PX_PGS_OBJECT" | cut -d ' ' -f 1
-    echo "version ${PS5PX_VERSION:-}"
+    echo "version ${PS5PX_VERSION:-} release $release"
     echo "pgo $pgo ${pgo_profile:+$(sha256sum "$pgo_profile" | cut -d ' ' -f 1)}"
     sha256sum "$root"/.deps/ports/lib/*.a | cut -d ' ' -f 1
     } | sha256sum | cut -c 1-16)
@@ -192,6 +206,7 @@ pgo_note=
 [[ $pgo == generate ]] && pgo_note="; profiling build"
 [[ $pgo == cs-generate ]] && pgo_note="; profiling build, second round on profile ${profile_digest:0:12}"
 [[ $pgo == use ]] && pgo_note="; profile ${profile_digest:0:12}"
+[[ $release == 1 ]] || pgo_note+="; developer build"
 identity="$digest (pcsx2 ${pcsx2_revision:0:12} + ps5 patch; sdk ${sdk_revision:0:7}; PS5_Vulkan ${vulkan_revision:0:7}; RADV ${archive_digest:0:12} from Mesa ${mesa_revision:0:7}$radv_note$pgo_note)"
 echo "$identity" > "$build/build-identity.txt"
 
@@ -200,6 +215,7 @@ echo "$identity" > "$build/build-identity.txt"
     printf '#define PS5PX_BUILD_STAMP "%s"\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
     printf '#define PS5PX_BUILD_IDENTITY "%s"\n' "$identity"
     printf '#define PS5PX_BUILD_VERSION "%s"\n' "${PS5PX_VERSION:-}"
+    printf '#define PS5PX_BUILD_RELEASE %d\n' "$release"
     # The build number shown in the interface's top bar: the count of commits in this repository.
     printf '#define PS5PX_BUILD_NUMBER "%s"\n' "$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 0)"
 } > "$build/ps5px-generated/ps5_build_stamp.inc"

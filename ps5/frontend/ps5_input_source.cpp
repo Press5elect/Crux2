@@ -36,6 +36,7 @@
 #include "ps5_input_source.h"
 
 #include "ps5_keyboard.h"
+#include "ps5_move_source.h"
 #include "ps5_usbpad.h"
 
 #include "Config.h"
@@ -341,6 +342,32 @@ namespace
 	std::function<void(u32)> s_leave_handler;
 	std::atomic<float> s_leave_progress{0.0f};
 
+	// ------------------------------------------------------------------ quick taps
+
+	// Each controller's minimum hold (PS5InputLogic::TapHold), and the pressure R2 last set, for
+	// a hold that ends on a poll with no new readings. Kept here and not in Pad: one source.
+	std::array<PS5InputLogic::TapHold, PS5InputSource::MAX_PADS> s_tap_hold;
+	std::array<float, PS5InputSource::MAX_PADS> s_tap_pressure = {1.0f, 1.0f, 1.0f, 1.0f};
+
+	// Gives InputManager the buttons the game gets, where they changed from what it was last
+	// given (values: the pad's button_values).
+	void InvokeButtons(u32 index, u32 game_buttons, float pressure_value, std::array<float, 21>& values)
+	{
+		// Player 1's PlayStation Move and Nav (ps5_move_source.cpp) hold buttons alongside the controller's.
+		if (index == 0)
+			game_buttons |= PS5Move::GameButtons();
+		for (u32 button = 0; button < BUTTON_COUNT; button++)
+		{
+			const bool down = (game_buttons & (1u << button)) != 0;
+			const float value = !down ? 0.0f : ((PRESSURE_BUTTONS & (1u << button)) ? pressure_value : 1.0f);
+			if (value == values[button])
+				continue;
+			values[button] = value;
+			InputManager::InvokeEvents(InputSource::MakeGenericControllerButtonKey(InputSourceType::SDL, index, button), value,
+				s_button_info[button].generic_binding);
+		}
+	}
+
 	// ------------------------------------------------------------------ optional pad functions
 
 	// scePadSetMotionSensorState is in libScePad's stub, but it is not imported: a title that
@@ -635,6 +662,7 @@ void PS5InputSource::SetConnected(u32 index, bool connected)
 		pad.button_values = {};
 		pad.axes = {128, 128, 128, 128, 0, 0};
 		pad.touch_is_back = false;
+		s_tap_hold[index].Reset();
 		pad.leave_combo.Cancel();
 		pad.last_timestamp_us = 0;
 		InputManager::OnInputDeviceDisconnected(MakeDeviceKey(index), fmt::format("SDL-{}", index));
@@ -679,19 +707,19 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 	const bool pressure = m_pressure_from_r2 && running;
 	const float pressure_value = pressure ? PS5InputLogic::TriggerPressure(sample.r2) : 1.0f;
 
-	for (u32 button = 0; button < BUTTON_COUNT; button++)
-	{
-		const bool down = (buttons & (1u << button)) != 0;
-		const float value = !down ? 0.0f : ((PRESSURE_BUTTONS & (1u << button)) ? pressure_value : 1.0f);
-		if (value == pad.button_values[button])
-			continue;
-		pad.button_values[button] = value;
-		InputManager::InvokeEvents(MakeGenericControllerButtonKey(InputSourceType::SDL, index, button), value,
-			s_button_info[button].generic_binding);
-	}
+	// Every reading since the last poll comes through here, in order, but the game reads the
+	// pad's state once in its frame: a tap that went down and up between two of its reads is held
+	// down for it for at least 50 ms (PS5InputLogic::TapHold; PollEvents lets it go when the hold
+	// ends). Only while a game runs; the interface gets the buttons as they are. The sticks and
+	// triggers, the leave-the-game hold and R3's recentring read the reading itself.
+	const u64 now_us = NowMicroseconds();
+	const u32 game_buttons = s_tap_hold[index].Update(buttons, now_us, running ? PS5InputLogic::TapHold::MIN_HOLD_US : 0);
+	s_tap_pressure[index] = pressure_value;
+	InvokeButtons(index, game_buttons, pressure_value, pad.button_values);
 
 	const std::array<u8, AXIS_COUNT> axes = {
-		sample.left_x, sample.left_y, sample.right_x, sample.right_y, sample.l2, pressure ? u8{0} : sample.r2};
+		sample.left_x, sample.left_y, sample.right_x, sample.right_y, sample.l2,
+		std::max<u8>(pressure ? u8{0} : sample.r2, index == 0 ? PS5Move::Trigger() : u8{0})}; // and the Move's T
 	for (u32 axis = 0; axis < AXIS_COUNT; axis++)
 	{
 		if (axes[axis] == pad.axes[axis])
@@ -710,7 +738,6 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 	// click of both sticks in play does nothing. Once taken, a double buzz says so and the
 	// handler the host gave (SetLeaveGameHandler) does what the quick menu's "Leave the game"
 	// does. The buttons still reach the game while held.
-	const u64 now_us = NowMicroseconds();
 	pad.leave_combo.Configure(m_leave_mask, m_leave_hold_us);
 	if (!running)
 	{
@@ -779,6 +806,11 @@ void PS5InputSource::UpdateMotionAim(u64 now_us)
 		m_guncon_plugged = Host::GetStringSettingValue("USB1", "Type", "None") == "guncon2" ||
 						   Host::GetStringSettingValue("USB2", "Type", "None") == "guncon2";
 	}
+
+	// A PlayStation Move ([PS5] MoveAim, ps5_move_source.cpp) that is aiming has the pointer: the
+	// controller's motion aim is left alone for player 1, never added to it.
+	if (PS5Move::Update(running))
+		return;
 
 	Pad& pad = m_pads[0];
 	const bool active = running && pad.connected && (m_motion_aim_setting || m_guncon_plugged);
@@ -883,6 +915,14 @@ void PS5InputSource::PollEvents()
 			}
 			if (connected)
 				ApplySample(i, &sample);
+		}
+
+		// A quick tap's hold that has ended, with no reading since to let it go.
+		if (pad.connected)
+		{
+			const bool running = VMManager::GetState() == VMState::Running;
+			const u32 game_buttons = s_tap_hold[i].Tick(NowMicroseconds(), running ? PS5InputLogic::TapHold::MIN_HOLD_US : 0);
+			InvokeButtons(i, game_buttons, s_tap_pressure[i], pad.button_values);
 		}
 
 		// The confirming double buzz plays over the game's rumble, and ends by giving it back.

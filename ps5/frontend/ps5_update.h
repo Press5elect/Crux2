@@ -25,7 +25,9 @@
 //
 // Recover() at the next start puts the old files back after an install that a power cut stopped.
 // The user's files (settings, memory cards, states, BIOS, games, covers, network.cfg...) are never
-// in the set that is replaced, and a file the release does not have is left where it is.
+// in the set that is replaced. A file the release does not have is left where it is, unless the
+// running build's own resource manifest lists it (Setup::shipped): a file the old version shipped
+// and the new one dropped is removed with the install (and put back if the install is undone).
 
 #pragma once
 
@@ -101,6 +103,15 @@ struct Setup
 	HttpDownload http_download;
 	Log log;              // may be empty
 	FreeSpace free_space; // may be empty: statvfs() is asked
+	/// 1: the running build is a release. 0: a developer build of `version`, which comes before
+	/// that version's release (the release is offered). -1: as this build was made
+	/// (RunningIsRelease(); a release in the PC test).
+	int release = -1;
+	/// The files the running build shipped, as paths below the title folder ("resources/x.png"):
+	/// its resource manifest (tools/build.sh). Those of them the new release does not have are
+	/// removed when it is installed. Empty: the manifest compiled into the title; in the PC test,
+	/// none, and nothing is removed.
+	std::vector<std::string> shipped;
 };
 
 /// Once at start-up, before anything else reads the title's files: an install that a power cut
@@ -145,6 +156,18 @@ int CompareVersions(const Version& a, const Version& b);
 Version VersionIn(const std::string& text);
 /// "1.2.3".
 std::string ToString(const Version& version);
+/// The version as the interface shows it: "v1.2.3", or "v1.2.3 - developer build" when `release`
+/// is false. Empty for an empty version.
+std::string VersionLabel(const std::string& version, bool release);
+/// Whether the running build was made as a release, and its version as shown (VersionLabel).
+/// (ps5_build_stamp.cpp)
+bool RunningIsRelease();
+std::string RunningVersionLabel();
+/// Of the files the running build shipped (`shipped`, paths below the title folder), those an
+/// install of a release that brings `incoming` removes: the program's own (IsManaged) that the
+/// release has under no name, compared without regard to case as exFAT names are. Sorted, each
+/// once. Nothing when `shipped` is empty.
+std::vector<std::string> StaleFiles(const std::vector<std::string>& shipped, const std::vector<std::string>& incoming);
 
 /// Whether a path below the title folder ("eboot.bin", "resources/fonts/x.ttf") is one of the
 /// program's own files, which an update may replace. Everything else is the user's.

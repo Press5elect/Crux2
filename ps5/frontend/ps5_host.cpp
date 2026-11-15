@@ -16,6 +16,7 @@
 #include "ps5_pgo.h"
 #include "ps5_keyboard.h"
 #include "ps5_services.h"
+#include "ps5_fixes_fetch.h"
 #include "ps5_pacing.h"
 #include "ps5_boot_step.h"
 #include "ps5_pgs.h"
@@ -204,6 +205,9 @@ namespace PS5Host
 
 			std::atomic_bool settings_dirty{false};
 			Common::Timer::Value settings_dirty_time = 0;
+			// (From OGBox 0.0.7) While the settings or the quick menu are open, changes are kept in
+			// memory and written when they close (ps5px_settings_hold, ps5px_settings_flush).
+			std::atomic_bool settings_held{false};
 
 			// The game list scan: started, replaced and joined by the emulation thread alone (requests
 			// from other threads are queued to it), so none of this needs a lock. A request made
@@ -388,6 +392,7 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "FastPipelines", true);
 	b("PS5", "ThreadedRecording", true);
 	b("PS5", "UpdateAtStart", true);
+	b("PS5", "FixesAtStart", true);
 	// Care for the screen (the interface's own section).
 	i("PS5UI", "IdleDim", 3);
 	b("PS5UI", "ScreenSaver", true);
@@ -457,10 +462,14 @@ void PS5Host::SaveSettingsIfDue(bool force)
 {
 	if (!s_state.settings_dirty.load(std::memory_order_acquire))
 		return;
+	if (!force && s_state.settings_held.load(std::memory_order_acquire))
+		return;
 	if (!force && Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - s_state.settings_dirty_time) < SETTINGS_SAVE_DELAY)
 		return;
 
-	s_state.settings_dirty.store(false, std::memory_order_release);
+	// (Claimed: the interface's thread and the emulation thread may both flush.)
+	if (!s_state.settings_dirty.exchange(false, std::memory_order_acq_rel))
+		return;
 
 	Error error;
 	const auto lock = Host::GetSettingsLock();
@@ -468,6 +477,31 @@ void PS5Host::SaveSettingsIfDue(bool force)
 		ps5px_log("settings: cannot save %s: %s", s_state.base_settings->GetFileName().c_str(), error.GetDescription().c_str());
 	else
 		PS5Platform::MakePublic(s_state.base_settings->GetFileName().c_str(), false);
+}
+
+// The settings or the quick menu open (1) or closed (0): while they are open a change is not
+// written by itself a second later; their closing writes it (ps5px_settings_flush).
+extern "C" void ps5px_settings_hold(int held)
+{
+	PS5Host::s_state.settings_held.store(held != 0, std::memory_order_release);
+}
+
+// What was changed and not yet written, written now, on the calling thread: the menus closing, a
+// game starting, Crux2 closing.
+extern "C" void ps5px_settings_flush(void)
+{
+	PS5Host::SaveSettingsIfDue(true);
+}
+
+// A crash: what was changed and not yet written, written by the crash report (ps5_crash.cpp), after
+// the report and the log are out. Without the settings' lock (the crashed thread may hold it) and
+// once; returns 1 when something was written.
+extern "C" int ps5px_settings_flush_at_crash(void)
+{
+	static std::atomic_bool s_done{false};
+	if (s_done.exchange(true) || !PS5Host::s_state.base_settings || !PS5Host::s_state.settings_dirty.exchange(false))
+		return 0;
+	return PS5Host::s_state.base_settings->Save(nullptr) ? 1 : 0;
 }
 
 bool PS5Host::LoadFonts()
@@ -762,6 +796,34 @@ extern "C" int ps5_title_videoout_vrr_unpeg(int32_t handle)
 	return unpeg ? unpeg(handle) : -1;
 }
 
+// HDR output (PS5_Mesa patch 0020, as OGBox's): the driver retypes the framebuffers through
+// sceVideoOutSubmitChangeBufferAttribute2 and reads the output's dynamic range through sceVideoOutGetOutputStatus,
+// both looked up here by their NIDs as the variable refresh one is. -1 when the console has no such function:
+// HDR is then refused, and the output reads as unknown.
+extern "C" int ps5_title_videoout_change_attribute(int32_t handle, int32_t set, const void* attribute)
+{
+	using ChangeFn = int (*)(int32_t, int32_t, const void*, const void*);
+	static const ChangeFn change = [] {
+		const ChangeFn found = reinterpret_cast<ChangeFn>(
+			PS5SystemModules::FindFunction("libSceVideoOut", "sceVideoOutSubmitChangeBufferAttribute2", "HuViW4HnrOw"));
+		ps5px_log("display: sceVideoOutSubmitChangeBufferAttribute2 %s", found ? "found" : "not on this console: no HDR output");
+		return found;
+	}();
+	return change ? change(handle, set, attribute, nullptr) : -1;
+}
+
+extern "C" int ps5_title_videoout_output_status(int32_t handle, void* status)
+{
+	using StatusFn = int (*)(int32_t, void*);
+	static const StatusFn get = [] {
+		const StatusFn found =
+			reinterpret_cast<StatusFn>(PS5SystemModules::FindFunction("libSceVideoOut", "sceVideoOutGetOutputStatus", "utPrVdxio-8"));
+		ps5px_log("display: sceVideoOutGetOutputStatus %s", found ? "found" : "not on this console: the output's range unknown");
+		return found;
+	}();
+	return get ? get(handle, status) : -1;
+}
+
 // Crux2: settings the emulation thread uses but must not read itself (it can be waited for by a thread
 // that holds the settings lock), handed over where settings are applied, with the lock released.
 static void PS5HandOverEmulationSettings()
@@ -937,6 +999,7 @@ void PS5Host::CPUThreadEntryPoint()
 	// The updater: what to ask GitHub, and how (ps5_update.cpp). It asks once now, unless [PS5]
 	// UpdateAtStart is off; nothing is downloaded until the user says so.
 	PS5Services::StartUpdater();
+	PS5Fixes::Start();
 
 	// The interface's sound, before the interface: its files are read on a thread of their own
 	// while the first frames are drawn.

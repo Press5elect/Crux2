@@ -139,8 +139,8 @@
 			"id": "radv",
 			"name": "RADV, ACO, NIR and Mesa's runtime, with the PS5 winsys and VideoOut WSI (PS5_Mesa)",
 			"licence": "MIT and other permissive licences (Mesa's notices)",
-			"copyright": "the Mesa authors; Mihawk for the PS5 parts",
-			"modifications": "ps5/patches/mesa/0001-diagnostic-breadcrumbs.patch: log lines at device start-up, into the title's boot log; 0002-threaded-recording-queues-push-descriptors.patch: threaded recording (off unless a test run asks for it) queues vkCmdPushDescriptorSet instead of waiting for its thread, and tells the title when that thread starts; 0003-videoout-120hz-settle.patch: a television switching to 119.88 Hz is measured again for up to 1.5 s, its shortest vblank interval taken, before 59.94 Hz is restored; 0004-ps5-timed-waits-on-the-condvar-clock.patch: the VideoOut WSI's and the PS5 winsys's timed waits are given deadlines on the clock their condition variable keeps (found once), where a monotonic deadline came back at once and the wait spun",
+			"copyright": "the Mesa authors; Mihawk for the PS5 parts; Press5elect for Crux2's patches and OGBox's HDR10 patch (ps5/patches/mesa-27/0020); ZiZc3 (VLC for PS5, GPL-3.0) for 0020's way of switching the framebuffers to HDR10",
+			"modifications": "ps5/patches/mesa-27/0020-wsi-videoout-HDR10-framebuffers-on-request.patch (OGBox's, after VLC for PS5's patches/mesa/0001-videoout-hdr10.patch): the framebuffers retyped as HDR10 on the title's request, and the output's dynamic range read; ps5/patches/mesa/0001-diagnostic-breadcrumbs.patch: log lines at device start-up, into the title's boot log; 0002-threaded-recording-queues-push-descriptors.patch: threaded recording (off unless a test run asks for it) queues vkCmdPushDescriptorSet instead of waiting for its thread, and tells the title when that thread starts; 0003-videoout-120hz-settle.patch: a television switching to 119.88 Hz is measured again for up to 1.5 s, its shortest vblank interval taken, before 59.94 Hz is restored; 0004-ps5-timed-waits-on-the-condvar-clock.patch: the VideoOut WSI's and the PS5 winsys's timed waits are given deadlines on the clock their condition variable keeps (found once), where a monotonic deadline came back at once and the wait spun",
 			"texts": {
 				"Mesa-license.rst": "../PS5_Mesa/docs/license.rst"
 			},
@@ -979,6 +979,39 @@
 			}
 		},
 		{
+			"id": "startup-video",
+			"name": "The startup video and its sound (resources/intro): the title's mark behind glass that cracks and shatters, made from OGBox's (OGBox by Press5elect)",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Press5elect",
+			"modifications": "-",
+			"texts": {},
+			"artifacts": [
+				"resources/intro/intro.ivf",
+				"resources/intro/intro.ogg"
+			],
+			"source": {
+				"url": "the source archive that comes with this package (ps5/art/intro: the scene, the renderer, the sound's synthesis, and how they are made)",
+				"revision": "@identity"
+			}
+		},
+		{
+			"id": "libvpx",
+			"name": "libvpx (the startup video's VP9 decoder)",
+			"licence": "BSD-3-Clause",
+			"copyright": "The WebM Project authors (Google Inc.)",
+			"modifications": "none",
+			"texts": {
+				"libvpx-copyright.txt": "/usr/share/doc/libvpx9/copyright"
+			},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/ps5-payload-dev/pacbrew-repo (release v0.40.2, prebuilt for the console: libvpx 1.14.1)",
+				"revision": "v0.40.2"
+			}
+		},
+		{
 			"id": "cacert",
 			"name": "Certificate bundle (resources/cacert.pem): Mozilla's list, as the certifi package carries it",
 			"licence": "MPL-2.0",
@@ -1111,6 +1144,36 @@
 			"source": {
 				"url": "https://github.com/nayuki/QR-Code-generator",
 				"revision": "3c6d0b3cefb4e049dc337e82237c9644399716a8"
+			}
+		},
+		{
+			"id": "move-management",
+			"name": "Move Management for PS5 (formerly Move Studio): its loopback input protocol (MVB1), the checks of its reference client (integrations/move_management_client.hpp) and of its saved screen geometry (integrations/aim_screen_profile.hpp), for aiming the GunCon 2 with a PlayStation Move (ps5/frontend/ps5_move_logic.h, ps5_move_source.cpp). Move Management itself is a separate payload and is not in the package",
+			"licence": "GPL-3.0 (its reference client and profile reader GPL-3.0-or-later)",
+			"copyright": "REXCRAFT88 and the Move Management contributors (its docs/CREDITS.md: AnyPad PS5 by sinfiltros / elmonomalvad0, S-Mohammad-A, Project Porpoise)",
+			"modifications": "written anew in Crux2's style by Press5elect (Copyright (C) 2026) after the protocol document and the reference client: the same refusals, a 50 ms allowance for the title's clock, the stream's generations, the light gun's mapping",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/REXCRAFT88/Move-Management-PS5",
+				"revision": "4d8851b6809756906a9c029ba11baaecda7ceb49"
+			}
+		},
+		{
+			"id": "porpoise-aim",
+			"name": "Project Porpoise's aim (src/porpoise_aim.cpp: the motion fusion, the pointer's geometry, the grip levelling and the pointer's smoothing), for aiming the GunCon 2 with a PlayStation Move (ps5/frontend/ps5_move_logic.h)",
+			"licence": "GPL-3.0-or-later",
+			"copyright": "Copyright (C) 2026 Ruben (Project Porpoise)",
+			"modifications": "the functions used copied unchanged, made inline in a header (ps5/frontend/ps5_move_logic.h, PorpoiseAim), with their notice",
+			"texts": {},
+			"artifacts": [
+				"eboot.bin"
+			],
+			"source": {
+				"url": "https://github.com/elripalda/Porpoise-Dolphin-Emulator-for-PS5",
+				"revision": "61f38f6079a3011abba88e8f4f1cb0ddc0ed27a8"
 			}
 		},
 		{

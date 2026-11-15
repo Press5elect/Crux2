@@ -666,6 +666,13 @@ const GameInfo& settingsGame()
 	return st.game;
 }
 
+// Whether the settings or the quick menu are the screen (the Backend writes the settings when they
+// close: bp_pcsx2.cpp). Declared where it is used.
+bool menusOpen()
+{
+	return screen == Screen::Settings || screen == Screen::Quick;
+}
+
 void openSettings(const GameInfo* game, Screen back, const char* page)
 {
 	const bool forGame = (game != nullptr);

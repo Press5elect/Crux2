@@ -713,6 +713,7 @@ public:
 	}
 	void setFrameLimit(bool on) override { run.frameLimit = on; }
 	void toggleSoftwareRenderer() override { run.hardware = !run.hardware; }
+	bool saveLog() override { return true; }
 	void recordGsDump() override
 	{
 		g_check.expect(run.valid, "a GS dump is recorded in a running game");

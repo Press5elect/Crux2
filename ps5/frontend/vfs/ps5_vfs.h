@@ -141,6 +141,10 @@ int ps5vfs_remove(const char* path, int folder);
 /* Counters, for a report: virtual streams open now, bytes read through backends, backend reads. */
 void ps5vfs_stats(unsigned* open_files, uint64_t* bytes_read, uint64_t* backend_reads);
 
+/* From OGBox 0.0.6: while reads of a share are under way, how long none of them has finished
+ * (seconds; 0 when none is under way): a share that stopped answering, said on the screen. */
+double ps5vfs_stalled_seconds(void);
+
 #ifdef __cplusplus
 }
 
@@ -151,6 +155,20 @@ void ps5vfs_stats(unsigned* open_files, uint64_t* bytes_read, uint64_t* backend_
  * -1 with errno to stop; it may be asked again from 0 after a lost connection). Returns 0, or -1
  * with errno; a stopped or failed transfer leaves no file under the name. */
 int ps5vfs_store_from(const char* path, uint64_t size, const std::function<int64_t(void* buffer, uint32_t length, uint64_t offset)>& source);
+
+#include <string>
+#include <vector>
+
+/* From OGBox 0.0.9: a NAS whose disks have spun down takes seconds to answer a game's first read.
+ * When the title starts, each mount is read a little on a thread of its own (64 KiB at the start
+ * of a file and 64 KiB somewhere inside it), so its disks are turning by the time a game starts.
+ * The file: the first of `preferred` (the games played last) on that mount, else the first file of
+ * 8 MB or more within two folders of its top. Returns at once. */
+void ps5vfs_wake_mounts(std::vector<std::string> preferred);
+/* What ps5vfs_wake_mounts reads of one mount ("" when nothing), and the reading itself (the bytes
+ * read; *file is the file). For the tests. */
+std::string ps5vfs_wake_file(const std::string& mount_point, const std::vector<std::string>& preferred);
+size_t ps5vfs_wake_one(const std::string& mount_point, const std::vector<std::string>& preferred, std::string* file);
 #endif
 
 #endif /* PS5PX_VFS_H */

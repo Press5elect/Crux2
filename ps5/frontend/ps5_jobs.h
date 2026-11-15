@@ -49,6 +49,12 @@ void GameClosed();
 /// or went wrong (the sync when the title starts and after a game). Does nothing when one runs.
 void SyncCards(bool quiet);
 
+/// What the jobs are still writing to a disk, a line for each (a card being changed, the memory
+/// cards' sync, a backup or restore, the logs' copy); empty when nothing is. Cheap, for every frame
+/// of an exit that waits for them (bp_pcsx2.cpp).
+std::vector<std::string> Writing();
+/// Crux2 is closing: the memory cards' sync stops after the card it is copying (none starts after).
+void AskToStop();
 PS5Logs::Files LogFiles();
 void CopyLogs(const Place& place);
 /// Once, when the title starts: whether the run before ended in a crash. Empty when it did not.

@@ -32,6 +32,7 @@
 #include "../ps5_cheats_logic.h"
 #include "../ps5_disc.h"
 #include "../ps5_disc_image.h"
+#include "../ps5_hdr.h"
 #include "../ps5_about.h"
 #include "../vfs/ps5_vfs.h"
 #include "../ps5_extras.h"
@@ -111,6 +112,11 @@ extern "C" void ps5px_download_covers_now(void);
 bool Crux2WantsSoftFloat(const std::string& serial); // GameDatabase.cpp (ps5.patch)
 extern "C" void ps5px_download_pictures_now(void);
 extern "C" int ps5px_arm_profiled_start(int threaded_recording);
+// (From OGBox 0.0.7) The settings written when the menus close, not a second after each change
+// (ps5_host.cpp); and whether they are open (bp_settings.cpp).
+extern "C" void ps5px_settings_hold(int held);
+extern "C" void ps5px_settings_flush(void);
+namespace bp { bool menusOpen(); }
 // The interface's faces, as the emulator's font atlas has them (ImGui/ImGuiManager.cpp): 0 the
 // text face, 1 the bold one, 2 the one the title's name is lettered in.
 ImFont* ps5px_interface_font(int which);
@@ -1147,6 +1153,13 @@ public:
 	bp::LoadState loadState() override
 	{
 		bp::LoadState out;
+		// (From OGBox 0.0.6) The image's share not answering yet: the seconds counted.
+		if (m_share_wait.active && NowSeconds() - m_share_wait.since >= 1.0)
+		{
+			out.text = fmt::format("Waiting for the network share... {} s", static_cast<int>(NowSeconds() - m_share_wait.since));
+			out.slow = "The game starts as soon as the share answers. Circle goes back to the game list.";
+			return out;
+		}
 		const std::lock_guard lock(s_told_mutex);
 		out.text = s_load_text;
 		out.progress = s_load_text.empty() ? -1.f : s_load_progress;
@@ -1180,31 +1193,36 @@ public:
 
 	void loadStateFile(const bp::StateInfo& state) override
 	{
-		Host::RunOnCPUThread([path = state.path, slot = state.slot, backup = state.backup]() {
-			if (!VMManager::HasValidVM())
-				return;
-			// (A state still being packed into its file, the one saved by itself above all, is
-			// whole before it is read.)
-			VMManager::WaitForSaveStateFlush();
-			Error error;
-			if (!VMManager::LoadState(path.c_str(), &error))
-				FullscreenUI::ReportStateLoadError(error.GetDescription(), slot > 0 ? std::optional<s32>(slot) : std::nullopt, backup);
+		LeaveAfterWrites("loading the state", [path = state.path, slot = state.slot, backup = state.backup]() {
+			Host::RunOnCPUThread([path, slot, backup]() {
+				if (!VMManager::HasValidVM())
+					return;
+				// (A state still being packed into its file, the one saved by itself above all, is
+				// whole before it is read.)
+				VMManager::WaitForSaveStateFlush();
+				Error error;
+				if (!VMManager::LoadState(path.c_str(), &error))
+					FullscreenUI::ReportStateLoadError(error.GetDescription(), slot > 0 ? std::optional<s32>(slot) : std::nullopt, backup);
+			});
 		});
 		m_undo_age.ResetTo(0);
 	}
 
 	void reset() override
 	{
-		Host::RunOnCPUThread([]() {
-			if (VMManager::HasValidVM())
-				VMManager::Reset();
+		LeaveAfterWrites("restarting the game", [] {
+			Host::RunOnCPUThread([]() {
+				if (VMManager::HasValidVM())
+					VMManager::Reset();
+			});
 		});
 	}
 
 	void closeGame(bool saveState) override
 	{
 		m_states_key.clear();
-		Host::RunOnCPUThread([saveState]() { Host::RequestVMShutdown(false, saveState, saveState); });
+		LeaveAfterWrites("going back to the game list",
+			[saveState] { Host::RunOnCPUThread([saveState]() { Host::RequestVMShutdown(false, saveState, saveState); }); });
 	}
 
 	void changeDisc(const std::string& path) override
@@ -1231,6 +1249,8 @@ public:
 				MTGS::ToggleSoftwareRendering();
 		});
 	}
+
+	bool saveLog() override { return ps5px_log_keep("Save the log was chosen in the quick menu") != 0; }
 
 	void recordGsDump() override
 	{
@@ -1290,17 +1310,19 @@ public:
 	{
 		m_undo_can = false;
 		m_undo_age.Reset();
-		Host::RunOnCPUThread([]() {
-			if (!VMManager::HasValidVM())
-				return;
-			const std::string path = VMManager::GetCurrentSpecialSaveStateFileName("undo");
-			if (path.empty())
-				return;
-			// (It may still be on its way into its file.)
-			VMManager::WaitForSaveStateFlush();
-			Error error;
-			if (!VMManager::LoadState(path.c_str(), &error))
-				FullscreenUI::ReportStateLoadError(error.GetDescription(), std::nullopt, false);
+		LeaveAfterWrites("undoing the load", [] {
+			Host::RunOnCPUThread([]() {
+				if (!VMManager::HasValidVM())
+					return;
+				const std::string path = VMManager::GetCurrentSpecialSaveStateFileName("undo");
+				if (path.empty())
+					return;
+				// (It may still be on its way into its file.)
+				VMManager::WaitForSaveStateFlush();
+				Error error;
+				if (!VMManager::LoadState(path.c_str(), &error))
+					FullscreenUI::ReportStateLoadError(error.GetDescription(), std::nullopt, false);
+			});
 		});
 	}
 
@@ -3425,7 +3447,42 @@ public:
 		const PS5Logs::Files files = PS5Jobs::LogFiles();
 		page.rows.push_back(Action("This run",
 			"Shows the log of this session.",
-			show("The log of this run", files.now), bp::Option::AllGames));
+			[now = show("The log of this run", files.now)] {
+				// (Kept in memory: from there.)
+				std::string text;
+				if (PS5Platform::LogInMemory(&text))
+					bp::showText("The log of this run", PS5Logs::TailText(text, 800, 2000));
+				else
+					now();
+			},
+			bp::Option::AllGames));
+		// (From OGBox 0.0.7) The boot log kept in memory, written only when something goes wrong.
+		page.rows.push_back(Action("Save the log",
+			"Writes this session's log to crux2-boot.log now, and the rest of the session's lines as they come. For something "
+				"that went wrong without Crux2 noticing.",
+			[] {
+				if (ps5px_log_keep("Save the log was chosen"))
+					bp::toast("The log was written to crux2-boot.log.");
+				else
+					bp::toast("The log is written to crux2-boot.log as it goes already.");
+			},
+			bp::Option::AllGames));
+		page.rows.back().info = [] { return std::string(ps5px_log_in_memory() ? "Kept in memory" : "Written as it goes"); };
+		{
+			bp::Option o;
+			o.kind = bp::Option::StringList;
+			o.label = "Boot log";
+			o.desc = "Only when something goes wrong: the session's log is kept in memory and written to crux2-boot.log after a "
+					 "crash, a game that did not start, 15 seconds without a new picture while a game runs, or Save the log. "
+					 "Always written: every line goes to the file as it is logged, as before. Takes effect the next time Crux2 starts.";
+			o.section = "PS5";
+			o.key = "LogMode";
+			o.names = {"Only when something goes wrong", "Always written"};
+			o.strings = {"memory", "always"};
+			o.defString = "memory";
+			o.flags = bp::Option::AllGames | bp::Option::Restart;
+			page.rows.push_back(std::move(o));
+		}
 		{
 			bp::Option before = Action("The run before",
 				"Shows the log of the previous session, including a crash report if it crashed.",
@@ -3497,7 +3554,7 @@ public:
 	{
 		bp::Page page{"\xef\x81\x9a", "About", {}};
 		page.rows.push_back(Line("Crux2", *ps5px_build_version() != '\0' ?
-			fmt::format("{}, a work in progress, built {}", ps5px_build_version(), ps5px_build_stamp()) :
+			fmt::format("{}, a work in progress, built {}", PS5Update::RunningVersionLabel(), ps5px_build_stamp()) :
 			fmt::format("A work in progress, built {}", ps5px_build_stamp())));
 		page.rows.push_back(Line("Made by", "Press5elect. Crux2 by Press5elect: Copyright (C) 2026 Press5elect"));
 		page.rows.push_back(Line("Emulator", fmt::format("PCSX2 {}, by the PCSX2 Dev Team", GIT_REV)));
@@ -3597,6 +3654,11 @@ public:
 		}
 		else if (w == "interface")
 		{
+			// The startup video (frontend/ps5_intro.cpp, bigpicture/bp_splash.cpp): in the start-up animation's place.
+			rows.push_back(Toggle("Startup video",
+				"Plays Crux2's short video when it starts, in place of the start-up animation, with the start-up sound's volume. "
+				"Press any button to skip it. Needs the start-up animation on and Motion set to All.",
+				"PS5", "StartupVideo", true, A));
 			rows.push_back(Heading("SOUND"));
 			{
 				bp::Option set;
@@ -3677,12 +3739,74 @@ public:
 				size.flags = A | bp::Option::Restart;
 				rows.push_back(std::move(size));
 			}
+			// Crux2: HDR output (ps5_hdr.h; the passes in GSDeviceVK_PS5.cpp, the driver's ps5/patches/mesa-27/0020).
+			{
+				const auto hdr_on = [](int) { return Host::GetBaseBoolSettingValue("PS5", "HDR", false); };
+				const auto nits = [](const std::vector<int>& values, bp::Option& o) {
+					for (int v : values)
+					{
+						o.ints.push_back(v);
+						o.names.push_back(v == 0 ? std::string("Off") :
+										  v == PS5Hdr::DEFAULT_WHITE ? std::string("203 nits (reference)") :
+																	   std::to_string(v) + " nits");
+					}
+				};
+				bp::Option hdr = Toggle("HDR",
+					"Sends the picture to the TV as HDR10, with the game's brightest parts brighter. Needs the console's own HDR "
+						"setting on and a TV that takes HDR; otherwise the picture stays SDR.",
+					"PS5", "HDR", false, A);
+				rows.push_back(std::move(hdr));
+				bp::Option peak;
+				peak.kind = bp::Option::IntList;
+				peak.label = "Peak brightness";
+				peak.desc = "For HDR: how bright the game's brightest parts (the sky, lights, fire) become. Set it near the TV's "
+					"peak. Off: the SDR picture as it is, at the white level.";
+				peak.section = "PS5";
+				peak.key = "HDRPeak";
+				nits(PS5Hdr::PeakChoices(), peak);
+				peak.defInt = PS5Hdr::DEFAULT_PEAK;
+				peak.flags = A;
+				peak.enabled = hdr_on;
+				rows.push_back(std::move(peak));
+				bp::Option white;
+				white.kind = bp::Option::IntList;
+				white.label = "White level";
+				white.desc = "For HDR: how bright white is, the menus' and the game's ordinary whites. 203 nits is HDR's reference; "
+					"raise it if the picture looks dim.";
+				white.section = "PS5";
+				white.key = "HDRWhite";
+				nits(PS5Hdr::WhiteChoices(), white);
+				white.defInt = PS5Hdr::DEFAULT_WHITE;
+				white.flags = A;
+				white.enabled = hdr_on;
+				rows.push_back(std::move(white));
+				bp::Option adjust = Action("Adjust HDR brightness",
+					"A test screen: the X in a square raised until it vanishes sets the peak, then a grey scale sets the white "
+						"level.",
+					[] { PS5Hdr::OpenCalibration(); }, A);
+				adjust.enabled = hdr_on;
+				adjust.info = [] { return std::string("HDR: ") + PS5Hdr::Status(); };
+				rows.push_back(std::move(adjust));
+			}
 		}
 		else if (w == "picture")
 		{
 			rows.push_back(Action("A look of your own",
 				"Loads a libretro shader preset (.slangp) from a \"shaders\" folder on a USB drive or in the title folder.",
 				[this, layer] { PickOwnLook(layer); }));
+			// Crux2: debanding, the last pass before the screen (GSDeviceVK_PS5.cpp; before HDR's when that is on).
+			bp::Option deband;
+			deband.kind = bp::Option::IntList;
+			deband.label = "Debanding";
+			deband.desc = "Smooths the colour bands in skies, fog and dark gradients; edges and detail are kept. Low: the fine "
+				"steps of 32-bit colour. High: the wider ones of 16-bit colour.";
+			deband.section = "PS5";
+			deband.key = "Deband";
+			deband.names = {"Off", "Low", "High"};
+			deband.ints = {0, 1, 2};
+			deband.defInt = 0;
+			deband.flags = A;
+			rows.push_back(std::move(deband));
 		}
 		else if (w == "controllers")
 		{
@@ -3734,6 +3858,10 @@ public:
 				sens.flags = A;
 				rows.push_back(std::move(sens));
 			}
+			rows.push_back(Toggle("Aim with a PlayStation Move (Move Management)",
+				"Player 1 aims the GunCon 2 with a PlayStation Move, and a Navigation controller works its D-pad. Needs the "
+					"Move Management payload running. Press Select on the Move to recentre.",
+				"PS5", "MoveAim", false, A));
 			rows.push_back(Toggle("USB keyboard",
 				"Lets a USB keyboard type in the menus, and act as a PS2 keyboard in games that support one.",
 				"PS5", "USBKeyboard", true, A | bp::Option::Restart));
@@ -3797,6 +3925,9 @@ public:
 			rows.push_back(Toggle("Look for a newer Crux2 at start-up",
 				"Checks GitHub for a newer version each time Crux2 starts. Nothing is downloaded without asking.", "PS5",
 				"UpdateAtStart", true, A));
+			rows.push_back(Toggle("Game fixes from GitHub at start",
+				"Each time Crux2 starts, fetches the game fixes that changed since this version was made (game database entries "
+				"and game patches). They apply to the games started after they came.", "PS5", "FixesAtStart", true, A));
 			{
 				bp::Option news = Action("What's new", "What was added, changed and fixed in each version, newest first.", [] {
 					int versions = 0;
@@ -3887,6 +4018,7 @@ public:
 
 	void frame() override
 	{
+		SharesAndWritesFrame();
 		// L1 and R1 held as the title starts: a television that shows nothing at 120 Hz gets 60 Hz
 		// from the next start (the screen is open by now: this start stays as it is).
 		if (!m_safe_asked && m_frame < 150 && (pad().held & (bp::Pad::L1 | bp::Pad::R1)) == (bp::Pad::L1 | bp::Pad::R1))
@@ -3911,6 +4043,279 @@ public:
 			if (!track.name.empty() && !VMManager::HasValidVM() && m_frame > 300)
 				bp::toast(std::string(ICON_FA_MUSIC "  ") + track.name, 3.f);
 		}
+	}
+
+	// ---- (from OGBox 0.0.6 to 0.0.9) the network shares, the writes an exit waits for, the settings
+	// written when the menus close
+
+	static double NowSeconds() { return Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue()); }
+
+	// Once a frame (frame()).
+	void SharesAndWritesFrame()
+	{
+		const VMState vm = VMManager::GetState();
+		// The boot log's watch: 15 s without a frame while a game runs writes a log kept in memory.
+		ps5px_log_frame(vm == VMState::Running ? 1 : 0);
+		// The settings: kept while the settings or the quick menu are open, written as they close.
+		const bool menus = bp::menusOpen();
+		if (menus != m_menus_open)
+		{
+			m_menus_open = menus;
+			ps5px_settings_hold(menus ? 1 : 0);
+			if (!menus)
+				ps5px_settings_flush();
+		}
+		// The shares woken once, while the game list is looked at.
+		if (!m_shares_woken && m_frame >= 2)
+		{
+			m_shares_woken = true;
+			WakeShares();
+		}
+		if (m_share_wait.active)
+			PollShareWait();
+		if (m_leave.active)
+			PollLeave();
+		// A game closing: its state (when asked for) and memory cards on their way to the disk.
+		if (vm == VMState::Stopping)
+		{
+			if (m_stopping_since < 0)
+				m_stopping_since = NowSeconds();
+			else if (NowSeconds() - m_stopping_since >= 0.4 && !m_leave.active)
+				DrawWriteBar("Closing the game", "Its memory cards, and its state when one is saved, on their way to the disk", -1.f, false,
+					static_cast<float>((NowSeconds() - m_stopping_since - 0.4) / 0.25));
+		}
+		else
+		{
+			m_stopping_since = -1;
+		}
+		// A read of the share that has not finished for 2 s while a game runs (the share stopped
+		// answering): said, with the seconds, until it answers. (Drawn when the graphics thread
+		// draws a frame: a game whose emulation waits for the read gives it none.)
+		const double stalled = (vm == VMState::Running && !bp::active()) ? ps5vfs_stalled_seconds() : 0.0;
+		if (stalled >= 2.0)
+		{
+			if (!m_stall_said)
+				ps5px_log("vfs: a read of the share has not finished for %.1f s (the game waits for it)", stalled);
+			m_stall_said = true;
+			std::string disc;
+			{
+				const std::lock_guard lock(s_told_mutex);
+				disc = std::string(Path::GetFileName(s_game_path));
+			}
+			DrawWriteBar(fmt::format("Waiting for the network share... {} s", static_cast<int>(stalled)),
+				(disc.empty() ? std::string() : "Disc: " + disc + ". ") + "The game goes on when the share answers.", -1.f, false,
+				static_cast<float>((stalled - 2.0) / 0.25));
+		}
+		else if (m_stall_said && stalled == 0.0)
+		{
+			m_stall_said = false;
+			ps5px_log("vfs: the share answered again");
+		}
+	}
+
+	// When the title starts: each share read a little on a thread of its own, the game played last
+	// on it where there is one, so that a NAS's disks are turning when a game is started.
+	void WakeShares()
+	{
+		std::vector<std::pair<time_t, std::string>> played;
+		for (const bp::GameInfo& g : games())
+		{
+			if (g.lastPlayed > 0 && ps5vfs_is_virtual(g.path.c_str()))
+				played.emplace_back(g.lastPlayed, g.path);
+		}
+		std::sort(played.begin(), played.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+		std::vector<std::string> preferred;
+		for (auto& p : played)
+			preferred.push_back(std::move(p.second));
+		ps5vfs_wake_mounts(std::move(preferred));
+	}
+
+	// The start of a game whose image is on a share: true when it waits for the share.
+	bool WaitForShare(VMBootParameters& params)
+	{
+		if (params.filename.empty() || !ps5vfs_is_virtual(params.filename.c_str()))
+			return false;
+		m_share_wait = ShareWait();
+		m_share_wait.active = true;
+		m_share_wait.since = NowSeconds();
+		m_share_wait.image = params.filename;
+		m_share_wait.params = std::move(params);
+		s_boot_pending.store(true, std::memory_order_release);
+		StartShareProbe();
+		return true;
+	}
+
+	// The image looked for on a thread of its own (a share that does not answer can take a while to
+	// say so): 1 there, 2 not yet, 3 the share answers and the image is not on it.
+	void StartShareProbe()
+	{
+		auto result = std::make_shared<std::atomic<int>>(0);
+		m_share_wait.result = result;
+		m_share_wait.next = NowSeconds() + 1.0;
+		std::thread([result, image = m_share_wait.image]() {
+			struct stat st;
+			if (ps5vfs_stat(image.c_str(), &st) == 0)
+			{
+				result->store(1);
+				return;
+			}
+			const int error = errno;
+			const std::string folder(Path::GetDirectory(image));
+			result->store((error == ENOENT && !folder.empty() && ps5vfs_stat(folder.c_str(), &st) == 0) ? 3 : 2);
+		}).detach();
+	}
+
+	void PollShareWait()
+	{
+		const int result = m_share_wait.result ? m_share_wait.result->load() : 2;
+		const double now = NowSeconds();
+		if (result == 1 || result == 3)
+		{
+			if (m_share_wait.told)
+				ps5px_log("game: the share answered after %.1f s: starting the game", now - m_share_wait.since);
+			m_share_wait.active = false;
+			m_share_wait.result.reset();
+			// (Not there: the start says so, as it would without the wait.)
+			Boot(std::move(m_share_wait.params), true);
+			return;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+		{
+			ps5px_log("game: waiting for the share given up (Circle)");
+			m_share_wait.active = false;
+			m_share_wait.result.reset();
+			s_boot_pending.store(false, std::memory_order_release);
+			return;
+		}
+		if (result == 2 && !m_share_wait.told)
+		{
+			m_share_wait.told = true;
+			ps5px_log("game: the disc image %s is not reachable yet: waiting for the share", m_share_wait.image.c_str());
+		}
+		if (result == 2 && now >= m_share_wait.next)
+			StartShareProbe();
+	}
+
+	// then() once nothing is left on its way to the disk: at once (the next frame) when nothing is,
+	// else with a bar along the bottom saying what: a save state being packed into its file, and
+	// with `jobs` (Crux2 closing) the jobs that write (the memory cards' sync, a backup, a card
+	// being changed, the logs' copy), which Circle leaves when only they are left.
+	void LeaveAfterWrites(const char* what, std::function<void()> then, bool jobs = false)
+	{
+		if (m_leave.active)
+		{
+			// (One asked for while another waits, Crux2 closing above all: after it.)
+			m_leave.then = [first = std::move(m_leave.then), then = std::move(then)] {
+				first();
+				then();
+			};
+			return;
+		}
+		m_leave = Leave();
+		m_leave.active = true;
+		m_leave.what = what;
+		m_leave.then = std::move(then);
+		m_leave.since = NowSeconds();
+		m_leave.lastLog = m_leave.since - 4.75; // (the first line once it has waited a quarter of a second)
+		m_leave.stage = std::make_shared<std::atomic<int>>(1);
+		m_leave.skip = std::make_shared<std::atomic<bool>>(false);
+		std::thread([stage = m_leave.stage, skip = m_leave.skip, jobs]() {
+			// (Safe beside the emulation thread's own waits: each joins the packing threads it takes.)
+			VMManager::WaitForSaveStateFlush();
+			stage->store(2);
+			while (jobs && !skip->load() && !PS5Jobs::Writing().empty())
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			stage->store(3);
+		}).detach();
+	}
+
+	void PollLeave()
+	{
+		const int stage = m_leave.stage->load();
+		const double now = NowSeconds();
+		if (stage == 3)
+		{
+			if (now - m_leave.since >= 0.25)
+				ps5px_log("interface: %s: the writes were done after %.1f s%s", m_leave.what.c_str(), now - m_leave.since,
+					m_leave.skip->load() ? " (the jobs left, Circle)" : "");
+			std::function<void()> then = std::move(m_leave.then);
+			m_leave.active = false;
+			then();
+			return;
+		}
+		std::vector<std::string> parts;
+		if (stage == 1)
+			parts.emplace_back("A save state being written");
+		else
+			parts = PS5Jobs::Writing();
+		const bool can_skip = (stage == 2);
+		if (can_skip && !m_leave.skip->load() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+		{
+			m_leave.skip->store(true);
+			ps5px_log("interface: %s: the jobs still writing left (Circle)", m_leave.what.c_str());
+		}
+		if (now - m_leave.lastLog >= 5.0)
+		{
+			m_leave.lastLog = now;
+			std::string all;
+			for (const std::string& p : parts)
+				all += (all.empty() ? "" : ", ") + p;
+			ps5px_log("interface: %s: waiting for the disk (%s)", m_leave.what.c_str(), all.c_str());
+		}
+		if (now - m_leave.since < 0.25)
+			return;
+		std::string detail;
+		for (const std::string& p : parts)
+			detail += (detail.empty() ? "" : "  \xC2\xB7  ") + p;
+		DrawWriteBar("Saving before " + m_leave.what, detail, -1.f, can_skip, static_cast<float>((now - m_leave.since - 0.25) / 0.25));
+	}
+
+	// Along the bottom, over everything: what is being waited for (title), what is left (detail), a
+	// bar (fraction 0-1; below 0 a light goes along it: no end known), Circle's hint when what is
+	// left may be left.
+	static void DrawWriteBar(const std::string& title, const std::string& detail, float fraction, bool can_skip, float appear)
+	{
+		const float a = std::clamp(appear, 0.f, 1.f);
+		if (a <= 0.f)
+			return;
+		ImDrawList* const dl = ImGui::GetForegroundDrawList();
+		const ImVec2 screen = ImGui::GetIO().DisplaySize;
+		const float u = screen.y / 1080.f;
+		const auto alpha = [a](int r, int g, int b, float o) { return IM_COL32(r, g, b, static_cast<int>(255.f * o * a)); };
+		const float margin = 48.f * u, h = 118.f * u, rise = 24.f * u * (1.f - a);
+		const ImVec2 p0(margin, screen.y - margin - h + rise), p1(screen.x - margin, screen.y - margin + rise);
+		dl->AddRectFilled(ImVec2(p0.x, p0.y + 8.f * u), ImVec2(p1.x, p1.y + 12.f * u), alpha(0, 0, 0, 0.35f), 22.f * u);
+		dl->AddRectFilled(p0, p1, alpha(28, 30, 38, 0.96f), 20.f * u);
+		dl->AddRect(p0, p1, alpha(255, 255, 255, 0.10f), 20.f * u, 1.5f * u);
+		const float x = p0.x + 36.f * u, w = p1.x - p0.x - 72.f * u;
+		ImFont* const regular = ps5px_interface_font(0);
+		ImFont* const bold = ps5px_interface_font(1);
+		float hint_w = 0.f;
+		if (can_skip)
+		{
+			static constexpr const char HINT[] = "Circle  Leave now";
+			hint_w = (regular ? regular : ImGui::GetFont())->CalcTextSizeA(20.f * u, FLT_MAX, 0.f, HINT).x;
+			dl->AddText(regular, 20.f * u, ImVec2(p1.x - 36.f * u - hint_w, p0.y + 26.f * u), alpha(170, 176, 190, 1.f), HINT);
+		}
+		const ImVec4 clip(x, p0.y, x + w - (hint_w > 0.f ? hint_w + 24.f * u : 0.f), p1.y);
+		dl->AddText(bold, 26.f * u, ImVec2(x, p0.y + 20.f * u), alpha(240, 242, 248, 1.f), title.c_str(), nullptr, 0.f, &clip);
+		const ImVec4 clip2(x, p0.y, x + w, p1.y);
+		dl->AddText(regular, 20.f * u, ImVec2(x, p0.y + 56.f * u), alpha(176, 182, 196, 1.f), detail.c_str(), nullptr, 0.f, &clip2);
+		const float by = p1.y - 28.f * u, bh = 6.f * u;
+		dl->AddRectFilled(ImVec2(x, by), ImVec2(x + w, by + bh), alpha(255, 255, 255, 0.12f), bh * 0.5f);
+		float f0 = 0.f, f1 = 0.f;
+		if (fraction >= 0.f)
+		{
+			f1 = std::min(1.f, fraction);
+		}
+		else
+		{
+			const float t = static_cast<float>(std::fmod(ImGui::GetTime(), 1.6) / 1.6);
+			f0 = std::max(0.f, t * 1.3f - 0.3f);
+			f1 = std::min(1.f, t * 1.3f);
+		}
+		if (f1 > f0)
+			dl->AddRectFilled(ImVec2(x + w * f0, by), ImVec2(x + w * f1, by + bh), alpha(74, 158, 255, 1.f), bh * 0.5f);
 	}
 
 	// Sleep-safe saving's note (PS5Extras): the console closed the title while a game was played.
@@ -4710,7 +5115,10 @@ public:
 
 	void quit() override
 	{
-		Host::RunOnCPUThread([]() { Host::RequestExitApplication(false); });
+		// (From OGBox 0.0.9) What is still on its way to a disk first, the memory cards' sync stopping
+		// after the card it copies; the settings written by the closing (ps5_host.cpp).
+		PS5Jobs::AskToStop();
+		LeaveAfterWrites("Crux2 closes", [] { Host::RunOnCPUThread([]() { Host::RequestExitApplication(false); }); }, true);
 	}
 
 	void log(const std::string& line) override { ps5px_log("interface: %s", line.c_str()); }
@@ -5343,8 +5751,14 @@ private:
 		});
 	}
 
-	void Boot(VMBootParameters params)
+	void Boot(VMBootParameters params, bool share_answered = false)
 	{
+		// (From OGBox 0.0.6) An image on a share: looked for on a thread first, and the start waits
+		// while the share does not answer (PollShareWait calls this again once it does).
+		if (!share_answered && WaitForShare(params))
+			return;
+		// (From OGBox 0.0.7) What was changed in the menus and not yet written, written first.
+		ps5px_settings_flush();
 		s_boot_pending.store(true, std::memory_order_release);
 		s_boot_from_network.store(params.filename.compare(0, 5, "/smb/") == 0, std::memory_order_relaxed);
 		PS5UI::SetLoadProgress(std::string(), -1.f);
@@ -5372,6 +5786,7 @@ private:
 				if (result != VMBootResult::StartupSuccess)
 				{
 					ps5px_log("game: could not be started: %s", error.GetDescription().c_str());
+					ps5px_log_keep("a game did not start");
 					s_boot_pending.store(false, std::memory_order_release);
 					if (MTGS::IsOpen())
 						MTGS::RunOnGSThread([why = error.GetDescription()]() { bp::startFailed(why); });
@@ -5524,6 +5939,32 @@ private:
 	bool m_disc_lent = false; // the drive was given to a start from the disc
 	unsigned m_disc_seen = ~0u;
 	std::map<std::string, u32> m_disc_crcs;
+
+	// (From OGBox 0.0.6 to 0.0.9: SharesAndWritesFrame.)
+	bool m_menus_open = false;  // the settings or the quick menu, as last seen
+	bool m_shares_woken = false;
+	bool m_stall_said = false;  // a read of the share that has not finished, logged
+	double m_stopping_since = -1;
+	// A start waiting for the share its image is on.
+	struct ShareWait
+	{
+		bool active = false;
+		bool told = false; // logged
+		double since = 0, next = 0;
+		std::string image;
+		VMBootParameters params;
+		std::shared_ptr<std::atomic<int>> result;
+	} m_share_wait;
+	// An exit waiting for what is still on its way to the disk.
+	struct Leave
+	{
+		bool active = false;
+		std::string what; // "going back to the game list"
+		std::function<void()> then;
+		double since = 0, lastLog = 0;
+		std::shared_ptr<std::atomic<int>> stage; // 1 the states, 2 the jobs, 3 done
+		std::shared_ptr<std::atomic<bool>> skip; // Circle: the jobs left
+	} m_leave;
 };
 
 PCSX2Backend s_backend;
@@ -5892,7 +6333,9 @@ void FullscreenUI::Render()
 		Achievements::DrawGameOverlays();
 
 	// (While one of PCSX2's lists is up the screens draw nothing and read no button.)
-	bp::render();
+	// (Nor while Adjust HDR brightness's test screen is up: ps5_hdr.h.)
+	if (!PS5Hdr::CalibrationFrame())
+		bp::render();
 	if (overlay == 1)
 		Achievements::DrawAchievementsWindow();
 	else if (overlay == 2)

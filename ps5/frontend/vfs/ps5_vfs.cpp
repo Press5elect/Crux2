@@ -24,6 +24,7 @@
 #include <mutex>
 #include <strings.h>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,32 @@ void (*s_log)(const char* line) = nullptr;
 
 std::atomic<uint64_t> s_bytes_read{0};
 std::atomic<uint64_t> s_backend_reads{0};
+
+/* From OGBox 0.0.6: how long the reads under way have gone without one finishing (a share that
+ * stopped answering), for ps5vfs_stalled_seconds: the reads under way, and when one last finished. */
+std::atomic<int> s_reads_under_way{0};
+std::atomic<int64_t> s_read_progress_ms{0};
+
+int64_t NowMs()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+struct ReadUnderWay
+{
+  ReadUnderWay()
+  {
+    if (s_reads_under_way.fetch_add(1) == 0)
+      s_read_progress_ms.store(NowMs());
+  }
+  ~ReadUnderWay()
+  {
+    s_read_progress_ms.store(NowMs());
+    s_reads_under_way.fetch_sub(1);
+  }
+};
 
 struct MountPoint
 {
@@ -229,6 +256,7 @@ Block* GetBlock(VFile* file, int64_t offset)
   uint32_t have = 0;
   while (have < wanted)
   {
+    ReadUnderWay under_way; // a read that takes long is said on the screen (ps5vfs_stalled_seconds)
     const int64_t got = file->file->Read(victim->data.get() + have, wanted - have, block_offset + have);
     s_backend_reads.fetch_add(1, std::memory_order_relaxed);
     if (got < 0)
@@ -1424,4 +1452,97 @@ extern "C" void ps5vfs_stats(unsigned* open_files, uint64_t* bytes_read, uint64_
     *bytes_read = s_bytes_read.load(std::memory_order_relaxed);
   if (backend_reads)
     *backend_reads = s_backend_reads.load(std::memory_order_relaxed);
+}
+
+extern "C" double ps5vfs_stalled_seconds(void)
+{
+  if (s_reads_under_way.load() <= 0)
+    return 0.0;
+  return static_cast<double>(NowMs() - s_read_progress_ms.load()) / 1000.0;
+}
+
+/* From OGBox 0.0.9: a file of at least 8 MB (a disc image) within `depth` folders below; "" for none. */
+static std::string FirstLargeFile(const std::string& folder, int depth)
+{
+  ps5vfs_dir* const dir = ps5vfs_opendir(folder.c_str());
+  if (!dir)
+    return std::string();
+  std::vector<std::string> subs;
+  std::string found;
+  struct ps5vfs_dirent e;
+  for (unsigned n = 0; found.empty() && n < 400 && ps5vfs_readdir(dir, &e) == 1; n++)
+  {
+    if (!e.name || e.name[0] == '.')
+      continue;
+    if (e.is_directory)
+      subs.push_back(folder + "/" + e.name);
+    else if (e.size >= (8 << 20))
+      found = folder + "/" + e.name;
+  }
+  ps5vfs_closedir(dir);
+  for (size_t i = 0; found.empty() && depth > 0 && i < subs.size() && i < 16; i++)
+    found = FirstLargeFile(subs[i], depth - 1);
+  return found;
+}
+
+std::string ps5vfs_wake_file(const std::string& mount_point, const std::vector<std::string>& preferred)
+{
+  for (const std::string& path : preferred)
+  {
+    if (path.size() > mount_point.size() + 1 && path.compare(0, mount_point.size() + 1, mount_point + "/") == 0)
+      return path;
+  }
+  return FirstLargeFile(mount_point, 2);
+}
+
+size_t ps5vfs_wake_one(const std::string& mount_point, const std::vector<std::string>& preferred, std::string* file)
+{
+  *file = ps5vfs_wake_file(mount_point, preferred);
+  if (file->empty())
+    return 0;
+  size_t got = 0;
+  if (FILE* const fp = ps5vfs_fopen(file->c_str(), "rb"))
+  {
+    std::vector<char> buffer(64 * 1024);
+    got = ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    /* And somewhere inside: what the server keeps in its memory doesn't wake its disks. */
+    struct stat st;
+    if (ps5vfs_fstat(fp, &st) == 1 && st.st_size > static_cast<off_t>(4 * buffer.size()))
+    {
+      uint64_t mix = static_cast<uint64_t>(NowMs()) * 0x9E3779B97F4A7C15ull;
+      mix ^= mix >> 29;
+      const off_t at = static_cast<off_t>(mix % static_cast<uint64_t>(st.st_size - static_cast<off_t>(buffer.size())));
+      if (ps5vfs_fseeko(fp, at & ~static_cast<off_t>(4095), SEEK_SET) == 0)
+        got += ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    }
+    ps5vfs_fclose(fp);
+  }
+  return got;
+}
+
+void ps5vfs_wake_mounts(std::vector<std::string> preferred)
+{
+  std::vector<std::string> mounts;
+  for (unsigned i = 0;; i++)
+  {
+    const char* const point = ps5vfs_mount_point(i);
+    if (!point)
+      break;
+    mounts.emplace_back(point);
+  }
+  if (mounts.empty())
+    return;
+  std::thread([mounts = std::move(mounts), preferred = std::move(preferred)]() {
+    for (const std::string& m : mounts)
+    {
+      const int64_t t0 = NowMs();
+      std::string file;
+      const size_t got = ps5vfs_wake_one(m, preferred, &file);
+      if (file.empty())
+        Log("vfs: share %s: no large file on it to read (to wake its disks)", m.c_str());
+      else
+        Log("vfs: share %s woken: %zu KiB of %s read in %.1f s", m.c_str(), got / 1024, file.c_str(),
+            static_cast<double>(NowMs() - t0) / 1000.0);
+    }
+  }).detach();
 }
