@@ -62,19 +62,75 @@ of the area), `level` (Essentials, More, Everything: today's Normal, Advanced, E
 where a game's page shows it at another), and `origin` (`pcsx2` or `crux2`). A PCSX2 setting has
 PCSX2's own words beside it, from PCSX2 at the pin without `ps5.patch`: `pcsx2_title`,
 `pcsx2_description` and `pcsx2_source` (file:line; Big Picture's `FullscreenUI_Settings.cpp` first,
-else the Qt interface's tooltips, else PCSX2's controller tables), and `pcsx2_tooltip` where the Qt
-interface says something else as well. A PCSX2 text that names games is not copied (rule 4):
-`*_withheld` says so and the source line is given. `dynamic: true`: the row's words come from data
-(PCSX2's tables, a game's patches, a drive's name). `doubtful:` says why an area or section is a guess
-(`settings-text.py doubtful` lists them).
+else PCSX2's controller and hotkey tables, else the Qt interface's tooltips and forms), and
+`pcsx2_tooltip` where the Qt interface says something else as well. PCSX2's texts are copied whole,
+the games they name included (the owner's decision of 2026-11-15, an exception to rule 4).
+`dynamic: true`: the row's words come from data (PCSX2's tables, a game's patches, a drive's name).
+`doubtful:` says why an area or section is a guess (`settings-text.py doubtful` lists them).
 
 ```bash
 ps5/tools/settings-text.py make      # writes the file from the inventory (keeps what was edited by hand)
-ps5/tools/settings-text.py check     # every row has an entry, no stale ids, valid fields, the code's words
+ps5/tools/settings-text.py check     # every row has an entry, no stale ids, valid fields, the code's words, the new words' checks
 ps5/tools/settings-text.py bake      # bp_settings_text.h, the table the interface will compile in
+ps5/tools/settings-text.py review --out /tmp/review.html   # the review sheet: every row, today's words and the new
+ps5/tools/settings-text.py apply     # phase 3: the new words become the row's words, then bake
 ```
 
 In phase 1 the interface does not read `bp_settings_text.h` yet, and `check` requires the file's
-words to be exactly the code's, so nothing on the screen can change. Phase 2 rewrites Crux2's own
-descriptions in PCSX2's voice and uses PCSX2's word for word; phase 3 makes the interface take its
-words and places from the baked table (and lifts that check).
+words to be exactly the code's, so nothing on the screen can change. Phase 2 writes the new words
+beside today's; phase 3 makes the interface take its words and places from the baked table (and
+lifts that check).
+
+## The new words (phase 2)
+
+The owner's requirement: PCSX2's descriptions word for word wherever PCSX2 has the setting, and
+everything else in PCSX2's style. Each entry has, beside today's `label`, `desc` and `choices`:
+
+| Field | What |
+| --- | --- |
+| `new_label`, `new_desc`, `new_choices` | the words to be (the choice names only: their values never change) |
+| `text` | the description's kind: `exact`, `written` or `exact-but-wrong` (every row has one) |
+| `text_source` | where PCSX2's text is (file:line at the pin), for `exact` and `exact-but-wrong` |
+| `label_text`, `label_source` | the label's kind (`exact` or `written`) and where PCSX2's is; none where the label is data |
+| `choices_text`, `choices_source` | the choice names' kind (`exact`, `mixed`, `written`, `exact-but-wrong`) and PCSX2's list |
+| `text_note` | why a text is exact-but-wrong, or what else is worth knowing |
+
+- **exact**: PCSX2's text at the pin, byte for byte (a `\n` or a trailing space included). The
+  setting is matched by section and key, never by label. FullscreenUI's text is preferred, then the
+  controller and hotkey tables, then the Qt interface's tooltip (`pcsx2_tooltip` keeps Qt's where it
+  differs). Labels and choice names are FullscreenUI's for that key where it has them, else the
+  tables' or the Qt form's (a form label's colon left off). A choice is mapped to PCSX2's name by its
+  value. A few actions are matched to the PCSX2 button that does the same (Scan For New Games, Login,
+  Save Profile...: `text_note` says so); the four crop rows take Qt's text for their side, since
+  FullscreenUI has one row for all four.
+- **exact-but-wrong**: PCSX2's text for the setting, untrue of this row (it joins switches, offers
+  more, or states something the console does not have). The owner decides; `apply` leaves today's
+  words for it.
+- **written**: Crux2's rows, and PCSX2 settings PCSX2 gives no text, in PCSX2's voice:
+  - one or two sentences (three at most), present tense, starting with what it does: Enables,
+    Determines, Selects, Sets, Shows, Controls, Uses, Applies, Reduces, Allows, Prevents, Forces;
+    "When enabled, ..." for what a switch then does; "When disabled, ..." for the other side;
+  - the cost or risk as PCSX2 states it: "Reduces performance.", "May cause issues in some games.",
+    "Can improve performance in some games.", "Not supported in all games.";
+  - PCSX2's terms: internal resolution, upscaling, hardware/software renderer, save state, memory
+    card, on-screen display (OSD), game list, cover, BIOS, PS2, virtual machine, vsync, input lag,
+    FMV, hotkey, bindings, input profile, game fixes, patches, cheats, network adapter, HDD, startup;
+  - American spelling, as PCSX2 writes (color, center, gray, license);
+  - labels in Title Case, a noun phrase or Enable/Show/Use + noun, as PCSX2's ("Show FPS",
+    "Fast Boot", "Swap OK/Cancel"); choice names in Title Case, the standard value marked
+    `(Default)` where PCSX2 marks one, "Default" where a choice is the standard one itself, "Use
+    Global Setting" for a game's "as in the Settings";
+  - never: "Crux2" (except a folder's name in quotes), "our", "own" meaning ours, "as before",
+    "new", "now", version numbers, history, implementation details, file names the user need not
+    know, "PS5's"; and no "Takes effect at the next start" or "Experimental" (PCSX2 never says them:
+    the row's `NextStart`/`Restart` flag says the first, a risk sentence the second).
+
+`check` adds, for the new words: every `exact` (and `exact-but-wrong`) description, label and
+choice list is PCSX2's at its source, read again from `vendor/pcsx2`'s git HEAD (the pin without
+`ps5.patch`), naming the row and the source when not; written words have none of the banned words or
+British spellings (a name in double quotes is left out of the search); no description is empty
+(bindings and information lines may be: PCSX2's have none, a line shows its value) or another row's
+by accident; a choice named `(Default)` is the row's default; every row has `text`.
+
+`apply` (phase 3) writes the new words over today's and bakes; an action's or information line's id
+is made from its label, so the inventory's baseline is blessed for those relabels then.

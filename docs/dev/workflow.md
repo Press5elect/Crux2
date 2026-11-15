@@ -103,4 +103,4 @@ These are the owner's standing rules. They hold for every session and every agen
 | `ps5/tools/merge-profiles.sh` | PGO profiles merged ([`building.md`](building.md#profile-guided-builds)) |
 | `ps5/tests/run-host-tests.sh` | The host tests (CI runs them) |
 | `ps5/tests/bigpicture/run-bigpicture-tests.sh <dir> [crawl\|shots\|inventory\|all]` | The interface on the PC; `inventory`: no setting lost |
-| `ps5/tools/settings-inventory.py check\|bless\|show`, `ps5/tools/settings-text.py make\|check\|bake` | The settings inventory and its baseline; `settings-text.yaml` ([`settings-inventory.md`](settings-inventory.md)) |
+| `ps5/tools/settings-inventory.py check\|bless\|show`, `ps5/tools/settings-text.py make\|check\|bake\|review\|apply` | The settings inventory and its baseline; `settings-text.yaml` ([`settings-inventory.md`](settings-inventory.md)) |

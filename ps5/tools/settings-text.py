@@ -23,6 +23,16 @@
 #   ps5/tools/settings-text.py doubtful
 #       The rows whose area or section is a guess (the `doubtful:` notes), for the owner to decide.
 #
+#   ps5/tools/settings-text.py review --out FILE
+#       Writes the review sheet (one HTML page): every row's words now and as they will be, grouped
+#       by the revamp's areas, with the kind and PCSX2's source of each.
+#
+#   ps5/tools/settings-text.py apply
+#       Makes the new words the row's words: new_label, new_desc and new_choices become label, desc
+#       and choices (a field marked exact-but-wrong is left as it is, and named), then bakes. For
+#       phase 3: after it, `check`'s comparison with the code's words fails until the interface
+#       takes its words from the baked table.
+#
 # An entry (one line per field, values in double quotes or as a [list]):
 #
 #   - id: "EmuCore/GS.Renderer"           # fixed: the setting's section.key (an action's or a line's
@@ -44,6 +54,21 @@
 #     dynamic: true                       # its words come from data (PCSX2's controller tables, a game's
 #                                         # patches, a drive's name): the interface cannot take them from here
 #     doubtful: "..."                     # why the area or section is a guess
+#
+# The words of the revamp (phase 2), next to today's until they are applied (docs/dev/settings-inventory.md):
+#
+#     new_label: "Graphics API"           # the label, description and choice names to be
+#     new_desc: "..."
+#     new_choices: ["Vulkan", ...]
+#     text: "exact"                       # the description's kind: exact (PCSX2's, byte for byte),
+#                                         # written (in PCSX2's voice), exact-but-wrong (PCSX2's, but
+#                                         # untrue of this row: the owner decides; apply leaves it)
+#     text_source: "pcsx2/ImGui/..:3114"  # where PCSX2's text is (exact, exact-but-wrong)
+#     text_note: "..."                    # why exact-but-wrong, or what else to know
+#     label_text: "exact"                 # the label's kind (exact or written), and where PCSX2's is
+#     label_source: "pcsx2/ImGui/..:3114"
+#     choices_text: "exact"               # the choice names' kind: exact (all PCSX2's), mixed (some),
+#     choices_source: "pcsx2/ImGui/..:2857" # written, exact-but-wrong; and the PCSX2 list they are from
 #
 # Never change an id by hand: the code finds the row by it.
 
@@ -170,30 +195,252 @@ def call_args(src, at):
     return args
 
 
-def pcsx2_index():
-    """PCSX2's words for each setting: {(section, key): {"fsui": (title, summary, where), "qt": (...)}}, and every
-    translatable text of its controller and hotkey tables: {text: where}."""
-    by_key = {}
-    fsui_path = "pcsx2/ImGui/FullscreenUI_Settings.cpp"
-    for path in (fsui_path, "pcsx2/ImGui/FullscreenUI.cpp"):
+# ------------------------------------------------------------------------------ PCSX2's words, by place
+
+TEXT_MACROS = re.compile(r"\b(FSUI_ICONSTR_S|FSUI_ICONSTR|FSUI_CSTR|FSUI_NSTR|FSUI_STR|FSUI_FSTR|FSUI_VSTR|QT_TRANSLATE_NOOP|"
+                         r"TRANSLATE_NOOP|TRANSLATE_SV|TRANSLATE|tr)\s*\(")
+ONLY_LITERALS = re.compile(r'\s*(?:"(?:[^"\\]|\\.)*"\s*)+')
+
+
+def line_offset(src, line):
+    pos = 0
+    for _ in range(line - 1):
+        pos = src.index("\n", pos) + 1
+    return pos
+
+
+def statement_at(src, line):
+    """The text of the statement, call or table entry that starts on `line` (1-based)."""
+    start = i = line_offset(src, line)
+    depth, opened, n = 0, False, len(src)
+    while i < n:
+        c = src[i]
+        if c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            i = j + 1
+            continue
+        if src.startswith("//", i):
+            i = src.find("\n", i)
+            i = n if i < 0 else i
+            continue
+        if c in "([{":
+            depth += 1
+            opened = True
+        elif c in ")]}":
+            depth -= 1
+            if depth < 0:
+                break
+            if depth == 0 and opened and c == "}" and src[i + 1:i + 2] in (",", ";", "\n"):
+                i += 1
+                break
+            if depth == 0 and c == ")" and (src[i + 1:].lstrip().startswith("{") or  # if (...) { : the condition only
+                                            not src[i + 1:src.find("\n", i) if "\n" in src[i:] else n].strip()):  # a macro: no ;
+                i += 1
+                break
+        elif c == ";" and depth == 0:
+            break
+        elif c == "," and depth == 0 and opened:
+            break
+        i += 1
+    return src[start:i]
+
+
+def texts_of(code):
+    """The translatable texts of a piece of C++, in order: the text argument of each FSUI_*STR, TRANSLATE_NOOP, tr()."""
+    out = []
+    for m in TEXT_MACROS.finditer(code):
+        args = call_args(code, m.end())
+        if not args:
+            continue
+        macro = m.group(1)
+        arg = args[1] if macro in ("FSUI_ICONSTR", "FSUI_ICONSTR_S", "TRANSLATE_NOOP", "QT_TRANSLATE_NOOP", "TRANSLATE_SV", "TRANSLATE") \
+            and len(args) > 1 else args[0]
+        if ONLY_LITERALS.fullmatch(strip_comments(arg)):
+            out.append(literals(arg))
+    return out
+
+
+def texts_at(where):
+    """The translatable texts of the statement at `where` ("path:line") in PCSX2 at the pin, without ps5.patch; of a Qt
+    form (.ui), the <string>s on that line, a label's colon left off."""
+    path, _, line = where.rpartition(":")
+    src = pristine(path)
+    if not src or not line.isdigit():
+        return []
+    if path.endswith(".ui"):
+        import html
+        text = src.splitlines()[int(line) - 1]
+        return [html.unescape(t).removesuffix(":") for t in re.findall(r"<string[^>]*>(.*?)</string>", text)]
+    # The statement that starts on the line, and every text written whole on the line itself (a table's row of several).
+    texts = texts_of(statement_at(src, int(line)))
+    return texts + [t for t in texts_of(src.splitlines()[int(line) - 1]) if t not in texts]
+
+
+def array_at(where):
+    """The entries of the brace-initialised array whose definition is at `where`: each a translatable text, a string, a number."""
+    path, _, line = where.rpartition(":")
+    src = pristine(path)
+    start = line_offset(src, int(line))
+    open_at = src.index("{", start)
+    body = src[open_at + 1:]
+    depth, i, entries, cur = 0, 0, [], ""
+    while i < len(body):
+        c = body[i]
+        if c == '"':
+            j = i + 1
+            while j < len(body) and body[j] != '"':
+                j += 2 if body[j] == "\\" else 1
+            cur += body[i:j + 1]
+            i = j + 1
+            continue
+        if body.startswith("//", i):
+            i = body.find("\n", i)
+            continue
+        if c == "#":  # a preprocessor line (#ifdef): every platform's entries are read
+            i = body.find("\n", i)
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            if depth == 0:
+                entries.append(cur)
+                break
+            depth -= 1
+        elif c == "," and depth == 0:
+            entries.append(cur)
+            cur = ""
+            i += 1
+            continue
+        cur += c
+        i += 1
+    out = []
+    for e in entries:
+        e = strip_comments(e).strip()
+        if not e or e == "nullptr":
+            continue
+        t = texts_of(e)
+        if t:
+            out.append(t[0])
+        elif ONLY_LITERALS.fullmatch(e):
+            out.append(literals(e))
+        else:
+            out.append(e.rstrip("f"))
+    return out
+
+
+def find_array(src, name, before):
+    """The line of the definition of the array `name` nearest before offset `before` (or anywhere in the file)."""
+    best = None
+    for m in re.finditer(r"\b" + re.escape(name) + r"\s*\[[^\]]*\]\s*=\s*\{", src):
+        if best is None or m.start() < before:
+            best = m
+    return None if best is None else src.count("\n", 0, best.start()) + 1
+
+
+DRAW = re.compile(r"\bDraw(Toggle|IntList|IntRange|IntSpinBox|FloatRange|FloatSpinBox|StringList|FloatList|Enum|IPAddress|IntRect|"
+                  r"ClampingMode)Setting\(\s*bsi\s*,")
+CLAMP_KEYS = {"-1": "fpuOverflow", "0": "vu0Overflow", "1": "vu1Overflow"}
+
+# PCSX2 settings whose FullscreenUI row is not a Draw*Setting call with the key written out (a key made with fmt, a
+# button of its own): where the row is, read as the others are.
+FSUI = "pcsx2/ImGui/FullscreenUI_Settings.cpp"
+# {key: (title's place, which text of it, description's place or None, which text of it)}
+MANUAL_ROWS = {
+    ("Filenames", "BIOS"): (f"{FSUI}:2552", 0, f"{FSUI}:2552", 1),
+    ("EmuCore", "InputProfileName"): (f"{FSUI}:2203", 0, f"{FSUI}:2203", 1),
+    ("MemoryCards", "Slot1_Enable"): (f"{FSUI}:3878", 0, f"{FSUI}:3878", 1),
+    ("MemoryCards", "Slot2_Enable"): (f"{FSUI}:3878", 0, f"{FSUI}:3878", 1),
+    ("MemoryCards", "Slot1_Filename"): (f"{FSUI}:3887", 0, f"{FSUI}:3887", 1),
+    ("MemoryCards", "Slot2_Filename"): (f"{FSUI}:3887", 0, f"{FSUI}:3887", 1),
+    ("Pad", "Type"): (f"{FSUI}:5345", 0, None, 0),
+    ("EmuCore", "ShowCheatsForAllCRCs"): (f"{FSUI}:5905", 0, f"{FSUI}:5907", 0),
+    ("EmuCore", "ShowPatchesForAllCRCs"): (f"{FSUI}:5905", 1, f"{FSUI}:5907", 1),
+    ("EmuCore/GS", "FramerateNTSC"): ("pcsx2-qt/Settings/GraphicsAdvancedSettingsTab.ui:247", 0, None, 0),
+    ("EmuCore/GS", "FrameratePAL"): ("pcsx2-qt/Settings/GraphicsAdvancedSettingsTab.ui:273", 0, None, 0),
+    ("SPU2/Output", "StretchSequenceLengthMS"): ("pcsx2-qt/Settings/AudioStretchSettingsDialog.ui:20", 0, None, 0),
+    ("SPU2/Output", "StretchSeekWindowMS"): ("pcsx2-qt/Settings/AudioStretchSettingsDialog.ui:63", 0, None, 0),
+    ("SPU2/Output", "StretchOverlapMS"): ("pcsx2-qt/Settings/AudioStretchSettingsDialog.ui:106", 0, None, 0),
+    ("SPU2/Output", "StretchUseQuickSeek"): ("pcsx2-qt/Settings/AudioStretchSettingsDialog.ui:198", 0, None, 0),
+    ("SPU2/Output", "StretchUseAAFilter"): ("pcsx2-qt/Settings/AudioStretchSettingsDialog.ui:205", 0, None, 0),
+    ("SPU2/Output", "ExpandBlockSize"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:456", 0, None, 0),
+    ("SPU2/Output", "ExpandCircularWrap"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:20", 0, None, 0),
+    ("SPU2/Output", "ExpandShift"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:63", 0, None, 0),
+    ("SPU2/Output", "ExpandDepth"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:106", 0, None, 0),
+    ("SPU2/Output", "ExpandFocus"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:149", 0, None, 0),
+    ("SPU2/Output", "ExpandCenterImage"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:192", 0, None, 0),
+    ("SPU2/Output", "ExpandFrontSeparation"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:235", 0, None, 0),
+    ("SPU2/Output", "ExpandRearSeparation"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:278", 0, None, 0),
+    ("SPU2/Output", "ExpandLowCutoff"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:321", 0, None, 0),
+    ("SPU2/Output", "ExpandHighCutoff"): ("pcsx2-qt/Settings/AudioExpansionSettingsDialog.ui:364", 0, None, 0),
+}
+# Choice names PCSX2 keeps outside FullscreenUI's own arrays: {key: (display names' array, values' array or an offset)}.
+MANUAL_CHOICES = {
+    ("EmuCore/GS", "upscale_multiplier"): (f"{FSUI}:2910", f"{FSUI}:2937"),
+    ("EmuCore/GS", "AspectRatio"): ("pcsx2/Pcsx2Config.cpp:639", "pcsx2/Pcsx2Config.cpp:639"),
+    ("EmuCore/GS", "FMVAspectRatioSwitch"): ("pcsx2/Pcsx2Config.cpp:647", "pcsx2/Pcsx2Config.cpp:647"),
+    ("SPU2/Output", "SyncMode"): ("pcsx2/Pcsx2Config.cpp:1214", "pcsx2/Pcsx2Config.cpp:1210"),
+    # FullscreenUI lists the positions from Top Left as 0, but the setting is an OsdOverlayPos, whose 0 is None.
+    ("Achievements", "NotificationPosition"): (f"{FSUI}:5037", 1),
+    ("SPU2/Output", "ExpansionMode"): ("pcsx2/Host/AudioStream.cpp:191", "pcsx2/Host/AudioStream.cpp:183"),
+    ("Pad", "InvertL"): ("pcsx2/SIO/Pad/PadDualshock2.cpp:51", 0),
+    ("Pad", "InvertR"): ("pcsx2/SIO/Pad/PadDualshock2.cpp:51", 0),
+}
+
+
+def pcsx2_text():
+    """PCSX2's words for each setting at the pin: {(section, key): [{"ui", "title", "desc", "where", "choices"}...]}, FullscreenUI's
+    rows first (in file order), then the Qt interface's tooltips, then the controller tables. "choices" is [(name, value)] where
+    PCSX2 names them; a "desc" of None is a row that has none."""
+    found = {}
+
+    def add(key, entry):
+        found.setdefault(key, []).append(entry)
+
+    for path in (FSUI, "pcsx2/ImGui/FullscreenUI.cpp"):
         src = pristine(path)
-        for m in re.finditer(r"\bDraw(Toggle|IntList|IntRange|IntSpinBox|FloatRange|FloatSpinBox|StringList|FloatList|Enum|IPAddress|"
-                             r"IntRect|Clamping)\w*Setting\(\s*bsi\s*,", src):
+        for m in DRAW.finditer(src):
             args = call_args(src, m.end())
+            kind = m.group(1)
             if len(args) < 3:
                 continue
             line = src.count("\n", 0, m.start()) + 1
-            title = literals(args[0])
-            summary = literals(args[1]) if ("CSTR" in args[1] or args[1].strip().startswith('"')) else ""
-            keys = []
-            if m.group(1) == "Clamping":
-                vu = args[2].strip()
-                keys = [("EmuCore/CPU/Recompiler", {"-1": "fpuOverflow", "0": "vu0Overflow", "1": "vu1Overflow"}.get(vu, ""))]
-            elif len(args) >= 4 and args[2].strip().startswith('"') and args[3].strip().startswith('"'):
+            where = f"{path}:{line}"
+            t = texts_of(args[0])
+            title = t[0] if t else None
+            s = args[1].strip()
+            desc = texts_of(s)[0] if re.fullmatch(r"FSUI_CSTR\(" + ONLY_LITERALS.pattern + r"\)", s, re.S) else None
+            if kind == "ClampingMode":
+                keys = [("EmuCore/CPU/Recompiler", CLAMP_KEYS.get(args[2].strip(), ""))]
+            elif kind == "IntRect":
+                keys = [(literals(args[2]), literals(a)) for a in (args[3], args[5], args[7], args[9])]
+            elif len(args) >= 4 and ONLY_LITERALS.fullmatch(args[2]) and ONLY_LITERALS.fullmatch(args[3]):
                 keys = [(literals(args[2]), literals(args[3]))]
+            else:
+                continue
+            choices = None
+            if kind in ("IntList", "StringList", "FloatList") and len(args) > 6:
+                names_line = find_array(src, args[5].strip(), m.start()) if re.fullmatch(r"\s*\w+\s*", args[5]) else None
+                if names_line:
+                    names = array_at(f"{path}:{names_line}")
+                    if kind == "IntList":
+                        offset = int(args[8]) if len(args) > 8 and re.fullmatch(r"\s*-?\d+\s*", args[8]) else 0
+                        values = [i + offset for i in range(len(names))]
+                    else:
+                        values_line = find_array(src, args[6].strip(), m.start()) if re.fullmatch(r"\s*\w+\s*", args[6]) else None
+                        values = array_at(f"{path}:{values_line}") if values_line else None
+                    if values and len(values) == len(names):
+                        choices = {"where": f"{path}:{names_line}", "list": list(zip(names, values))}
             for key in keys:
                 if key[1]:
-                    by_key.setdefault(key, {}).setdefault("fsui", (title, summary, f"{path}:{line}"))
+                    add(key, {"ui": "fsui", "title": title, "desc": desc, "where": where, "choices": choices})
+    for key, (title_at, ti, desc_at, di) in MANUAL_ROWS.items():
+        t = texts_at(title_at)
+        d = texts_at(desc_at) if desc_at else []
+        add(key, {"ui": "qt" if title_at.rpartition(":")[0].endswith(".ui") else "table" if "/Pad/" in title_at else "fsui",
+                  "title": t[ti] if len(t) > ti else None, "desc": d[di] if len(d) > di else None,
+                  "where": desc_at or title_at, "title_where": title_at, "choices": None})
     for path in pcsx2_files():
         if not path.startswith("pcsx2-qt/"):
             continue
@@ -207,18 +454,51 @@ def pcsx2_index():
             args = call_args(src, m.end())
             if len(args) < 4:
                 continue
-            widget = args[0].strip()
             line = src.count("\n", 0, m.start()) + 1
-            for key in widgets.get(widget, []):
-                by_key.setdefault(key, {}).setdefault("qt", (literals(args[1]), literals(args[3]), f"{path}:{line}"))
-    texts = {}
-    for path in pcsx2_files():
-        if not (path.startswith("pcsx2/SIO/Pad/") or path.startswith("pcsx2/USB/") or path in ("pcsx2/Hotkeys.cpp", "pcsx2/GS/GS.cpp")):
-            continue
+            t1, t3 = texts_of(args[1]), texts_of(args[3])
+            for key in widgets.get(args[0].strip(), []):
+                add(key, {"ui": "qt", "title": t1[0] if t1 else None, "desc": t3[0] if t3 else None, "where": f"{path}:{line}",
+                          "choices": None})
+    # The controller's own settings (the DualShock 2's table, which FullscreenUI and Qt show as they are).
+    path = "pcsx2/SIO/Pad/PadDualshock2.cpp"
+    src = pristine(path)
+    for m in re.finditer(r"\{\s*SettingInfo::Type::\w+\s*,\s*\"(\w+)\"", src):
+        line = src.count("\n", 0, m.start()) + 1
+        t = texts_of(statement_at(src, line))
+        add(("Pad", m.group(1)), {"ui": "table", "title": t[0] if t else None, "desc": t[1] if len(t) > 1 else None,
+                                  "where": f"{path}:{line}", "choices": None})
+    # The bindings' names: the DualShock 2's buttons, and the hotkeys (Hotkeys.cpp, GS.cpp).
+    for m in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*TRANSLATE_NOOP\(\s*\"Pad\"", src):
+        line = src.count("\n", 0, m.start()) + 1
+        t = texts_at(f"{path}:{line}")
+        add(("Pad", m.group(1)), {"ui": "table", "title": t[0] if t else None, "desc": None, "where": f"{path}:{line}", "choices": None})
+    noop = r"TRANSLATE_NOOP\(\s*\"Hotkeys\"\s*,\s*\"([^\"]*)\"\s*\)"
+    for path in ("pcsx2/Hotkeys.cpp", "pcsx2/GS/GS.cpp"):
         src = pristine(path)
-        for m in re.finditer(r"TRANSLATE_NOOP\(\s*\"[^\"]*\"\s*,\s*((?:\"(?:[^\"\\]|\\.)*\"\s*)+)\)", src):
-            texts.setdefault(literals(m.group(1)), f"{path}:{src.count(chr(10), 0, m.start()) + 1}")
-    return by_key, texts
+        hotkeys = [(m.group(1), m.start(3)) for m in re.finditer(r"\"(\w+)\"\s*,\s*" + noop + r"\s*,\s*" + noop, src)]
+        hotkeys += [(("SaveStateToSlot" if m.group(1) == "SAVE" else "LoadStateFromSlot") + m.group(2), m.start(3))
+                    for m in re.finditer(r"DEFINE_HOTKEY_(SAVE|LOAD)STATE_X\((\d+),\s*" + noop, src)]
+        for name, at in hotkeys:
+            line = src.count("\n", 0, at) + 1
+            add(("Hotkeys", name), {"ui": "table", "title": unescape(re.match(r'([^"]*)', src[at:]).group(1)), "desc": None,
+                                    "where": f"{path}:{line}", "choices": None})
+    for key, (names_at, values_at) in MANUAL_CHOICES.items():
+        names = array_at(names_at)
+        values = array_at(values_at) if isinstance(values_at, str) else [i + values_at for i in range(len(names))]
+        for entry in found.get(key, []):
+            if len(values) == len(names):
+                entry["choices"] = {"where": names_at, "list": list(zip(names, values))}
+    return found
+
+
+def pcsx2_for(found, section, key):
+    """PCSX2's words for a row's setting: a controller port's (Pad1..Pad8) are the controller table's."""
+    if re.fullmatch(r"Pad\d", section or ""):
+        return found.get(("Pad", key), [])
+    if (section, key) in found:
+        return found[(section, key)]
+    # PCSX2's own spelling of a key can differ in case (EmuCore/TraceLog IOP.Bios): its settings are read without it.
+    return next((v for (s, k), v in found.items() if s == section and k.lower() == (key or "").lower()), [])
 
 
 def pcsx2_keys():
@@ -231,57 +511,6 @@ def pcsx2_keys():
     # Pcsx2Config.cpp names many keys by the field (SettingsWrapBitBool(Name)): the field is the key.
     words |= set(re.findall(r"SettingsWrap\w*\(\s*(\w+)", pristine("pcsx2/Pcsx2Config.cpp")))
     return words
-
-
-# A PCSX2 text that names games (rule 4: no game titles in anything published) is not copied: its place is given
-# instead. It names one when it says "games like", "e.g. X" and the like, or when it has a run of capitalised
-# words that is not one of the technical names below, or a capitalised word inside a sentence that is a whole
-# title of PCSX2's game database.
-NAMES_GAMES = re.compile(r"\b(games? (?:like|such as)|following games|(?:e\.g\.|for example|for instance),? (?!DualShock|Xbox)[A-Z]|SOTC|"
-                         r"Known to affect)", re.I)
-TECHNICAL = {"discord presence", "emotion engine", "emotion engine cpu", "auto standard", "aspect ratio", "contrast adaptive sharpening",
-             "forced excluding sprites", "force 32bit", "rasterizer ordered view", "sprite renderer", "unscale point", "memory clearing",
-             "dolby pro logic", "pro logic ii", "hard disk drive", "xbox one", "analog sensitivity", "floating point unit", "vector unit",
-             "scratchpad mfifo", "playstation 2", "playstation 5", "full screen", "game list", "big picture", "save state", "game fixes",
-             "dualshock 4", "dualshock 2", "game database"}
-
-
-def game_titles():
-    """The titles of PCSX2's game database (its names and English names), as words, and every first few words of them."""
-    titles, starts = set(), set()
-    index = VENDOR / "bin" / "resources" / "GameIndex.yaml"
-    if index.exists():
-        for line in index.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith(("  name:", "  name-en:")):
-                words = re.findall(r"[a-z0-9']+", line.split(":", 1)[1].strip().strip('"').lower())
-                titles.add(" ".join(words))
-                for n in range(2, len(words) + 1):
-                    starts.add(" ".join(words[:n]))
-    return titles, starts
-
-
-# Names of games PCSX2's texts give by a short name, a series or a studio, which the database's titles do not
-# begin with.
-NAMED_GAMES = {"socom", "tales", "ace games", "snowblind", "sotc", "namco", "jak", "gta", "goemon"}
-
-
-def names_games(text, titles):
-    """Whether the text names a game: "games like", "e.g. X" and the like, two or more capitalised words that a
-    title of the database begins with, a capitalised word inside a sentence that is a whole title, or a name above."""
-    whole, starts = titles
-    if NAMES_GAMES.search(text):
-        return True
-    for m in re.finditer(r"\b[A-Z][A-Za-z0-9']*(?: [A-Z0-9][A-Za-z0-9']*)+", text):
-        words = re.findall(r"[a-z0-9']+", m.group(0).lower())
-        for i in range(len(words)):
-            for j in range(i + 2, len(words) + 1):
-                run = " ".join(words[i:j])
-                if run in starts and run not in TECHNICAL:
-                    return True
-    for m in re.finditer(r"(?<=[a-z,;(] )([A-Z][a-z']{2,})\b", text):
-        if m.group(1).lower() in whole:
-            return True
-    return any(re.search(r"\b" + re.escape(n) + r"\b", text, re.I) for n in NAMED_GAMES)
 
 
 # ------------------------------------------------------------------------------- the revamp's map
@@ -429,10 +658,8 @@ def q(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def entries(inventory, index, keys, old):
+def entries(inventory, found, keys, old):
     """The file's pages, headings and entries from the inventory (and what `old` has of them by hand)."""
-    by_key, texts = index
-    titles = game_titles()
     pages = {}
     for row in inventory["rows"]:
         page = pages.setdefault(row["page"], {"headings": {}})
@@ -448,35 +675,23 @@ def entries(inventory, index, keys, old):
         game = {v.get("flags") and level_of(v["flags"]) for k, v in row.get("variants", {}).items() if k.startswith("game/") and "flags" in v}
         if game and game != {e["level"]} and "game" in row["layers"]:
             e["level_one_game"] = sorted(g for g in game if g)[0]
+        theirs = pcsx2_for(found, row.get("section"), row.get("key")) if row.get("key") else []
         crux2 = row.get("section") in ("PS5", "PS5UI", "PS5GamePatch") or row["kind"] in ("action", "info") or \
-            (row.get("key") and row["kind"] != "bind" and row["key"] not in keys and row.get("section") not in ("Patches", "Cheats") and
-             not re.fullmatch(r"Pad\d", row.get("section", "")))
+            (row.get("key") and row["kind"] != "bind" and row["key"] not in keys and not theirs and
+             row.get("section") not in ("Patches", "Cheats") and not re.fullmatch(r"Pad\d", row.get("section", "")))
         e["origin"] = "crux2" if crux2 else "pcsx2"
-        if e["origin"] == "pcsx2":
-            found = by_key.get((row.get("section"), row.get("key")), {})
-            first = found.get("fsui") or found.get("qt")
-            if first is None and row.get("desc") in texts:
-                first = (None, row["desc"], texts[row["desc"]])
-            if first is None and row["label"] in texts:
-                first = (row["label"], None, texts[row["label"]])
-            if first is not None:
-                title, text, where = first
-                if title and names_games(title, titles):
-                    e["pcsx2_title_withheld"] = "PCSX2's label names a game (rule 4): read it at its source"
-                elif title:
-                    e["pcsx2_title"] = title
-                if text and names_games(text, titles):
-                    e["pcsx2_description_withheld"] = "PCSX2's text names games (rule 4): read it at its source"
-                elif text:
-                    e["pcsx2_description"] = text
-                e["pcsx2_source"] = where
-                if "fsui" in found and "qt" in found and found["qt"][1] and found["qt"][1] != text:
-                    qt = found["qt"]
-                    if names_games(qt[1], titles):
-                        e["pcsx2_tooltip_withheld"] = "PCSX2's text names games (rule 4): read it at its source"
-                    else:
-                        e["pcsx2_tooltip"] = qt[1]
-                    e["pcsx2_tooltip_source"] = qt[2]
+        if e["origin"] == "pcsx2" and theirs:
+            # PCSX2's words for it, for reference (FullscreenUI's first, then its controller tables, then Qt's).
+            first = next((o for o in theirs if o["ui"] in ("fsui", "table") and (o["desc"] or o["title"])), None) or theirs[0]
+            if first["title"]:
+                e["pcsx2_title"] = first["title"]
+            if first["desc"]:
+                e["pcsx2_description"] = first["desc"]
+            e["pcsx2_source"] = first["where"] if first["desc"] else first.get("title_where", first["where"])
+            qt = next((o for o in theirs if o["ui"] == "qt" and o["desc"]), None)
+            if first["ui"] != "qt" and qt and qt["desc"] != first["desc"]:
+                e["pcsx2_tooltip"] = qt["desc"]
+                e["pcsx2_tooltip_source"] = qt["where"]
         if row["layers"] != ["shared", "game"]:
             e["layers"] = row["layers"][0] if len(row["layers"]) == 1 else row["layers"]
         if dynamic(row):
@@ -485,31 +700,42 @@ def entries(inventory, index, keys, old):
             e["doubtful"] = doubt
         # What was written by hand is kept.
         if row["id"] in old:
-            for field in ("label", "desc", "choices", "area", "section", "level", "doubtful"):
+            for field in ("label", "desc", "choices", "area", "section", "level", "doubtful") + NEW_FIELDS:
                 if field in old[row["id"]]:
                     e[field] = old[row["id"]][field]
         heading["rows"].append(e)
     return pages
 
 
+# The revamp's words (phase 2), kept by make like the hand-written fields.
+NEW_FIELDS = ("new_label", "label_text", "label_source", "new_desc", "text", "text_source", "text_note", "new_choices", "choices_text",
+              "choices_source")
 FIELDS = ("id", "label", "desc", "choices", "kind", "area", "section", "level", "level_one_game", "origin", "layers", "dynamic", "pcsx2_title",
-          "pcsx2_title_withheld", "pcsx2_description", "pcsx2_description_withheld", "pcsx2_source", "pcsx2_tooltip", "pcsx2_tooltip_withheld",
-          "pcsx2_tooltip_source", "doubtful")
+          "pcsx2_description", "pcsx2_source", "pcsx2_tooltip", "pcsx2_tooltip_source", "doubtful") + NEW_FIELDS
 
 
 def write_yaml(pages, path):
-    out = ["# Crux2 - every setting's words, for editing by hand (ps5/tools/settings-text.py: make, check, bake).",
-           "# Under each page and heading as the interface shows them today. Change a label, desc or choices; area,",
-           "# section and level place the row in the revamp's eight areas. Never change an id. A row marked dynamic",
-           "# takes its words from data. pcsx2_* is PCSX2's own text, word for word, and where it is (for reference).",
+    """Writes the file from entries()' pages (a dict by page name, of headings by label)."""
+    dump_yaml([{"name": name, "headings": [{"label": hlabel, "rows": heading["rows"]} for hlabel, heading in page["headings"].items()]}
+               for name, page in pages.items()], path)
+
+
+def dump_yaml(pages, path):
+    """Writes the file from read_yaml()'s pages (a list of pages, each a list of headings)."""
+    out = ["# Crux2 - every setting's words, for editing by hand (ps5/tools/settings-text.py: make, check, bake, review, apply).",
+           "# Under each page and heading as the interface shows them today. label, desc and choices are today's words;",
+           "# new_label, new_desc and new_choices the revamp's (text, label_text, choices_text: exact = PCSX2's, byte for",
+           "# byte, at *_source; written = in PCSX2's voice; exact-but-wrong = PCSX2's but untrue here, for the owner to",
+           "# decide). area, section and level place the row in the revamp's eight areas. Never change an id. A row marked",
+           "# dynamic takes its words from data. pcsx2_* is PCSX2's own text and where it is (for reference).",
            "pages:"]
-    for name, page in pages.items():
-        out.append(f"  - page: {q(slug(name))}")
-        out.append(f"    name: {q(name)}")
+    for page in pages:
+        out.append(f"  - page: {q(slug(page['name']))}")
+        out.append(f"    name: {q(page['name'])}")
         out.append("    headings:")
-        for hlabel, heading in page["headings"].items():
-            out.append(f"      - heading: {q(slug(hlabel))}")
-            out.append(f"        label: {q(hlabel)}")
+        for heading in page["headings"]:
+            out.append(f"      - heading: {q(slug(heading['label']))}")
+            out.append(f"        label: {q(heading['label'])}")
             out.append("        rows:" + ("" if heading["rows"] else " []"))
             for e in heading["rows"]:
                 first = True
@@ -601,6 +827,271 @@ def bake_text(pages):
     return "\n".join(lines)
 
 
+# ------------------------------------------------------------------------------ the revamp's words (phase 2)
+
+TEXT_KINDS = ("exact", "written", "exact-but-wrong")
+LABEL_KINDS = ("exact", "written")
+CHOICE_KINDS = ("exact", "mixed", "written", "exact-but-wrong")
+# Words PCSX2's voice has no place for, in written words (labels, descriptions, choice names). A name in double quotes
+# (a folder or a file the user must know, such as "Crux2") is left out of the search.
+BANNED = [(re.compile(p), why) for p, why in (
+    (r"Crux2|crux2|CRUX2", "names the title (\"Crux2\")"),
+    (r"\b[Oo]ur\b", "\"our\""),
+    (r"\bas before\b|\(before\)|\bof before\b", "history (\"as before\")"),
+    (r"\(new\)|\bnew:|\bNew:", "history (\"new\")"),
+    (r"'s own\b(?! (?:settings|DNS|account|core))", "\"own\" (whose?)"),
+    (r"PS5PX", "an implementation name"),
+    (r"\bv\d+\.\d+|\b\d+\.\d+\.\d+\b", "a version number"),
+    (r"(?:^|[.!?:;]\s+)[Nn]ow\b", "\"now\" at a sentence's start"),
+    (r"\bPS5's\b", "\"PS5's\" (the console's, or nothing)"),
+    (r"[Tt]akes effect", "\"takes effect\" (PCSX2 never says it; the row's NextStart/Restart flag does)"),
+    (r"[Ee]xperimental", "\"experimental\" (PCSX2 states the risk instead)"),
+    (r"\b(?:[Cc]olour|[Cc]entre|[Gg]rey|[Ll]icence|[Bb]ehaviour|[Ff]avourite|\w*(?:optimis|customis|recognis|normalis|synchronis|"
+     r"initialis|minimis|maximis|prioritis|organis|personalis|visualis))", "British spelling (PCSX2 writes American)"),
+)]
+# Rows that share one written description on purpose (the same thing for two players, two sticks, two ports).
+TWINS = [{"action:test-player-1-s-microphone", "action:test-player-2-s-microphone"}, {"PS5.StickCurveLeft", "PS5.StickCurveRight"},
+         {"Pad1.Type", "Pad2.Type"}]
+
+
+def banned(text):
+    bare = re.sub(r'"[^"]*"', '""', text or "")
+    return [why for pat, why in BANNED if pat.search(bare)]
+
+
+def pcsx2_words_at(where):
+    """Every text PCSX2 has at `where`: the statement's, and the array's when one starts there."""
+    words = list(texts_at(where))
+    try:
+        words += [w for w in array_at(where) if w not in words]
+    except (ValueError, IndexError):
+        pass
+    return words
+
+
+def same_value(a, b):
+    try:
+        return abs(float(a) - float(b)) < 1e-6
+    except (TypeError, ValueError):
+        return a == b
+
+
+def check_new_words(have, rows):
+    """Phase 2's checks of the new words: each row has its kinds; an exact text is PCSX2's at the pin byte for byte; a
+    written one has none of the banned words; no description is empty or another row's by accident; a choice called
+    (Default) is the default."""
+    problems = []
+    written = {}
+    for rid, e in have.items():
+        r = rows.get(rid, {})
+        where = f"{rid} ({e.get('label')}, {e.get('area')} > {e.get('section')})"
+        if e.get("text") not in TEXT_KINDS:
+            problems.append(f"{where}: text {e.get('text')!r} is not one of {TEXT_KINDS}")
+            continue
+        if "new_desc" not in e:
+            problems.append(f"{where}: no new_desc")
+            continue
+        if e.get("label_text") is not None and e["label_text"] not in LABEL_KINDS:
+            problems.append(f"{where}: label_text {e['label_text']!r} is not one of {LABEL_KINDS}")
+        if e.get("label_text") and not e.get("new_label"):
+            problems.append(f"{where}: label_text without a new_label")
+        if e.get("choices"):
+            if len(e.get("new_choices") or []) != len(e["choices"]):
+                problems.append(f"{where}: {len(e.get('new_choices') or [])} new choice names for {len(e['choices'])} choices")
+            if e.get("choices_text") not in CHOICE_KINDS:
+                problems.append(f"{where}: choices_text {e.get('choices_text')!r} is not one of {CHOICE_KINDS}")
+        # (a) PCSX2's words, byte for byte, where they are said to be.
+        if e["text"] in ("exact", "exact-but-wrong"):
+            src = e.get("text_source")
+            if not src:
+                problems.append(f"{where}: text {e['text']} without a text_source")
+            elif e["new_desc"] == "" and e.get("kind") == "bind":
+                if e.get("new_label") not in texts_at(src):
+                    problems.append(f"{where}: the binding's name {e.get('new_label')!r} is not PCSX2's at {src}")
+            elif e["new_desc"] not in texts_at(src):
+                found = texts_at(src)
+                problems.append(f"{where}: new_desc is not PCSX2's text at {src} (there: {found[:3]!r})")
+        if e.get("label_text") == "exact":
+            src = e.get("label_source")
+            if not src or e["new_label"] not in texts_at(src):
+                problems.append(f"{where}: new_label {e.get('new_label')!r} is not PCSX2's at {src}")
+        if e.get("choices_text") in ("exact", "exact-but-wrong", "mixed"):
+            src = e.get("choices_source")
+            theirs = pcsx2_words_at(src) if src else []
+            mine = [n for n in e.get("new_choices", []) if n in theirs]
+            if not src:
+                problems.append(f"{where}: choices_text {e['choices_text']} without a choices_source")
+            elif e["choices_text"] != "mixed" and len(mine) != len(e.get("new_choices", [])):
+                problems.append(f"{where}: choices {[n for n in e['new_choices'] if n not in theirs]!r} are not PCSX2's at {src}")
+            elif e["choices_text"] == "mixed" and not mine:
+                problems.append(f"{where}: no choice name is PCSX2's at {src}")
+        # (b) the banned words, in written words.
+        own = []
+        if e.get("label_text") == "written":
+            own.append(("label", e["new_label"]))
+        if e["text"] == "written":
+            own.append(("desc", e["new_desc"]))
+        if e.get("choices_text") in ("written", "mixed"):
+            theirs = pcsx2_words_at(e["choices_source"]) if e.get("choices_source") else []
+            own += [("choice", n) for n in e.get("new_choices", []) if n not in theirs]
+        for what, text in own:
+            for why in banned(text):
+                problems.append(f"{where}: written {what} {text!r}: {why}")
+        # (c) empty descriptions (a binding's and an information line's may be: PCSX2 shows none either / the line shows
+        # its value), and written descriptions shared by accident.
+        if not e["new_desc"].strip() and e.get("kind") not in ("bind", "info"):
+            problems.append(f"{where}: empty new_desc")
+        if e["text"] == "written" and e["new_desc"].strip():
+            written.setdefault(e["new_desc"], []).append(rid)
+        # (e) a choice called (Default) is the row's default.
+        default = r.get("default")
+        if e.get("choices_text") != "exact-but-wrong" and r.get("choices") and default is not None:
+            for name, choice in zip(e.get("new_choices", []), r["choices"]):
+                if "(Default)" in name and not same_value(choice["value"], default):
+                    problems.append(f"{where}: choice {name!r} says (Default), but the default is {default!r}")
+    for desc, ids in written.items():
+        bases = {i.split("@")[0] for i in ids}
+        if len(bases) > 1 and not any(set(ids) <= t for t in TWINS):
+            problems.append(f"the same written description in {', '.join(sorted(ids))}: {desc[:60]!r}...")
+    return problems
+
+
+def apply(args):
+    """Makes the new words the row's words (for phase 3), leaving every exact-but-wrong field as it is."""
+    pages = read_yaml(YAML)
+    kept, changed = [], 0
+    for p in pages:
+        for h in p["headings"]:
+            for e in h["rows"]:
+                if "new_label" in e and not e.get("dynamic"):
+                    changed += e["label"] != e["new_label"]
+                    e["label"] = e.pop("new_label")
+                if "new_desc" in e:
+                    if e.get("text") == "exact-but-wrong":
+                        kept.append(f"{e['id']}: description (exact-but-wrong)")
+                    else:
+                        changed += e.get("desc", "") != e["new_desc"]
+                        e["desc"] = e.pop("new_desc")
+                if "new_choices" in e:
+                    if e.get("choices_text") == "exact-but-wrong":
+                        kept.append(f"{e['id']}: choices (exact-but-wrong)")
+                    else:
+                        changed += e.get("choices") != e["new_choices"]
+                        e["choices"] = e.pop("new_choices")
+    dump_yaml(pages, YAML)
+    HEADER.write_text(bake_text(pages))
+    for k in kept:
+        print("  left as it is: " + k)
+    print(f"settings-text: applied {changed} changed field(s); wrote {YAML.name} and {HEADER.name}")
+    print("  (check now fails its comparison with the code's words until the interface takes its words from the table: phase 3;\n"
+          "   an action's or an information line's id is made from its label: bless the inventory for those, settings-inventory.md)")
+    return 0
+
+
+def review(args):
+    """The review sheet for the owner: one HTML page."""
+    if not args.out:
+        raise SystemExit("settings-text: review needs --out FILE (a work folder outside the repository)")
+    import html as H
+    inventory = load_inventory(args)
+    rows = {r["id"]: r for r in inventory["rows"] if r["kind"] != "heading"}
+    pages = read_yaml(YAML)
+    have = yaml_entries(pages)
+    esc = lambda s: H.escape(s or "").replace("\n", "<br>")
+    kinds = {k: [i for i, e in have.items() if e.get("text") == k] for k in TEXT_KINDS}
+    relabel = [i for i, e in have.items() if e.get("new_label") and e["new_label"] != e.get("label")]
+    rechoice = [i for i, e in have.items() if e.get("new_choices") and e["new_choices"] != e.get("choices")]
+    differ = [i for i, e in have.items() if e.get("text") in ("exact", "exact-but-wrong") and e.get("pcsx2_tooltip")]
+    wrong = [i for i, e in have.items() if e.get("text") == "exact-but-wrong" or e.get("choices_text") == "exact-but-wrong"]
+    doubt = [i for i, e in have.items() if e.get("doubtful")]
+    ids_relabel_action = [i for i in relabel if have[i].get("kind") in ("action", "info")]
+
+    def link(i):
+        return f'<a href="#{H.escape(i)}">{H.escape(i)}</a>'
+
+    out = ["<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width, initial-scale=1'>",
+           "<title>Settings Words Review</title><style>",
+           ":root{--ink:#1b1f24;--soft:#57606a;--line:#d0d7de;--bg:#ffffff;--band:#f6f8fa;--old:#fff1f0;--new:#effaf1;--warn:#fff8c5}",
+           "@media (prefers-color-scheme: dark){:root:not([data-theme=light]){--ink:#1b1f24;--soft:#57606a;--line:#d0d7de;--bg:#ffffff;"
+           "--band:#f6f8fa;--old:#fff1f0;--new:#effaf1;--warn:#fff8c5}}",
+           ":root[data-theme=dark]{--ink:#1b1f24;--soft:#57606a;--line:#d0d7de;--bg:#ffffff;--band:#f6f8fa;--old:#fff1f0;--new:#effaf1;--warn:#fff8c5}",
+           "body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0 auto;max-width:1100px;padding:16px}",
+           "h1{font-size:24px}h2{font-size:20px;border-bottom:2px solid var(--ink);margin-top:40px}h3{font-size:16px;margin-top:28px;color:var(--soft)}",
+           ".row{border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:10px 0;overflow-wrap:anywhere}",
+           ".id{font:12px ui-monospace,monospace;color:var(--soft)}.k{display:inline-block;font-size:12px;border:1px solid var(--ink);border-radius:10px;"
+           "padding:0 7px;margin-right:4px}.k.wrong{background:var(--warn)}",
+           "table{border-collapse:collapse;width:100%;margin-top:6px}td{vertical-align:top;padding:4px 6px;border-top:1px solid var(--line)}",
+           "td.f{width:90px;color:var(--soft);font-size:13px}td.o{background:var(--old);width:45%}td.n{background:var(--new);width:45%}",
+           ".src{font:12px ui-monospace,monospace;color:var(--soft)}.note{background:var(--warn);padding:4px 6px;margin-top:6px;font-size:14px}",
+           "ul{padding-left:20px}li{margin:2px 0}.same{color:var(--soft)}</style></head><body>",
+           "<h1>Settings words: review sheet (phase 2)</h1>",
+           "<p>Every row of the settings, grouped by the revamp's area and section: today's words on the left, the new on the right. "
+           "<b>exact</b>: PCSX2's text at the pin (without ps5.patch), byte for byte, at the source shown. <b>written</b>: in PCSX2's voice. "
+           "<b>exact-but-wrong</b>: PCSX2's text, untrue of this row: the owner decides (apply leaves today's words). "
+           "Nothing on the console changes until these are applied (phase 3).</p>",
+           "<h2>Summary</h2><ul>",
+           f"<li>Rows: {len(have)}. Descriptions: exact {len(kinds['exact'])}, written {len(kinds['written'])}, "
+           f"exact-but-wrong {len(kinds['exact-but-wrong'])}.</li>",
+           f"<li>Labels changed: {len(relabel)} (of them actions and information lines, whose ids are made from the label: "
+           f"{len(ids_relabel_action)}). Rows with changed choice names: {len(rechoice)}.</li>",
+           f"<li>Labels: exact {sum(1 for e in have.values() if e.get('label_text') == 'exact')}, written "
+           f"{sum(1 for e in have.values() if e.get('label_text') == 'written')}. Choice names: "
+           + ", ".join(f"{k} {sum(1 for e in have.values() if e.get('choices_text') == k)}" for k in CHOICE_KINDS) + ".</li></ul>",
+           f"<h3>Exact-but-wrong ({len(wrong)})</h3><ul>"]
+    out += [f"<li>{link(i)}: {esc(have[i].get('text_note', ''))}</li>" for i in wrong]
+    out += [f"</ul><h3>FullscreenUI's text and the Qt tooltip differ ({len(differ)}): FullscreenUI's is used</h3><ul>"]
+    out += [f"<li>{link(i)}</li>" for i in differ]
+    out += [f"</ul><h3>Doubtful places ({len(doubt)})</h3><ul>"]
+    out += [f"<li>{link(i)}: {esc(have[i]['area'])} &gt; {esc(have[i]['section'])}: {esc(have[i]['doubtful'])}</li>" for i in doubt]
+    out.append("</ul>")
+    groups = {}
+    for p in pages:
+        for h in p["headings"]:
+            for e in h["rows"]:
+                groups.setdefault(e["area"], {}).setdefault(e["section"], []).append((p["name"], h["label"], e))
+    for area in AREAS:
+        if area not in groups:
+            continue
+        out.append(f"<h2>{esc(area)}</h2>")
+        for section, items in groups[area].items():
+            out.append(f"<h3>{esc(section)}</h3>")
+            for page, heading, e in items:
+                badges = f"<span class='k{' wrong' if e.get('text') == 'exact-but-wrong' else ''}'>text: {esc(e.get('text'))}</span>"
+                if e.get("label_text"):
+                    badges += f"<span class=k>label: {esc(e['label_text'])}</span>"
+                if e.get("choices_text"):
+                    badges += f"<span class='k{' wrong' if e['choices_text'] == 'exact-but-wrong' else ''}'>choices: {esc(e['choices_text'])}</span>"
+                out.append(f"<div class=row id='{H.escape(e['id'])}'><div class=id>{esc(e['id'])} · today: {esc(page)} / {esc(heading)} · "
+                           f"{esc(e.get('level'))}</div>{badges}<table>")
+
+                def pair(field, old, new, src=None):
+                    same = old == new
+                    out.append(f"<tr><td class=f>{field}</td><td class=o>{esc(old)}</td><td class='n{' same' if same else ''}'>"
+                               f"{'(the same)' if same and old else esc(new)}"
+                               + (f"<div class=src>{esc(src)}</div>" if src else "") + "</td></tr>")
+                if e.get("new_label") is not None:
+                    pair("label", e.get("label"), e["new_label"], e.get("label_source"))
+                else:
+                    pair("label", e.get("label"), e.get("label"), "its words come from data")
+                pair("description", e.get("desc"), e.get("new_desc"), e.get("text_source"))
+                if e.get("choices"):
+                    pair("choices", " · ".join(e["choices"]), " · ".join(e.get("new_choices", [])), e.get("choices_source"))
+                out.append("</table>")
+                if e.get("text_note"):
+                    out.append(f"<div class=note>{esc(e['text_note'])}</div>")
+                if e.get("pcsx2_tooltip") and e.get("text") != "written":
+                    out.append(f"<div class=src>Qt's tooltip ({esc(e.get('pcsx2_tooltip_source'))}): {esc(e['pcsx2_tooltip'])}</div>")
+                if e.get("text") == "exact-but-wrong" or (e.get("text") == "written" and e.get("pcsx2_description")):
+                    out.append(f"<div class=src>PCSX2's text: {esc(e.get('pcsx2_description'))}</div>")
+                if e.get("doubtful"):
+                    out.append(f"<div class=src>Doubtful place: {esc(e['doubtful'])}</div>")
+                out.append("</div>")
+    out.append("</body></html>")
+    Path(args.out).write_text("\n".join(out) + "\n")
+    print(f"settings-text: wrote {args.out}")
+    return 0
+
+
 # ------------------------------------------------------------------------------------ commands
 
 def load_inventory(args):
@@ -617,7 +1108,7 @@ def load_inventory(args):
 def make(args):
     inventory = load_inventory(args)
     old = yaml_entries(read_yaml(YAML)) if YAML.exists() else {}
-    pages = entries(inventory, pcsx2_index(), pcsx2_keys(), old)
+    pages = entries(inventory, pcsx2_text(), pcsx2_keys(), old)
     write_yaml(pages, YAML)
     ids = {e["id"] for p in pages.values() for h in p["headings"].values() for e in h["rows"]}
     for gone in sorted(set(old) - ids):
@@ -662,6 +1153,8 @@ def check(args):
             problems.append(f"{rid}: desc is not the code's")
         if e.get("choices", []) != [c_["name"] for c_ in r.get("choices", [])]:
             problems.append(f"{rid}: choices are not the code's")
+    # Phase 2: the new words (they are not the interface's yet).
+    problems += check_new_words(have, rows)
     baked = bake_text(pages)
     if not HEADER.exists() or HEADER.read_text() != baked:
         problems.append(f"{HEADER.name} is not what bake writes: run ps5/tools/settings-text.py bake")
@@ -702,13 +1195,14 @@ def doubtful(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["make", "check", "bake", "doubtful"])
+    ap.add_argument("command", choices=["make", "check", "bake", "doubtful", "review", "apply"])
     ap.add_argument("--inventory", default=str(INVENTORY), help="the inventory (default: the baseline)")
     ap.add_argument("--dump", help="an inventory dump of the code (build-inventory.sh's dump.json) in place of the baseline")
     ap.add_argument("--check", action="store_true", help="bake: only say whether the header is up to date")
     ap.add_argument("--baked", help="check: the compiled table, printed as JSON, to compare with the code's words")
+    ap.add_argument("--out", help="review: the page to write (outside the repository)")
     args = ap.parse_args()
-    return {"make": make, "check": check, "bake": bake, "doubtful": doubtful}[args.command](args)
+    return {"make": make, "check": check, "bake": bake, "doubtful": doubtful, "review": review, "apply": apply}[args.command](args)
 
 
 if __name__ == "__main__":
