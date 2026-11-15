@@ -943,9 +943,16 @@ Page graphicsPage(int layer, bool forGame)
 							true),
 		GS, "LoadTextureReplacements", true)));
 	{
-		Option o = action("Download an HD texture pack",
-			"Downloads this game's HD texture pack from the Internet Archive. Packs can be several GB.",
-			[] { be->findTexturePacks(); }, Option::OneGame);
+		// (The texture pack manager, bp_textures.cpp: on this game in a game's options.)
+		Option o = action("HD texture packs",
+			"Opens the texture pack manager: the packs on this console, the USB drives and the shares, by game. Download packs from "
+			"the Internet Archive, one after another, and move or delete them. Packs can be several GB.",
+			[] {
+				if (TexturePackShelf* shelf = be->texturePackShelf())
+					openTexturePacks(shelf, settingsGame().serial);
+				else
+					be->findTexturePacks();
+			});
 		o.info = [] { return be->texturePackDoing(); };
 		rows.push_back(std::move(o));
 	}
@@ -965,7 +972,23 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.", GS, "fxaa", false));
+	// Crux2: one row for every anti-aliasing (FXAA, SMAA, SSAA by downsampling, SSAA then SMAA). It sets the keys
+	// the renderer reads ([EmuCore/GS] fxaa, [PS5] SMAA and Downsample) and, for SSAA, a resolution above the
+	// screen's (bp_pcsx2.cpp Changed; ps5/frontend/ps5_aa.h; the passes in GSDeviceVK_PS5.cpp, ps5_aa.glsl).
+	rows.push_back(list("Anti-aliasing",
+		"Smooths the jagged edges of the picture. FXAA: quick, a little soft. SMAA: sharper edges, a little GPU time. "
+		"SSAA: the game drawn larger than the screen and made screen-sized, the least shimmer; choosing it raises the "
+		"internal resolution to about one and a half times the screen's (8x at 4K) and turns FSR 1 off, and costs the most. "
+		"SSAA + SMAA: SSAA, then SMAA over it for the edges it leaves.",
+		"PS5", "AntiAliasing", 0, {"Off", "FXAA", "SMAA", "SSAA", "SSAA + SMAA"}, 0, Option::AllGames));
+	{
+		Option o = list("SSAA filter",
+			"How SSAA makes the larger picture screen-sized. Soft: every pixel it covers averaged, the least shimmer. Sharp: a "
+			"Lanczos filter, crisper edges.",
+			"PS5", "SSAAFilter", 1, {"Soft", "Sharp"}, 1, Option::AllGames);
+		o.enabled = [](int l) { return effectiveInt(l, "PS5", "AntiAliasing", 0) >= 3; };
+		rows.push_back(std::move(o));
+	}
 	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",

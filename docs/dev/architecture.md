@@ -43,11 +43,12 @@ sandbox) and leaves the sandbox only for USB drives, through the elevation helpe
 | `ps5_audio_stream.cpp` | Audio output (AudioOut): a worker writing 256 frames at a time, 48 kHz |
 | `ps5_pacing.cpp`, `ps5_framegen_pacer.h`, `ps5_clock.c` | Frame pacing, frame generation's pacing and figures, the title's clock |
 | `ps5_hdr.h` | HDR10 output's state and calibration (the passes are in the patch's `GSDeviceVK_PS5.cpp`) |
+| `ps5_aa.h` | Downsampling's and SMAA's decisions and push constants (the passes: `resources/shaders/vulkan/ps5_aa.glsl`, recorded in the patch's `GSDeviceVK_PS5.cpp`; SMAA's textures in `third_party/smaa`) |
 | `ps5_compute_fx.cpp`, `ps5_slang.cpp`, `ps5_mihawkgen_model.cpp` | Compute effects (FSR 3 optical flow, NIS), `.slangp` looks, MihawkGen |
 | `ps5_osd.cpp`, `ps5_auto_quality.cpp`, `ps5_thread_layout.cpp`, `ps5_priority.cpp` | The on-screen display, Automatic quality, thread pinning |
 | `ps5_disc.cpp`, `ps5_disc_cache.h`, `ps5_disc_image.cpp` | Disc drives, the disc read into memory, disc images made |
 | `ps5_card_image.h`, `ps5_mc.h`, `ps5_cards.cpp`, `ps5_card_sync.cpp`, `ps5_ps2_ftp.cpp` | Memory cards in memory, the card manager, card sync, a PS2's cards over FTP |
-| `ps5_extras.cpp`, `ps5_texture_packs*.{h,cpp}` | A card per game, the auto-save, texture packs from drives and shares, their downloads |
+| `ps5_extras.cpp`, `ps5_texture_packs*.{h,cpp}`, `ps5_texture_pack_{store,manager}.{h,cpp}` | A card per game, the auto-save, texture packs from drives and shares, their downloads, the manager's moves and deletes |
 | `ps5_backup.cpp`, `ps5_logs.cpp`, `ps5_jobs.cpp`, `ps5_online.cpp` | Backups; the logs on screen and their copy; jobs on drives and shares; covers, pictures, cheats, PCSX2's patches from the network |
 | `ps5_fixes_fetch.cpp` | Game fixes fetched from GitHub at start, checked against `ps5/game-fixes.txt` |
 | `ps5_update.cpp` | The updater (GitHub releases; prunes files a new version no longer ships) |
@@ -66,7 +67,7 @@ The screens came from PSFlyCast's front end and have no PCSX2 in them (`bp_*.cpp
 settings pages, grouped as PCSX2's settings window groups them), `bp_quick.cpp` and
 `bp_quick_layout.h` (the quick menu), `bp_splash.cpp` (start-ups and the video), `bp_care.cpp`
 (screen care), `bp_draw.cpp` (the mark, the name, the 36 skins; 30 of them generated into
-`bp_kit_skins.inc` by `make-kit-skins.py`), `bp_cards.cpp` (the card manager). `bp_pcsx2.cpp` is
+`bp_kit_skins.inc` by `make-kit-skins.py`), `bp_cards.cpp` (the card manager), `bp_textures.cpp` (the texture pack manager). `bp_pcsx2.cpp` is
 their door to PCSX2: it stands in for `FullscreenUI` and adds the PS5 rows to the pages
 (`extraRows("library" | "interface" | "motion" | "output" | "picture" | "saves" | "system" |
 "network" | "controllers")`). `ps5/tests/bigpicture/preview.cpp` runs the same screens on a PC.

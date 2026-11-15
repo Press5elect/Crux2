@@ -35,8 +35,10 @@ the host memory test. CI has neither, so it skips those two.
 | host memory | `PS5HostSys.cpp` over `mock_platform.cpp`, 16 KiB pages (needs the SDK fork) |
 | virtual file layer | a held read (a share that stops answering), shares woken; the full VFS test needs libsmb2 |
 | boot log in memory | `ps5_logs.h` (memory_log_test) |
+| texture pack manager | `ps5_texture_pack_store.cpp`: packs found, measured, moved (stopped, failing, begun again: the source kept), deleted, the queue |
 | game fixes from GitHub | `ps5_fixes_fetch` (fetch, unchanged, tampered, unsafe paths, no network) |
 | HDR and debanding | the last passes before the screen (`tests/hdr`) |
+| downsampling and SMAA | `ps5_aa.h`'s decisions; `ps5_aa.glsl`'s passes on lavapipe against double precision, SMAA on staircases (`tests/aa`) |
 | settings lock | `check-settings-lock.py`: no setting read through Host while the settings' lock is held |
 
 ## The interface: `ps5/tests/bigpicture/run-bigpicture-tests.sh`

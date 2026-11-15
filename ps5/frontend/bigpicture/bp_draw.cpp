@@ -1933,6 +1933,7 @@ void toast(const std::string& line, float seconds)
 void dropScreenDialogs()
 {
 	closeCardManager();
+	closeTexturePacks();
 	for (auto it = s_dialogs.begin(); it != s_dialogs.end();)
 	{
 		if (it->kind != Dialog::Message && it->kind != Dialog::Text)
@@ -1944,7 +1945,7 @@ void dropScreenDialogs()
 
 bool dialogOpen()
 {
-	return !s_dialogs.empty() || cardManagerOpen() || (be != nullptr && be->listening() > 0);
+	return !s_dialogs.empty() || cardManagerOpen() || texturePacksOpen() || (be != nullptr && be->listening() > 0);
 }
 
 void dialogInput()
@@ -1964,6 +1965,12 @@ void dialogInput()
 			const Input now = in;
 			in = Input{};
 			cardManagerInput(now);
+		}
+		else if (texturePacksOpen())
+		{
+			const Input now = in;
+			in = Input{};
+			texturePacksInput(now);
 		}
 		return;
 	}
@@ -2237,8 +2244,12 @@ float drawDownloadBar(ImDrawList* dl)
 		std::snprintf(part, sizeof(part), "   \xc2\xb7   %.1f MB/s", b.speed / 1e6);
 		detail += part;
 	}
-	std::snprintf(part, sizeof(part), "   \xc2\xb7   %d connection%s", b.connections, b.connections == 1 ? "" : "s");
-	detail += part;
+	// (A move or a delete shown in the bar has no connections.)
+	if (b.connections > 0)
+	{
+		std::snprintf(part, sizeof(part), "   \xc2\xb7   %d connection%s", b.connections, b.connections == 1 ? "" : "s");
+		detail += part;
+	}
 	if (b.secondsLeft >= 0)
 	{
 		const long sec = static_cast<long>(b.secondsLeft + 0.5);
@@ -2344,6 +2355,9 @@ void dialogDraw(ImDrawList* dl)
 	// The card manager, under its own lists and questions.
 	if (cardManagerOpen())
 		cardManagerDraw(dl);
+	// The texture pack manager, the same way.
+	if (texturePacksOpen())
+		texturePacksDraw(dl);
 
 	if (s_dialogs.empty())
 	{

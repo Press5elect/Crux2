@@ -395,6 +395,17 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "ThreadedRecording", true);
 	b("PS5", "UpdateAtStart", true);
 	b("PS5", "FixesAtStart", true);
+	// The anti-aliasing row (one for FXAA, SMAA and SSAA): a settings file from before it says what was chosen in
+	// the keys the row now sets, so it reads them back once.
+	if (!si.ContainsValue("PS5", "AntiAliasing"))
+	{
+		const bool fxaa = si.GetBoolValue("EmuCore/GS", "fxaa", false);
+		const bool smaa = si.GetBoolValue("PS5", "SMAA", false);
+		const int down = si.GetIntValue("PS5", "Downsample", 0);
+		si.SetIntValue("PS5", "AntiAliasing", (down > 0) ? (smaa ? 4 : 3) : smaa ? 2 : fxaa ? 1 : 0);
+		if (down > 0 && !si.ContainsValue("PS5", "SSAAFilter"))
+			si.SetIntValue("PS5", "SSAAFilter", down);
+	}
 	// Care for the screen (the interface's own section).
 	i("PS5UI", "IdleDim", 3);
 	b("PS5UI", "ScreenSaver", true);

@@ -8,6 +8,18 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: one Anti-aliasing row (Settings > Graphics > Post-processing): Off, FXAA, SMAA, SSAA or
+  SSAA + SMAA. SSAA draws the game larger than the screen (choosing it raises the internal resolution
+  to about 1.5 times the screen's and turns FSR 1 off) and makes it screen-sized from every texel each
+  pixel covers (SSAA filter: Soft or Sharp), instead of one bilinear tap; SSAA + SMAA runs SMAA over
+  that. Not yet run on a console.
+- Added: the HD texture pack manager (the library's Square menu, Settings > Graphics, a game's
+  options): every pack on the console, the USB drives and the shares by game, with its size and
+  files; move a pack between them (copied and checked before the original goes), delete it, download
+  the collection's packs for your games one after another. Not yet run on a console.
+- Fixed: a black screen with a look (Settings > Graphics > Look): the look's picture is put in the
+  layout the screen's pass reads, and PCSX2's vertex buffer is bound again after it. Not yet run on
+  a console.
 - Fixed: a click on the touch pad's left half could be taken for Start (and the right half for
   Select) when another finger or a thumb was also on the pad, or when the click came a moment before
   the finger's position: the finger that touched last decides now.

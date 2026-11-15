@@ -3399,7 +3399,7 @@ void quickViewsMenu()
 
 void listMenu()
 {
-	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Ps2Menu, Whole };
+	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Ps2Menu, TexturePacks, Whole };
 	std::vector<std::string> names;
 	names.push_back(nar.search.empty() ? std::string(ICON_FA_MAGNIFYING_GLASS "   Search by name") :
 	                                     std::string(ICON_FA_MAGNIFYING_GLASS "   Search: \"") + nar.search + "\"  (change it)");
@@ -3419,6 +3419,7 @@ void listMenu()
 	names.push_back(ICON_FA_DICE "   A game at random");
 	names.push_back(ICON_FA_ROTATE "   Look for new games");
 	names.push_back(ICON_FA_MICROCHIP "   The PlayStation 2 menu");
+	names.push_back(ICON_FA_IMAGES "   HD texture packs");
 	if (narrowed())
 		names.push_back(ICON_FA_XMARK "   Show all games again");
 	pick("The list", std::move(names), -1, [](int choice) {
@@ -3474,6 +3475,13 @@ void listMenu()
 				break;
 			case Ps2Menu:
 				startPs2Menu();
+				break;
+			case TexturePacks:
+				// The texture pack manager (bp_textures.cpp): every game's packs, on every place.
+				if (TexturePackShelf* shelf = be->texturePackShelf())
+					openTexturePacks(shelf);
+				else
+					toast("Texture packs are not managed here.", 3.f);
 				break;
 			case Whole:
 				applyQuick(-1);

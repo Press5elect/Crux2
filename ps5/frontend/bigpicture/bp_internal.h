@@ -349,6 +349,14 @@ bool cardManagerOpen();
 void cardManagerInput(const Input& now);
 void cardManagerDraw(ImDrawList* dl);
 void closeCardManager();
+/// The texture pack manager (bp_textures.cpp), the same way.
+bool texturePacksOpen();
+void texturePacksInput(const Input& now);
+void texturePacksDraw(ImDrawList* dl);
+void closeTexturePacks();
+/// The manager's row of a game, by its serial, in focus (the left pane). False when there is no
+/// such row. For the PC preview's walk through the screens.
+bool texturePacksFocus(const std::string& serial);
 /// The lists and questions that are up go, unanswered (the screen that asked is gone).
 void dropScreenDialogs();
 /// A dialog or a toast with no screen under it (a game runs): this draws them.

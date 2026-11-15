@@ -23,6 +23,33 @@ item is done or something new is learned; delete what no longer applies.
 - Not every setting has been tried one by one; paraLLEl-GS not in every game; native code modules
   and many PS2 accessories not tried. PGO's worth has not been measured before/after.
 - Screen care: how fast a panel ages is not measured.
+- Looks' black screen (GSDeviceVK_PS5.cpp, DoLook): the look's picture is now left in the shader
+  read layout and PCSX2's vertex buffer bound again after the look's passes (the two causes the
+  reverted eca7923/d01f2cd found). Not run on a console. To check: a Look (e.g. CRT) shows the game,
+  the menus over it are drawn; the boot log has `look: frame 1 made, WxH from WxH`.
+- Downsampling ([PS5] Downsample) and SMAA ([PS5] SMAA), both off by default (ps5_aa.h, ps5_aa.glsl,
+  GSDevice::PS5Antialias, GSDeviceVK_PS5.cpp's DoDownsample/DoSMAA). Checked on lavapipe only
+  (`tests/aa`). On a console, check: with Upscaling Off or CAS and 8x at 4K, Soft and Sharp show a
+  picture with less shimmer than Bilinear, nothing shifted or cropped, the menus fine; the boot log's
+  `picture: downsampling's passes made`, `picture: downsampled (Sharp) from ... to ...`, `picture:
+  SMAA's passes made`, `picture: SMAA runs at WxH`; a paused game (menu open) looks the same as
+  running; with frame generation and a look on top; HDR and debanding after it. GPU cost: the test
+  window's `downsampling and SMAA` figure in the boot log's GPU line (and the overlay's conversions).
+  Not measured: the cost at 8x-12x (Sharp's two passes reach up to 33 texels each at a ratio of 8).
+- The HD texture pack manager (bp_textures.cpp, ps5_texture_pack_manager.cpp; the file work in
+  ps5_texture_pack_store.cpp, host-tested in `tests/texturepacks/store_test.cpp`; the screen in the
+  interface crawl). Not run on a console. To check: the manager lists packs on the console, a USB
+  drive (elevated) and a share, with sizes (`texture packs: ... measured in` lines; how long 100k
+  files take on a drive and over SMB); a move console to USB and back, and to a share (the share's
+  copy is written with `ps5vfs_store_from`, file by file: its speed), stopped half-way (the source
+  as it was, `replacements.crux2-moving` beside the target) and begun again; a delete stopped and
+  finished; two downloads queued one after the other; the bar during a move. Free space: the
+  console gives a title none (statvfs is a stand-in), so the "may not fit" question never comes on
+  the console; a pack too large stops with the drive full. Whether rename() works on an exFAT USB
+  drive from the elevated title (the move's last step there) is not known.
+- PS Move: whether the console's own libSceMove gives a payload process Move data is unknown; the
+  probe in [`../../ps5/probes/move/`](../../ps5/probes/move/README.md) (built, never run) calls it with
+  the PS4's signatures and logs to `/data/crux2-move-probe.log`. Nothing in the title uses it yet.
 
 ## Known problems
 

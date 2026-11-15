@@ -31,11 +31,15 @@
 #     finish out of order handed over in order, the memory they may hold, failures, slow parts and
 #     a stop; and, with the PC's libcurl and libarchive, the download over 10 connections from a
 #     made-up server with ranges, without them, cutting parts off, and a .zip unpacked as it comes;
+#   - the texture pack manager's file work (frontend/ps5_texture_pack_store.cpp): packs found,
+#     measured, moved (stopped half-way, failing, begun again: the source kept), deleted, queued;
 #   - the memory card held in memory (frontend/ps5_card_image.h): random saves on the image and
 #     on a copy, the file compared with the copy after each flush;
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
 #     page protection and the fault handler), over a stand-in for the platform layer with the same
 #     argument rules (mock_platform.cpp), compiled for 16 KiB host pages as the console build is;
+#   - downsampling and SMAA (frontend/ps5_aa.h, tests/aa): when they run and at what size; their passes
+#     on a software Vulkan driver against the maths in double precision;
 #   - the interface's and host's sources: no setting read through Host while the settings' lock
 #     is held (check-settings-lock.py; such a read ends the title);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
@@ -285,6 +289,14 @@ echo "== HD texture pack downloads: pieces over several connections, in order (f
 # 127.0.0.1 when the PC has libcurl and libarchive (tests/texturepacks/run-fetch-tests.sh).
 bash "$tests/texturepacks/run-fetch-tests.sh" "$work/texturepack-fetch" || status=1
 
+echo "== the texture pack manager's file work (frontend/ps5_texture_pack_store.cpp)"
+# Packs found on made-up places, measured, moved to a drive and to a share that cannot rename,
+# moves stopped half-way and failing (the source as it was) and begun again, deletes, the queue.
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra -Werror $sanitize -I "$frontend" "$tests/texturepacks/store_test.cpp" \
+    "$frontend/ps5_texture_pack_store.cpp" -o "$work/texture_pack_store_test"
+"$work/texture_pack_store_test" "$work/texture-pack-store" || status=1
+
 echo "== Crux2's own screenshots (frontend/ps5_shots.h)"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/shots/shots_test.cpp" -o "$work/shots_test"
@@ -299,6 +311,11 @@ echo "== HDR output and debanding (the last passes before the screen)"
 # ps5_final.glsl compiled as the device does and run on lavapipe against the maths in double precision,
 # and ps5_hdr.h's choices (run-hdr-tests.sh: says what is missing when glslang or a driver is not there).
 bash "$tests/hdr/run-hdr-tests.sh" "$work/hdr" || status=1
+
+echo "== downsampling and SMAA (before the picture is sharpened and shown)"
+# ps5_aa.h's decisions under the sanitizers; ps5_aa.glsl's five passes compiled as the device does and run on
+# lavapipe against the maths in double precision, SMAA on staircases (run-aa-tests.sh: says what is missing).
+bash "$tests/aa/run-aa-tests.sh" "$work/aa" || status=1
 
 echo "== no setting read through Host while the settings' lock is held"
 python3 "$tests/check-settings-lock.py" || status=1

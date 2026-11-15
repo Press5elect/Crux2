@@ -27,6 +27,7 @@ Start with [`../CLAUDE.md`](../CLAUDE.md): the rules that always apply, the comm
 | [`dev/debugging.md`](dev/debugging.md) | Reading a boot log; klog; crashes and hangs; test runs and the profiler |
 | [`dev/releasing.md`](dev/releasing.md) | Making a release (only when the owner asks) |
 | [`dev/open-work.md`](dev/open-work.md) | What is untested on a console, unfinished, or known broken; decisions on record |
+| [`../ps5/probes/move/README.md`](../ps5/probes/move/README.md) | The Move probe: a standalone payload asking whether the console's libSceMove gives a homebrew process Move data |
 
 ## History
 

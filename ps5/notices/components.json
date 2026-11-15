@@ -1130,6 +1130,24 @@
 			}
 		},
 		{
+			"id": "smaa",
+			"name": "SMAA, Enhanced Subpixel Morphological Anti-Aliasing (resources/shaders/common/smaa/SMAA.hlsl; its area and search textures, AreaTex.h and SearchTex.h, compiled into the title; resources/shaders/vulkan/ps5_aa.glsl, which is this port's, runs its three passes)",
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez",
+			"modifications": "none (taken through OGBox by Press5elect, unchanged from iryoku's repository)",
+			"texts": {
+				"SMAA-LICENSE.txt": "ps5/licenses/SMAA-LICENSE.txt"
+			},
+			"artifacts": [
+				"eboot.bin",
+				"resources/shaders/common/smaa/SMAA.hlsl"
+			],
+			"source": {
+				"url": "https://github.com/iryoku/smaa",
+				"revision": "71c806a838bdd7d517df19192a20f0c61b3ca29d"
+			}
+		},
+		{
 			"id": "qrcodegen",
 			"name": "QR Code generator library (C), for the phone's address",
 			"licence": "MIT",

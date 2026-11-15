@@ -46,6 +46,9 @@ std::vector<Place> Places();
 /// or `again`). On a thread of its own; `then` is called on the graphics thread, with an empty
 /// list and a reason when the list could not be had.
 void FindFor(const std::string& serial, bool again, std::function<void(std::vector<Pack>, std::string error)> then);
+/// Every pack of the collection (the texture pack manager's list), the same way; `then` is called
+/// on that thread of its own, not the graphics thread.
+void FindAll(bool again, std::function<void(std::vector<Pack>, std::string error)> then);
 
 /// Downloads and unpacks a pack into a place, on a thread of its own; one at a time. `connections`
 /// at once (1-16, [PS5] TexturePackConnections; 1 is one stream, as before). `done` is called on

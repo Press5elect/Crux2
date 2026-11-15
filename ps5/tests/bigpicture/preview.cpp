@@ -36,6 +36,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -393,7 +394,7 @@ struct Check
 	}
 } g_check;
 
-class PreviewBackend final : public bp::Backend, public bp::CardShelf
+class PreviewBackend final : public bp::Backend, public bp::CardShelf, public bp::TexturePackShelf
 {
 public:
 	std::vector<bp::GameInfo> list;
@@ -613,9 +614,23 @@ public:
 		download.total = 1800ull << 20;
 	}
 	std::string texturePackDoing() override { return download.title.empty() ? std::string() : download.title + ": downloading"; }
-	void stopTexturePack() override { download = DownloadBar(); }
+	void stopTexturePack() override
+	{
+		download = DownloadBar();
+		packDownloading.reset(); // (a download stopped is not a pack brought)
+	}
 	DownloadBar texturePackBar() override
 	{
+		// (With no download, a move or a delete of the texture pack manager has the bar.)
+		if (download.title.empty() && packJobOn)
+		{
+			DownloadBar bar;
+			bar.title = packJobWhat;
+			bar.got = packJobDone;
+			bar.total = packJobTotal;
+			bar.speed = 30e6;
+			return bar;
+		}
 		if (download.title.empty())
 			return download;
 		download.got = std::min(download.total, download.got + (3u << 20));
@@ -1890,6 +1905,250 @@ public:
 	}
 	int imagesAsked = 0;
 
+	// ---- the texture pack manager's shelf, made up: three places, packs on them (one of a game
+	// that is not in the library, one unfinished move), the collection's list a moment after it
+	// is asked for, moves and deletes that take a second or two, the downloads' queue.
+	bp::TexturePackShelf* texturePackShelf() override { return this; }
+	unsigned packsGen = 0;
+	int packsLooked = 0, collectionAt = -1, measureLeft = 0;
+	std::vector<bp::PackPlace> packPlacesHeld;
+	std::vector<bp::InstalledPack> packsHeld;
+	std::vector<bp::OfferedPack> offersHeld;
+	struct Queued
+	{
+		bp::OfferedPack pack;
+		int place;
+	};
+	std::deque<Queued> packQueue;
+	std::optional<Queued> packDownloading;
+	bool packJobOn = false, packJobDelete = false, packJobStop = false;
+	std::string packJobWhat;
+	uint64_t packJobDone = 0, packJobTotal = 0;
+	bp::InstalledPack packJobPack;
+	int packJobTo = 0;
+	unsigned packMoves = 0, packDeletes = 0, packDownloads = 0, movesRefused = 0;
+
+	void inventPacks()
+	{
+		packPlacesHeld = {{"This console", "/data/homebrew/PPSA99249/textures", 0, true, true, -1},
+			{"USB drive 1", "/mnt/usb0/Crux2/textures", 1, true, true, -1},
+			{"Share: games", "/smb/games/Crux2/textures", 2, true, false, -1}};
+		const auto pack = [](const char* serial, const char* path, int place, bool zip, bp::InstalledPack::State state, bool read, uint64_t files,
+							  uint64_t bytes) {
+			bp::InstalledPack p;
+			p.serial = serial;
+			p.path = path;
+			p.place = place;
+			p.zip = zip;
+			p.state = state;
+			p.read = read;
+			p.measured = false;
+			p.files = files;
+			p.bytes = bytes;
+			return p;
+		};
+		using S = bp::InstalledPack;
+		packsHeld = {pack("SLUS-29001", "/data/homebrew/PPSA99249/textures/SLUS-29001/replacements", 0, false, S::Whole, true, 41233, 3300ull << 20),
+			pack("SLUS-29001", "/smb/games/Crux2/textures/SLUS-29001/replacements", 2, false, S::Whole, false, 41233, 3300ull << 20),
+			pack("SLUS-29002", "/mnt/usb0/Crux2/textures/SLUS-29002.zip", 1, true, S::Whole, true, 1, 900ull << 20),
+			pack("SLES-59003", "/smb/games/Crux2/textures/SLES-59003/replacements", 2, false, S::Whole, true, 8120, 1200ull << 20),
+			pack("SLUS-29900", "/data/homebrew/PPSA99249/textures/SLUS-29900/replacements", 0, false, S::Whole, true, 512, 64ull << 20),
+			pack("SLUS-29004", "/mnt/usb0/Crux2/textures/SLUS-29004/replacements.crux2-moving", 1, false, S::Moving, false, 300, 20ull << 20),
+			pack("SLUS-29004", "/data/homebrew/PPSA99249/textures/SLUS-29004/replacements", 0, false, S::Whole, true, 900, 60ull << 20)};
+		const auto offer = [](const char* title, uint64_t size, std::vector<std::string> serials) {
+			bp::OfferedPack o;
+			o.title = title;
+			o.file = std::string(title) + ".rar";
+			o.size = size;
+			o.serials = std::move(serials);
+			return o;
+		};
+		offersHeld = {offer("Brass Comet (USA) [SLUS-29001] HD Pack", 3100ull << 20, {"SLUS-29001"}),
+			offer("Neon Harbor Racing (USA) [SLUS-29007] HD Remaster", 1800ull << 20, {"SLUS-29007"}),
+			offer("Velvet Engine (USA) [SLUS-29011] Upscaled", 640ull << 20, {"SLUS-29011"}),
+			offer("Ashen Crown (USA) [SLUS-29008, SLUS-29009, SLUS-29010] HD", 5200ull << 20, {"SLUS-29008", "SLUS-29009", "SLUS-29010"}),
+			offer("Lost Signal (USA) [SLUS-29900] HD", 70ull << 20, {"SLUS-29900"})};
+	}
+	unsigned packsGeneration() override { return packsGen; }
+	std::vector<bp::PackPlace> packPlaces() override
+	{
+		std::vector<bp::PackPlace> places = packPlacesHeld;
+		// (Free space as a PC would know it; the console knows none.)
+		if (!places.empty())
+			places[0].freeBytes = 18ll << 30;
+		if (places.size() > 1)
+			places[1].freeBytes = 2ll << 30;
+		return places;
+	}
+	std::vector<bp::InstalledPack> installedPacks() override { return packsHeld; }
+	void lookAgain(bool all) override
+	{
+		packsLooked++;
+		measureLeft = 40;
+		for (bp::InstalledPack& p : packsHeld)
+			p.measured = p.measured && !all;
+		if (collectionAt < 0 || all)
+			collectionAt = 50;
+		packsGen++;
+	}
+	int measuring() override
+	{
+		int n = 0;
+		for (const bp::InstalledPack& p : packsHeld)
+			n += p.measured ? 0 : 1;
+		return n;
+	}
+	int collectionState() override { return collectionAt < 0 ? 0 : collectionAt > 0 ? 1 : 2; }
+	std::string collectionError() override { return {}; }
+	std::vector<bp::OfferedPack> collectionPacks() override { return collectionAt == 0 ? offersHeld : std::vector<bp::OfferedPack>(); }
+	std::string packBusy(const bp::InstalledPack& pack) override
+	{
+		if (packJobOn)
+			return "A pack is being moved or deleted: wait for it, or stop it.";
+		if (run.valid && run.serial == pack.serial)
+			return "The game that runs reads it: close the game first.";
+		return {};
+	}
+	bool knownPack(const bp::InstalledPack& pack)
+	{
+		for (const bp::InstalledPack& p : packsHeld)
+		{
+			if (p.path == pack.path)
+				return true;
+		}
+		return false;
+	}
+	void deletePack(const bp::InstalledPack& pack) override
+	{
+		g_check.expect(knownPack(pack), "only a pack that is there is deleted");
+		g_check.expect(packBusy(pack).empty(), "a pack is deleted only when it may be");
+		packJobOn = true;
+		packJobDelete = true;
+		packJobPack = pack;
+		packJobDone = 0;
+		packJobTotal = std::max<uint64_t>(pack.bytes, 1);
+		packJobWhat = "Deleting " + pack.serial;
+		packsGen++;
+	}
+	void movePack(const bp::InstalledPack& pack, int place) override
+	{
+		g_check.expect(knownPack(pack), "only a pack that is there is moved");
+		g_check.expect(place >= 0 && place < static_cast<int>(packPlacesHeld.size()) && place != pack.place, "a pack is moved to another place that exists");
+		g_check.expect(pack.state == bp::InstalledPack::Whole, "only a whole pack is moved");
+		// (The menu leaves out a place that has a whole copy; one found there since is refused, as
+		// the store refuses it.)
+		for (const bp::InstalledPack& other : packsHeld)
+		{
+			if (other.serial == pack.serial && other.zip == pack.zip && other.place == place && other.state == bp::InstalledPack::Whole)
+			{
+				movesRefused++;
+				bp::message("Texture packs", "A pack of " + pack.serial + " is there already: delete one of them first.");
+				return;
+			}
+		}
+		packJobOn = true;
+		packJobDelete = false;
+		packJobPack = pack;
+		packJobTo = place;
+		packJobDone = 0;
+		packJobTotal = std::max<uint64_t>(pack.bytes, 1);
+		packJobWhat = "Moving " + pack.serial + " to " + packPlacesHeld[static_cast<size_t>(place)].name;
+		packsGen++;
+	}
+	std::string packJob() override
+	{
+		if (!packJobOn)
+			return {};
+		return packJobWhat + ": " + std::to_string(packJobDone * 100 / packJobTotal) + "%";
+	}
+	void stopPackJob() override { packJobStop = true; }
+	void queueDownload(const bp::OfferedPack& pack, int place) override
+	{
+		g_check.expect(place >= 0 && place < static_cast<int>(packPlacesHeld.size()) && packPlacesHeld[static_cast<size_t>(place)].downloads,
+			"a download goes to a place that takes one");
+		packQueue.push_back({pack, place});
+		packsGen++;
+	}
+	std::vector<std::string> queuedDownloads() override
+	{
+		std::vector<std::string> out;
+		for (const Queued& q : packQueue)
+			out.push_back(q.pack.title + " to " + packPlacesHeld[static_cast<size_t>(q.place)].name);
+		return out;
+	}
+	void unqueueDownload(int index) override
+	{
+		g_check.expect(index >= 0 && index < static_cast<int>(packQueue.size()), "what is taken off the queue is on it");
+		if (index >= 0 && index < static_cast<int>(packQueue.size()))
+			packQueue.erase(packQueue.begin() + index);
+		packsGen++;
+	}
+	void packsTick()
+	{
+		if (collectionAt > 0 && --collectionAt == 0)
+			packsGen++;
+		if (measureLeft > 0 && --measureLeft == 0)
+		{
+			for (bp::InstalledPack& p : packsHeld)
+				p.measured = true;
+			packsGen++;
+		}
+		if (packJobOn)
+		{
+			packJobDone = std::min(packJobTotal, packJobDone + packJobTotal / 90 + 1);
+			if (packJobStop || packJobDone >= packJobTotal)
+			{
+				const bool stopped = packJobStop;
+				packJobOn = packJobStop = false;
+				for (size_t i = 0; i < packsHeld.size(); i++)
+				{
+					if (packsHeld[i].path != packJobPack.path)
+						continue;
+					if (stopped)
+						break;
+					if (packJobDelete)
+					{
+						packsHeld.erase(packsHeld.begin() + static_cast<std::ptrdiff_t>(i));
+						packDeletes++;
+					}
+					else
+					{
+						packsHeld[i].place = packJobTo;
+						packsHeld[i].path = packPlacesHeld[static_cast<size_t>(packJobTo)].where + "/" + packJobPack.serial + "/replacements";
+						packMoves++;
+					}
+					break;
+				}
+				bp::toast(stopped ? "Stopped: the pack is where it was." : packJobDelete ? "The pack is deleted." : "The pack is moved.", 3.f);
+				packsGen++;
+			}
+		}
+		// The downloads, one after another.
+		if (packDownloading && download.title.empty())
+		{
+			bp::InstalledPack p;
+			p.serial = packDownloading->pack.serials.front();
+			p.place = packDownloading->place;
+			p.path = packPlacesHeld[static_cast<size_t>(p.place)].where + "/" + p.serial + "/replacements";
+			p.measured = true;
+			p.files = 2000;
+			p.bytes = packDownloading->pack.size;
+			packsHeld.push_back(p);
+			packDownloading.reset();
+			packDownloads++;
+			packsGen++;
+		}
+		if (!packDownloading && download.title.empty() && !packQueue.empty())
+		{
+			packDownloading = packQueue.front();
+			packQueue.pop_front();
+			download = DownloadBar();
+			download.title = packDownloading->pack.title;
+			download.total = std::min<uint64_t>(packDownloading->pack.size, 600ull << 20);
+			packsGen++;
+		}
+	}
+
 	// One frame of the world: what was asked of the machine happens, a start completes, a game on
 	// its way down is down, a wait for a button ends.
 	void tick(float dt)
@@ -1943,6 +2202,7 @@ public:
 			scanBusy = false;
 			scanFrames = 0;
 		}
+		packsTick();
 	}
 
 	unsigned long long writes = 0;
@@ -1965,7 +2225,11 @@ struct Harness
 	std::string out;
 	unsigned frames = 0;
 
-	Harness(int w, int h) : width(w), height(h) { backend.inventCards(); }
+	Harness(int w, int h) : width(w), height(h)
+	{
+		backend.inventCards();
+		backend.inventPacks();
+	}
 
 	bool optionsWas = false;
 	int over = 0, under = 0, nowhere = 0;
@@ -2186,6 +2450,14 @@ void shots(Harness& h)
 	h.shot("02a-library-texture-pack-download");
 	b.stopTexturePack();
 	h.wait(30);
+	// The texture pack manager from the list's menu (Square): its last row but one.
+	h.press(P::Square, 30);
+	h.press(P::Up, 8);
+	h.press(P::Cross, 30);
+	g_check.expect(bp::texturePacksOpen(), "the list's menu opens the texture pack manager");
+	h.shot("02b-library-texture-packs");
+	h.press(P::Circle, 30);
+	g_check.expect(!bp::texturePacksOpen() && bp::screen == bp::Screen::Library, "Circle closes it, back to the library");
 	h.press(P::Down, 30);
 	h.press(P::Right);
 	h.press(P::R2, 4);
@@ -2513,6 +2785,84 @@ void shots(Harness& h)
 		b.cardFiles.erase("SLUS-29001.ps2");
 		b.pages++;
 	}
+	// The texture pack manager (Settings > Graphics > HD texture packs): the packs by game, a game's
+	// copies, a move asked about (it may not fit), a delete asked twice, downloads one after another,
+	// and a game's texture settings.
+	{
+		go("Graphics", "HD texture packs");
+		h.press(P::Cross, 10);
+		g_check.expect(bp::texturePacksOpen(), "the texture pack manager opens from the settings");
+		h.shot("13t-1-texture-packs-measuring");
+		h.wait(70); // measured, and the collection's list is there
+		h.shot("13t-2-texture-packs");
+		g_check.expect(bp::texturePacksFocus("SLUS-29001"), "a game with two copies is listed");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.shot("13t-3-game-copies");
+		h.press(P::Cross, 30); // the console's copy
+		h.shot("13t-4-pack-menu");
+		h.press(P::Cross, 30); // Move to USB drive 1, which has 2 GB free
+		h.shot("13t-5-may-not-fit");
+		h.press(P::Cross, 20);
+		g_check.expect(b.packMoves == 0 && !b.packJobOn, "a move that may not fit is not begun by the answer the question opens on");
+		h.press(P::Cross, 30);
+		h.press(P::Cross, 30);
+		h.press(P::Left, 8);
+		h.press(P::Cross, 10);
+		h.wait(30);
+		h.shot("13t-6-moving");
+		h.wait(120);
+		g_check.expect(b.packMoves == 1, "the pack is moved after the question");
+		h.press(P::Circle, 20);
+		// A pack of a game that is not in the library, deleted: asked twice.
+		g_check.expect(bp::texturePacksFocus("SLUS-29900"), "a pack of a game not in the library is listed, by the collection's name");
+		h.wait(10);
+		h.shot("13t-7-not-in-library");
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.press(P::Up, 8); // Delete, the last
+		h.press(P::Cross, 30);
+		h.shot("13t-8-delete-question");
+		h.press(P::Left, 8);
+		h.press(P::Cross, 30);
+		g_check.expect(b.packDeletes == 0 && !b.packJobOn, "the first answer alone deletes nothing");
+		h.shot("13t-9-delete-again");
+		h.press(P::Left, 8);
+		h.press(P::Cross, 10);
+		h.wait(120);
+		g_check.expect(b.packDeletes == 1, "the pack is deleted after the second answer");
+		// Downloads: two, one after the other.
+		g_check.expect(bp::texturePacksFocus("SLUS-29007"), "a game of the library the collection has a pack for is listed");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.shot("13t-10-download-where");
+		h.press(P::Cross, 20); // This console
+		g_check.expect(bp::texturePacksFocus("SLUS-29011"), "and another");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.press(P::Down, 8); // USB drive 1
+		h.press(P::Cross, 20);
+		g_check.expect(b.packDownloading.has_value() && b.packQueue.size() == 1, "one downloads, the other waits");
+		h.press(P::Left, 10); // out of the game's packs
+		h.press(P::R2, 10);   // to the last row: the places, the downloads above them
+		h.wait(20);
+		h.shot("13t-11-downloads-and-places");
+		h.wait(500);
+		g_check.expect(b.packDownloads == 2 && b.packQueue.empty(), "the two are downloaded one after the other");
+		// A game's texture settings (Triangle).
+		g_check.expect(bp::texturePacksFocus("SLUS-29001"), "the game is still listed");
+		h.wait(10);
+		h.press(P::Triangle, 30);
+		g_check.expect(!bp::texturePacksOpen() && bp::screen == bp::Screen::Settings && bp::settingsGame().serial == "SLUS-29001",
+			"Triangle opens the game's own settings");
+		h.shot("13t-12-game-texture-settings");
+		h.press(P::Circle, 20);
+		h.press(P::Circle, 30);
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings && bp::settingsGame().path.empty(), "back to the settings of all games");
+	}
 	// Backups: one is made, one restored after the question.
 	go("Memory Cards", "Backups go to");
 	h.shot("13a-settings-backup");
@@ -2667,6 +3017,13 @@ void shots(Harness& h)
 	h.wait(20);
 	h.shot("18-game-options-picture");
 	h.press(P::Circle);
+	// A game's own Texture Replacement row opens the manager on that game.
+	go("Graphics", "HD texture packs");
+	h.press(P::Cross, 40);
+	g_check.expect(bp::texturePacksOpen(), "a game's HD texture packs row opens the manager");
+	h.shot("18b-game-texture-packs");
+	h.press(P::Circle, 30);
+	g_check.expect(!bp::texturePacksOpen(), "and Circle closes it, back to the game's options");
 	go("Patches");
 	h.press(P::Cross);
 	h.press(P::Cross);
@@ -3259,6 +3616,61 @@ void crawl(Harness& h, unsigned seed)
 		h.press(P::Circle, 4);
 	h.press(P::Options, 10);
 	h.press(P::Options, 10);
+
+	// The texture pack manager, with every button for a while: opened on a game and on none,
+	// packs moved, deleted, downloads queued and taken off, its lists made again under it.
+	{
+		std::mt19937 prng(seed * 7 + 1);
+		const uint32_t keys[] = {P::Up, P::Down, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Cross, P::Circle, P::Square, P::L2, P::R2, P::Triangle};
+		unsigned opened = 0;
+		const char* serials[] = {"", "SLUS-29001", "SLUS-29900", "SLUS-29007", "SLUS-00000"};
+		for (int step = 0; step < 5000; step++)
+		{
+			// (A Cross that left the manager may have started a game from the library: it is put
+			// away, as the random walk below does; the manager is opened over the library or the
+			// settings, as the interface opens it.)
+			if (b.starting())
+			{
+				b.isStarting = false;
+				bp::startFailed("Put away by the walk through the texture pack manager.");
+				h.wait(3);
+			}
+			if (b.run.valid)
+			{
+				b.run = bp::Running();
+				bp::gameStopped();
+				h.wait(3);
+			}
+			if (!bp::texturePacksOpen() && !bp::dialogOpen() && (bp::screen == bp::Screen::Library || bp::screen == bp::Screen::Settings))
+			{
+				bp::openTexturePacks(&b, serials[opened % 5]);
+				opened++;
+			}
+			const uint32_t key = keys[prng() % (sizeof(keys) / sizeof(keys[0]))];
+			h.wait(1 + static_cast<int>(prng() % 2), key);
+			h.wait(1 + static_cast<int>(prng() % 4));
+			if (step % 900 == 450)
+			{
+				// The world changes under it: a game goes from the library, a pack is found anew.
+				if (!b.list.empty())
+					b.list.erase(b.list.begin() + static_cast<std::ptrdiff_t>(prng() % b.list.size()));
+				b.generation++;
+				b.packsHeld.push_back(b.packsHeld.empty() ? bp::InstalledPack() : b.packsHeld[prng() % b.packsHeld.size()]);
+				b.packsHeld.back().path += "/again" + std::to_string(step);
+				b.packsGen++;
+			}
+		}
+		for (int i = 0; i < 12 && (bp::texturePacksOpen() || bp::dialogOpen()); i++)
+			h.press(P::Circle, 4);
+		std::printf("crawl: the texture pack manager opened %u times: %u moves, %u deletes, %u downloads\n", opened, b.packMoves, b.packDeletes,
+			b.packDownloads);
+		g_check.expect(opened > 3, "the random walk opened the texture pack manager");
+		g_check.expect(b.packMoves + b.packDeletes + b.packDownloads > 0, "and something was done in it");
+		for (int i = 0; i < 6; i++)
+			h.press(P::Circle, 4);
+		h.press(P::Options, 10);
+		h.press(P::Options, 10);
+	}
 
 	// (A texture pack's bar over the screens for the first of the random steps.)
 	b.findTexturePacks();

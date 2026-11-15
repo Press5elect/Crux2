@@ -591,6 +591,27 @@ boot log says once what it does: `picture: FSR 1 enlarges 1920x1344 to 3086x2160
 has NIS (enlarge and sharpen) and PCSX2's CAS. The filter is AMD's, unchanged
 (`resources/shaders/common/fsr1/`, MIT).
 
+### Anti-aliasing: FXAA, SMAA and SSAA (new)
+
+Settings > Graphics > Post-processing > **Anti-aliasing** is one choice for all of them:
+
+- **FXAA**: quick, a little soft.
+- **SMAA**: sharper edges for a little GPU time.
+- **SSAA**: the game drawn larger than the screen and made screen-sized from every texel each pixel
+  covers, the least shimmer. Choosing it raises the internal resolution to about 1.5 times the
+  screen's (8x at 4K) and turns FSR 1 off, which would otherwise enlarge a smaller picture; it costs
+  the most. **SSAA filter**: **Soft** (each pixel's texels averaged, no halo) or **Sharp** (a Lanczos
+  filter, crisper edges with a halo of a few percent).
+- **SSAA + SMAA**: SSAA, then SMAA over the screen-sized picture for the edges it leaves.
+
+CAS sharpening, frame generation and the look then work on the screen-sized picture. The boot log
+says what it does: `picture: downsampled (Sharp) from 3840x2688 to 2880x2160`, `picture: SMAA runs at ...`.
+
+**SMAA** (the same section, off) smooths jagged edges on the picture as it is shown: SMAA 1x
+(Jimenez et al., MIT; `resources/shaders/common/smaa/`), High quality, after downsampling when
+there is one, otherwise at the picture's own size. It is sharper than FXAA; it does not add
+samples, so it cannot replace a higher internal resolution. Neither has run on a console yet.
+
 ### Frame generation
 
 Settings > Graphics > **Frame generation** (off by default) makes pictures between the game's
@@ -687,12 +708,37 @@ switches packs on (for every game, or in one game's options), and **Precache rep
 all of a pack before the game begins. A game's options say where its pack was found. Texture dumps
 always go to the title folder.
 
-A game's options > Graphics > **Download an HD texture pack** fetches a pack from the Internet
-Archive's collection into the title folder's `textures/` or `<USB drive>/Crux2/textures/`. The
-packs are their makers' work and often several GB; nothing of them comes with Crux2. A pack comes
-in pieces over several connections at once (**Download connections**, beside it: 10, from 1 to 16;
-1 is a single stream) and is unpacked as it comes, with no copy of the archive kept; a bar along the
-bottom of the menus shows how far it is, its speed, the connections and the time left.
+**HD texture packs** (the library's Square menu; Settings > Graphics; or a game's options >
+Graphics, where it opens on that game) is the texture pack manager:
+
+- **Installed**: every pack on the console, each USB drive and each share, by game (its cover and
+  name from your library, or its serial), with its size, its number of files, where it is, and
+  whether the game reads it (the first copy in the order above) or another copy comes first.
+  Sizes are measured in the background and kept; **Look again** (Square) measures everything anew.
+- **Move** a pack to another place (the console, a USB drive, a share): it is copied, every file
+  checked against the original, and only then is the original deleted. A move that is stopped or
+  fails leaves the pack where it was; moving it again goes on from what was copied. On the console
+  and a USB drive the copy is made beside its place and put there when checked, so a game never
+  reads a half copy.
+- **Delete** a pack (asked twice). The game stops reading it at once; a delete that is stopped
+  leaves the rest unread, and deleting it again finishes it.
+- **In the collection**: the games of your library the Internet Archive's collection has a pack
+  for, and for each game its packs and their sizes. **Download** one to the console or a USB drive
+  (not to a share); several wait their turn and come one after another. **Download again** brings
+  an installed pack anew.
+- **Texture settings of the game** (Triangle): the game's own Graphics > Load textures.
+- What runs (a download, a move, a delete) is under **Under way**, where Cross stops it, and on
+  the bar along the bottom of the menus.
+
+The console tells a title nothing of the free space on its storage or its drives, so the manager
+cannot warn that a pack will not fit there; a pack too large stops when the place is full (a move
+leaves the original as it was). Where the free space is known it says so before a download or a
+move that may not fit. Moving or deleting the pack of the game that runs waits until it is closed.
+
+The packs are their makers' work and often several GB; nothing of them comes with Crux2. A pack
+comes in pieces over several connections at once (**Download connections**, in a game's options
+beside the manager's row: 10, from 1 to 16; 1 is a single stream) and is unpacked as it comes, with no copy of the
+archive kept; the bar shows how far it is, its speed, the connections and the time left.
 
 ### Game patches
 

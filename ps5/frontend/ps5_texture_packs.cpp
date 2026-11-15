@@ -241,6 +241,23 @@ void FindFor(const std::string& serial, bool again, std::function<void(std::vect
 		then({}, "a thread could not be started");
 }
 
+void FindAll(bool again, std::function<void(std::vector<Pack>, std::string error)> then)
+{
+	const bool started = RunDetached([again, then] {
+		std::string json, error;
+		std::vector<Pack> found;
+		if (CollectionList(again, &json, &error))
+		{
+			found = PacksIn(json);
+			error.clear();
+		}
+		ps5px_log("texture packs: %zu packs in the collection%s%s", found.size(), error.empty() ? "" : ": ", error.c_str());
+		then(std::move(found), error);
+	});
+	if (!started)
+		then({}, "a thread could not be started");
+}
+
 bool Start(const Pack& pack, const Place& place, unsigned connections, std::function<void(bool ok, std::string sentence)> done)
 {
 	bool expected = false;
