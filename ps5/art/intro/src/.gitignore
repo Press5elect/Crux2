@@ -1,8 +1,9 @@
-# What making the video leaves here (README.md, one level up): not committed.
+# What making the video leaves (README.md, one level up), if it is made here: not committed.
 node_modules/
 package.json
 package-lock.json
-logo.png
+letters.png
+letters.json
 video.mp4
 audio.wav
 s_*.png

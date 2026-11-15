@@ -1,161 +1,220 @@
-# Crux2 - the startup video (ps5/art/intro, README.md there): its sound, synthesized, timed to main.js's
-# timeline (T). Made from OGBox's audio.py (OGBox by Press5elect), on Crux2's shorter timeline.
+#!/usr/bin/env python3
+# Crux2 - the startup video (ps5/art/intro, README.md there): its sound, synthesized on main.js's
+# timeline (T): a warm low drone; a traced hum while the guides draw; two slides that end in a
+# mechanical clack and a muted note each; the orange bar's rising charge, its latch and a chord; a run
+# of bells along it; four ticks and four rising notes as the letters land; the chord opening out as the
+# light crosses the name, and fading with the picture. All synthesized here (NumPy), nothing sampled.
 # SPDX-FileCopyrightText: 2026 Press5elect
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
-import numpy as np, wave
+#
+#   OUT=audio.wav python3 audio.py
 import os
-CHORD_GAIN=float(os.environ.get('CHORD_GAIN','4.5'))   # the old video's chord, about 4 dB over the rest
-SR=48000; DUR=7.0; N=int(SR*DUR)
-T=dict(hb1=0.45,hb2=1.0,i1=1.55,i2=2.15,i3=2.7,burst=3.4,text=4.3,fade=6.4,end=7.0)   # main.js's T
-rng=np.random.default_rng(15)
-L=np.zeros(N); R=np.zeros(N)            # dry
-WL=np.zeros(N); WR=np.zeros(N)          # reverb send
-def add(sig,t0,pan=0.0,gain=1.0,wet=0.0):
-    i=int(t0*SR)
-    if i>=N: return
-    if i<0: sig=sig[-i:]; i=0
-    n=min(len(sig),N-i); s=sig[:n]*gain
-    gl=np.cos((pan+1)*np.pi/4); gr=np.sin((pan+1)*np.pi/4)
-    L[i:i+n]+=s*gl; R[i:i+n]+=s*gr
-    if wet: WL[i:i+n]+=s*gl*wet; WR[i:i+n]+=s*gr*wet
-def tt(d): return np.arange(int(d*SR))/SR
-def noise_band(d,lo,hi,soft=0.25):
-    n=int(d*SR); x=rng.standard_normal(n); X=np.fft.rfft(x); f=np.fft.rfftfreq(n,1/SR)
-    m=1/(1+(lo/np.maximum(f,1e-3))**(2/soft*0.5))*1/(1+(f/hi)**(2/soft*0.5))
-    y=np.fft.irfft(X*m,n); return y/ (np.abs(y).max()+1e-9)
-def sweep(d,f0,f1,tau):
-    t=tt(d); return np.sin(2*np.pi*(f1*t+(f0-f1)*tau*(1-np.exp(-t/tau))))
-def kick(d,f0,f1,tau,dec,drive=1.0):
-    t=tt(d); return np.tanh(sweep(d,f0,f1,tau)*np.exp(-t/dec)*drive)/np.tanh(drive)
-def ping(freq,dec,d=None):
-    d=d or dec*6; t=tt(d); return np.sin(2*np.pi*freq*t+rng.uniform(0,6.28))*np.exp(-t/dec)*np.minimum(t/0.001,1)
-def fade(sig,a=0.005,r=0.02):
-    n=len(sig); e=np.ones(n); na=int(a*SR); nr=int(r*SR)
-    if na: e[:na]=np.linspace(0,1,na)
-    if nr: e[-nr:]*=np.linspace(1,0,nr)
-    return sig*e
+import wave
 
-# ---- bed: a low drone that grows until the burst
-t=np.arange(N)/SR
-bed=(np.sin(2*np.pi*36.7*t)+0.6*np.sin(2*np.pi*55.1*t+1)+0.35*np.sin(2*np.pi*73.6*t+2))
-env=np.clip((t-0.1)/3.6,0,1)**1.6*(t<T['burst']-0.05)
-add(bed*env,0,0,0.11)
-rum=noise_band(DUR,40,180)*env
-add(rum,0,0,0.07)
+import numpy as np
 
-# ---- heartbeats
-for t0,g in ((T['hb1'],0.5),(T['hb2'],0.8)):
-    add(kick(0.5,70,36,0.05,0.13),t0+0.02,0,g*0.75,0.12)
-    add(kick(0.5,62,33,0.05,0.16),t0+0.25,0,g*0.6,0.12)
+# main.js's T (the letters land at l0 + i * LET + LDUR)
+T = dict(guide=0.2, a0=0.5, a1=0.82, b0=0.92, b1=1.24, o0=1.5, o1=1.96, run=2.06, move=2.7, move1=3.2,
+         l0=3.02, LET=0.13, LDUR=0.36, sweep=4.0, sweep1=4.6, fade=5.9, end=6.6)
+LAND = [T["l0"] + i * T["LET"] + T["LDUR"] for i in range(4)]
+SR = 48000
+N = int(round(T["end"] * SR))
+rng = np.random.default_rng(2026111502)
+t = np.arange(N) / SR
+L = np.zeros(N); R = np.zeros(N)        # dry
+WL = np.zeros(N); WR = np.zeros(N)      # to the room
 
-# ---- the three blows
-def cracks(t0,span,n,g):
-    for _ in range(n):
-        dt=rng.exponential(span/3.0)
-        if dt>span*2: continue
-        d=rng.uniform(0.002,0.012); c=noise_band(d+0.004,rng.uniform(1800,4000),rng.uniform(6000,14000))*np.exp(-tt(d+0.004)/(d/3))
-        add(c,t0+dt,rng.uniform(-0.9,0.9),g*rng.uniform(0.2,1.0)*np.exp(-dt/span),0.25)
-def glass_ring(t0,n,g,flo=1700,fhi=7500,dec=(0.06,0.4)):
-    for _ in range(n):
-        add(ping(rng.uniform(flo,fhi),rng.uniform(*dec)),t0+rng.uniform(0,0.02),rng.uniform(-0.8,0.8),g*rng.uniform(0.3,1.0),0.5)
-for t0,g in ((T['i1'],0.62),(T['i2'],0.78),(T['i3'],0.95)):
-    add(kick(0.9,150,38,0.035,0.28,1.8),t0,0,g*0.95,0.10)
-    add(noise_band(0.25,150,900)*np.exp(-tt(0.25)/0.05),t0,0,g*0.55,0.2)              # the thud's body
-    add(noise_band(0.08,2500,14000)*np.exp(-tt(0.08)/0.012),t0,0,g*0.7,0.3)          # the snap
-    glass_ring(t0,9,0.10*g)
-    cracks(t0+0.01,0.55,int(70*g),0.30*g)
-# the glass under strain: ticks thicken, a whine climbs, the air rises
-for _ in range(240):
-    u=rng.uniform(0,1)**0.45; t0=T['i3']+0.15+u*(T['burst']-T['i3']-0.2)
-    d=rng.uniform(0.002,0.008); c=noise_band(d+0.004,2500,12000)*np.exp(-tt(d+0.004)/(d/3))
-    add(c,t0,rng.uniform(-1,1),0.14+0.36*u,0.2)
-d=T['burst']-T['i3']-0.1; ts=tt(d); u=ts/d
-for f0,f1,g in ((900,1900,0.12),(1340,2850,0.09),(2010,4300,0.06)):
-    ph=2*np.pi*np.cumsum(f0*(f1/f0)**(u**1.5))/SR
-    add(fade(np.sin(ph)*(u**2.2)*(1+0.3*np.sin(2*np.pi*(9+14*u)*ts)),0.01,0.03),T['i3']+0.1,0,g,0.5)
-bands=[(200*1.6**k,200*1.6**(k+1)) for k in range(9)]
-ris=np.zeros(len(ts))
-for k,(lo,hi) in enumerate(bands):
-    w=np.exp(-((k-(0.5+7.5*u**1.3))/1.1)**2)
-    ris+=noise_band(d,lo,hi)*w
-add(fade(ris*(u**2.2),0.01,0.035),T['i3']+0.1,0,1.25,0.3)
 
-# ---- the burst
-tb=T['burst']
-add(kick(2.6,110,27,0.09,0.75,2.6),tb,0,1.0,0.08)                                     # the sub
-add(kick(0.6,220,55,0.03,0.12,1.5),tb,0,0.6,0.1)                                      # the punch
-ex=np.zeros(int(1.6*SR)); te=tt(1.6)
-for k,(lo,hi) in enumerate(bands+[(200*1.6**9,16000)]):
-    ex+=noise_band(1.6,lo,hi)*np.exp(-te/(0.9*0.72**k+0.05))*(1.0 if k<6 else 0.7)
-add(ex,tb,0,0.55,0.35)
-for _ in range(520):                                                                   # the glass
-    dt=rng.exponential(0.42)
-    if dt>2.6: continue
-    f=np.exp(rng.uniform(np.log(1800),np.log(11500)))
-    add(ping(f,rng.uniform(0.012,0.14)),tb+0.01+dt,rng.uniform(-1,1),0.085*rng.uniform(0.2,1.0)*np.exp(-dt/1.1),0.6)
-add(noise_band(0.9,3500,15000)*np.exp(-tt(0.9)/0.16),tb,0,0.42,0.4)
-for pan0,pan1,t0,g in ((-0.9,0.9,tb+0.22,0.34),(0.8,-0.8,tb+0.42,0.26),(-0.3,0.6,tb+0.75,0.16)):   # shards past the camera
-    d=0.55; ts2=tt(d); u2=ts2/d; w=np.zeros(len(ts2))
-    for k,(lo,hi) in enumerate(bands[:7]):
-        w+=noise_band(d,lo,hi)*np.exp(-((k-(1.0+4.5*np.sin(np.pi*u2)))/1.0)**2)
-    w*=np.sin(np.pi*u2)**2.2
-    pan=pan0+(pan1-pan0)*u2; i=int(t0*SR); n=len(w)
-    L[i:i+n]+=w*g*np.cos((pan+1)*np.pi/4); R[i:i+n]+=w*g*np.sin((pan+1)*np.pi/4)
-    WL[i:i+n]+=w*g*0.2; WR[i:i+n]+=w*g*0.2
+def hz(note):                           # semitones from A4
+    return 440.0 * 2 ** (note / 12)
 
-# ---- the logo: a wide D major chord out of the blast
-def pad(freq,d,g,att,rel,bright):
-    ts=tt(d); out_l=np.zeros(len(ts)); out_r=np.zeros(len(ts))
-    for det,pn in ((-0.004,-0.7),(0.0,0.0),(0.004,0.7)):
-        f=freq*(1+det); s=np.zeros(len(ts))
-        for h in range(1,int(min(18,9000/f))+1):
-            s+=np.sin(2*np.pi*f*h*ts+rng.uniform(0,6.28))/h**bright
-        s*=1+0.08*np.sin(2*np.pi*rng.uniform(0.2,0.5)*ts+rng.uniform(0,6.28))
-        out_l+=s*np.cos((pn+1)*np.pi/4); out_r+=s*np.sin((pn+1)*np.pi/4)
-    e=np.minimum(ts/att,1)*np.exp(-np.maximum(ts-att,0)/rel)
-    return out_l*e*g,out_r*e*g
-t0=tb+0.15; d=DUR-t0; e=tt(d)
-chord=np.zeros(len(e))
-for f,g in ((110,.12),(165,.09),(220,.07),(330,.04)):
-    chord+=g*np.sin(2*np.pi*f*e)*np.minimum(e/0.4,1)*np.exp(-e/1.2)
-add(chord,t0,0,CHORD_GAIN,0.0)
-ts=tt(d); air=noise_band(d,5000,14000)*np.minimum(ts/1.2,1)*np.exp(-ts/2.2)
-add(air,t0,0,0.035,0.6)
 
-# ---- the word: a sweep, then two bell notes
-d=0.6; ts=tt(d); u=ts/d; sw=np.zeros(len(ts))
-for k,(lo,hi) in enumerate(bands[3:]+[(200*1.6**9,15000)]):
-    sw+=noise_band(d,lo,hi)*np.exp(-((k-(0.5+5.5*u))/1.0)**2)
-i=int(T['text']*SR); pan=-0.6+1.2*u; w=sw*np.sin(np.pi*u)**1.5*0.16
-L[i:i+len(w)]+=w*np.cos((pan+1)*np.pi/4); R[i:i+len(w)]+=w*np.sin((pan+1)*np.pi/4); WL[i:i+len(w)]+=w*0.4; WR[i:i+len(w)]+=w*0.4
-def bell(f,dec,g,t0,pan):
-    for mul,a,dm in ((1,1,1),(2.0,0.35,0.6),(2.76,0.28,0.45),(5.4,0.12,0.25),(8.93,0.05,0.15)):
-        add(ping(f*mul,dec*dm),t0,pan,g*a,0.8)
-bell(1318.5,0.9,0.085,T['text']+0.50,0.25); bell(1760.0,0.8,0.06,T['text']+0.62,-0.2); bell(880.0,1.3,0.06,T['text']+0.50,0.0)
-for k,f in enumerate((2637.0,3520.0,4434.9,5274.0)):                                   # the glint
-    bell(f,0.35,0.022,T['text']+1.05+0.085*k,-0.5+0.33*k)
+D2, A2, D3, E3, Fs3, A3, B3, D4, E4, Fs4, A4, B4, Cs5, D5, E5, Fs5, A5, B5, D6, E6 = (
+    hz(n) for n in (-31, -24, -19, -17, -15, -12, -10, -7, -5, -3, 0, 2, 4, 5, 7, 9, 12, 14, 17, 19))
 
-# ---- reverb, master
-irn=int(2.6*SR); ti=np.arange(irn)/SR
+
+def tt(d):
+    return np.arange(int(d * SR)) / SR
+
+
+def add(sig, t0, pan=0.0, gain=1.0, wet=0.0):
+    """Mix sig in at t0 (s), panned (-1 left .. 1 right), with some of it sent to the room."""
+    i = int(round(t0 * SR))
+    if i < 0:
+        sig, i = sig[-i:], 0
+    n = min(len(sig), N - i)
+    if n <= 0:
+        return
+    s = sig[:n] * gain
+    if np.ndim(pan) == 0:
+        gl, gr = np.cos((pan + 1) * np.pi / 4), np.sin((pan + 1) * np.pi / 4)
+    else:
+        p = np.asarray(pan)[:n]; gl, gr = np.cos((p + 1) * np.pi / 4), np.sin((p + 1) * np.pi / 4)
+    L[i:i + n] += s * gl; R[i:i + n] += s * gr
+    if wet:
+        WL[i:i + n] += s * gl * wet; WR[i:i + n] += s * gr * wet
+
+
+def band(x, lo, hi, order=2):
+    """Filter x (FFT, smooth band edges)."""
+    n = len(x); X = np.fft.rfft(x); f = np.fft.rfftfreq(n, 1 / SR)
+    m = 1 / np.sqrt(1 + (lo / np.maximum(f, 1e-3)) ** (2 * order)) / np.sqrt(1 + (f / hi) ** (2 * order))
+    return np.fft.irfft(X * m, n)
+
+
+def norm(x):
+    return x / (np.abs(x).max() + 1e-12)
+
+
+def env(d, a, r, shape=1.0):
+    """Attack a, then release over the rest of d."""
+    x = tt(d); e = np.minimum(x / max(a, 1e-4), 1) * np.clip(1 - (x - a) / max(d - a, 1e-4), 0, 1) ** shape
+    return e
+
+
+def saw(f, d, voices=3, spread=0.006):
+    x = tt(d); out = np.zeros(len(x))
+    for k in range(voices):
+        ph = rng.uniform(0, 1); fk = f * (1 + spread * (k - (voices - 1) / 2))
+        out += 2 * ((fk * x + ph) % 1) - 1
+    return out / voices
+
+
+def lowpass_sweep(x, f0, f1):
+    """A one-pole low-pass whose corner moves from f0 to f1 (log) over x."""
+    fc = np.exp(np.linspace(np.log(f0), np.log(f1), len(x)))
+    a = np.exp(-2 * np.pi * fc / SR); y = np.zeros(len(x)); z = 0.0
+    for i in range(len(x)):
+        z = (1 - a[i]) * x[i] + a[i] * z; y[i] = z
+    return y
+
+
+def pluck(f, d, bright=1.0):
+    """A soft, muted synth pluck: a few harmonics that die fast, the higher ones faster."""
+    x = tt(d); out = np.zeros(len(x))
+    for k, g in ((1, 1.0), (2, 0.45 * bright), (3, 0.22 * bright), (4, 0.10 * bright), (5, 0.05 * bright)):
+        out += g * np.sin(2 * np.pi * f * k * x + rng.uniform(0, 6.28)) * np.exp(-x * (5 + 6 * k))
+    return out * np.minimum(x / 0.002, 1)
+
+
+def bell(f, d, dec):
+    """A small FM bell (two operators, the modulator's index dying away)."""
+    x = tt(d); idx = 1.6 * np.exp(-x / (dec * 0.25))
+    s = np.sin(2 * np.pi * f * x + idx * np.sin(2 * np.pi * f * 3.5 * x))
+    return s * np.exp(-x / dec) * np.minimum(x / 0.003, 1)
+
+
+def clack(size=1.0, tone=1.0):
+    """A part hitting its stop: a click, a short metal ring (inharmonic), a body thump."""
+    d = 0.35; x = tt(d)
+    click = band(rng.standard_normal(len(x)), 2500, 12000) * np.exp(-x / 0.0018)
+    ring = sum(g * np.sin(2 * np.pi * f * tone * x + rng.uniform(0, 6.28)) * np.exp(-x / dd)
+               for f, g, dd in ((1730, 0.5, 0.045), (2610, 0.35, 0.03), (3870, 0.25, 0.02), (5320, 0.15, 0.012)))
+    body = np.sin(2 * np.pi * (150 * x - 60 * 0.03 * (1 - np.exp(-x / 0.03)))) * np.exp(-x / (0.05 * size))
+    return norm(click) * 0.9 + ring * 0.6 + body * 0.9 * size
+
+
+def whoosh(d, f0, f1, peak=0.8):
+    """Air: band-passed noise whose band rises from f0 to f1 and swells to `peak` of d, then stops short."""
+    n = int(d * SR); x = rng.standard_normal(n)
+    hi = band(x, 300, 9000, 1)
+    y = lowpass_sweep(hi, f0, f1)
+    u = np.linspace(0, 1, n); e = (u / peak) ** 2 * (u < peak) + (u >= peak) * np.exp(-(u - peak) / (1 - peak) * 4)
+    return norm(y) * e
+
+
+# ---- the drone: D under everything, an A over it from the second bar on; a slow beat between voices
+dr = (np.sin(2 * np.pi * D2 * t) * 0.55 + np.sin(2 * np.pi * D2 * 1.003 * t + 1) * 0.45 + 0.25 * np.sin(2 * np.pi * D3 * t + 2))
+dr += 0.35 * np.sin(2 * np.pi * A2 * t + 0.5) * np.clip((t - T["b1"]) / 0.6, 0, 1)
+dr_env = np.clip(t / 1.0, 0, 1) ** 2 * (0.55 + 0.45 * np.clip((t - T["o0"]) / (T["o1"] - T["o0"]), 0, 1))
+dr_env *= 1 - 0.5 * np.clip((t - T["o1"]) / 0.8, 0, 1)                   # the chord takes over
+add(dr * dr_env, 0, 0, 0.16, 0.2)
+
+# ---- the guides draw: a thin traced hum and a hiss
+d = 0.6; x = tt(d)
+hum = np.sin(2 * np.pi * (1800 * x + 600 * x * x)) * 0.5 + np.sin(2 * np.pi * (2700 * x + 900 * x * x)) * 0.25
+hum *= np.sin(np.pi * np.clip(x / d, 0, 1)) ** 2 * (0.8 + 0.2 * np.sin(2 * np.pi * 31 * x))
+add(hum, T["guide"], 0.0, 0.035, 0.6)
+add(norm(band(rng.standard_normal(len(x)), 4000, 12000)) * np.sin(np.pi * x / d) ** 3, T["guide"], 0, 0.03, 0.5)
+
+# ---- the cream bars: each slides in (from the top left, then the bottom right) and clacks home
+for t0, t1, p0, note, tone in ((T["a0"], T["a1"], -0.7, A3, 1.0), (T["b0"], T["b1"], 0.7, D4, 1.12)):
+    d = t1 - t0 + 0.02
+    w = whoosh(d, 900, 6000, peak=0.92)
+    add(w, t0, np.linspace(p0, p0 * 0.2, len(w)), 0.22, 0.3)
+    add(clack(1.0, tone), t1, p0 * 0.25, 0.42, 0.35)
+    add(pluck(note, 1.2, 0.8), t1, p0 * 0.2, 0.22, 0.6)
+
+# ---- the orange bar: a rising charge on its way in, then the latch ("ka-chunk"), a deep thump, the chord
+d = T["o1"] - T["o0"] + 0.01; x = tt(d)
+f = D3 * 2 ** (np.clip(x / d, 0, 1) ** 1.6 * 12 / 12)                 # D3 up to D4
+ph = 2 * np.pi * np.cumsum(f) / SR
+ch = (2 * ((ph / (2 * np.pi)) % 1) - 1) * 0.6 + np.sin(ph * 0.5) * 0.5
+ch = lowpass_sweep(ch, 300, 4500) * (x / d) ** 1.5
+add(ch, T["o0"], np.linspace(-0.8, 0.0, len(x)), 0.20, 0.4)
+add(whoosh(d, 600, 9000, peak=0.95), T["o0"], np.linspace(-0.8, 0, len(x)), 0.30, 0.3)
+add(clack(1.8, 0.8), T["o1"] - 0.012, 0, 0.45, 0.35)
+add(clack(1.4, 0.68), T["o1"] + 0.035, 0, 0.35, 0.4)
+x = tt(1.2)
+thump = np.sin(2 * np.pi * (42 * x + (95 - 42) * 0.06 * (1 - np.exp(-x / 0.06)))) * np.exp(-x / 0.32) * np.minimum(x / 0.002, 1)
+add(np.tanh(thump * 1.6), T["o1"], 0, 0.75, 0.15)
+stab = sum(saw(fq, 2.4, 3, 0.005) * g for fq, g in ((D3, 0.8), (A3, 0.6), (D4, 0.5), (Fs4, 0.4), (A4, 0.3)))
+x = tt(2.4)
+stab = lowpass_sweep(stab, 5000, 500) * np.exp(-x / 0.7) * np.minimum(x / 0.004, 1)
+add(stab, T["o1"], 0, 0.17, 0.9)
+
+# ---- the light runs along the bar: bells, low left to high right
+for k, fq in enumerate((D5, Fs5, A5, D6, E6)):
+    add(bell(fq, 1.4, 0.45), T["run"] + 0.085 * k, -0.6 + 0.3 * k, 0.05 * (1 - 0.08 * k), 0.8)
+
+# ---- the mark draws back to its place: a short falling breath of air
+w = whoosh(0.5, 5000, 700, peak=0.5); add(w[::-1] * 0.6 + w * 0.4, T["move"], 0.15, 0.10, 0.4)
+
+# ---- the letters: each slips out (a tiny air) and lands with a tick and a note, rising
+for i, (tl, fq) in enumerate(zip(LAND, (A4, B4, D5, Fs5))):
+    pan = (-0.55, -0.35, -0.12, 0.45)[i]
+    add(whoosh(T["LDUR"], 2000, 8000, peak=0.85), tl - T["LDUR"], pan, 0.06, 0.2)
+    add(clack(0.45, 1.5 + 0.08 * i), tl, pan, 0.26, 0.3)
+    add(pluck(fq, 1.4, 1.0) + 0.3 * pluck(fq * 2, 1.4, 0.5), tl, pan, 0.20 if i < 3 else 0.26, 0.7)
+
+# ---- the light crosses the name: the chord opens out (D, A, E over it), a shimmer from left to right
+d = T["end"] - T["sweep"] + 0.1; x = tt(d)
+pad = sum(saw(fq, d, 4, 0.004) * g for fq, g in ((D2, 0.7), (A2, 0.6), (D3, 0.5), (Fs3, 0.45), (A3, 0.4), (E4, 0.3), (A4, 0.18)))
+pad = lowpass_sweep(pad, 400, 2600) * np.minimum(x / 0.35, 1) ** 1.5 * np.exp(-x / 3.0)
+add(pad, T["sweep"], 0, 0.22, 0.7)
+sh = norm(band(rng.standard_normal(int(0.8 * SR)), 5000, 14000)) * np.sin(np.pi * np.linspace(0, 1, int(0.8 * SR))) ** 2
+add(sh, T["sweep"] - 0.05, np.linspace(-0.8, 0.8, len(sh)), 0.035, 0.5)
+for fq, dt, p, g in ((D5, 0.0, -0.3, 0.08), (A5, 0.12, 0.1, 0.065), (E6, 0.24, 0.4, 0.045)):
+    add(bell(fq, 2.4, 0.9), T["sweep"] + 0.05 + dt, p, g, 0.9)
+
+# ---- the room, the fade, the level
+irn = int(2.2 * SR); ti = np.arange(irn) / SR
+
+
 def ir(seed):
-    r=np.random.default_rng(seed); x=r.standard_normal(irn); X=np.fft.rfft(x); f=np.fft.rfftfreq(irn,1/SR)
-    X*=1/(1+(250/np.maximum(f,1))**2)*1/(1+(f/6500)**2); y=np.fft.irfft(X,irn)*(np.exp(-ti/0.55)*0.8+np.exp(-ti/0.12)*0.6)
-    y[:int(0.012*SR)]*=np.linspace(0,1,int(0.012*SR)); return y/np.sqrt((y**2).sum())
-def conv(x,h):
-    n=len(x)+len(h); m=1<<int(np.ceil(np.log2(n))); return np.fft.irfft(np.fft.rfft(x,m)*np.fft.rfft(h,m),m)[:len(x)]
-RL=conv(WL,ir(1)); RR=conv(WR,ir(2))
-ML=L+RL*0.9; MR=R+RR*0.9
-m=np.clip((T['end']-0.02-t)/(T['end']-0.02-T['fade']),0,1)**1.5*np.minimum(t/0.05,1)
-ML*=m; MR*=m
-pk=max(np.abs(ML).max(),np.abs(MR).max()); print('pre-limit peak',pk)
-drive=1.35/pk*1.0
-ML=np.tanh(ML*drive*1.6)/np.tanh(1.6); MR=np.tanh(MR*drive*1.6)/np.tanh(1.6)
-pk=max(np.abs(ML).max(),np.abs(MR).max()); ML*=0.94/pk; MR*=0.94/pk
-out=np.stack([ML,MR],1)
-OUT=os.environ.get("OUT","audio.wav")
-with wave.open(OUT,"wb") as w:
-    w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes((out*32767).astype(np.int16).tobytes())
-# a loudness curve, to check the shape
-blk=int(SR*0.1); rms=[float(np.sqrt((out[i:i+blk]**2).mean())) for i in range(0,N,blk)]
-print(' '.join('%2d'%int(max(-60,20*np.log10(r+1e-6))+60) for r in rms))
+    r = np.random.default_rng(seed); y = band(r.standard_normal(irn), 200, 7000, 1) * (np.exp(-ti / 0.5) * 0.8 + np.exp(-ti / 0.1) * 0.5)
+    pre = int(0.018 * SR); y = np.concatenate([np.zeros(pre), y[:-pre]])
+    return y / np.sqrt((y ** 2).sum())
+
+
+def conv(a, h):
+    n = len(a) + len(h); m = 1 << int(np.ceil(np.log2(n)))
+    return np.fft.irfft(np.fft.rfft(a, m) * np.fft.rfft(h, m), m)[:len(a)]
+
+
+ML = L + conv(WL, ir(1)) * 0.8
+MR = R + conv(WR, ir(2)) * 0.8
+fade = np.clip((T["end"] - 0.03 - t) / (T["end"] - 0.03 - T["fade"]), 0, 1) ** 1.6 * np.minimum(t / 0.02, 1)
+ML *= fade; MR *= fade
+pk = max(np.abs(ML).max(), np.abs(MR).max())
+ML = np.tanh(ML / pk * 2.2) / np.tanh(2.2); MR = np.tanh(MR / pk * 2.2) / np.tanh(2.2)
+pk = max(np.abs(ML).max(), np.abs(MR).max()); ML *= 0.89 / pk; MR *= 0.89 / pk       # -1 dBFS
+out = np.stack([ML, MR], 1)
+OUT = os.environ.get("OUT", "audio.wav")
+with wave.open(OUT, "wb") as w:
+    w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
+    w.writeframes(np.round(out * 32767).astype(np.int16).tobytes())
+blk = int(SR * 0.1)
+print(OUT, f"{N / SR:.2f} s;", "level per 0.1 s (dB + 60):",
+      " ".join("%2d" % int(max(-60, 20 * np.log10(np.sqrt((out[i:i + blk] ** 2).mean()) + 1e-6)) + 60) for i in range(0, N, blk)))

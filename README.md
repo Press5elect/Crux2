@@ -827,7 +827,7 @@ Crux2, and changing it for your own use, need nothing: the licence does not let 
 | PCSX2 | PCSX2 Dev Team and contributors | GPL-3.0-or-later |
 | Crux2: the port layer, the host, the tools, the tests, the changes to PCSX2 | Press5elect | GPL-3.0-or-later, with the attribution term of `NOTICE` |
 | The interface's screens (from PSFlyCast's Big Picture front end) | Press5elect (PSFlyCast and Crux2), and the other authors of the code PSFlyCast's front end came from | GPL-2.0-or-later, used under GPL-3.0-or-later |
-| Features ported from OGBox (covers, game fixes fetch, boot log in memory, HDR10, startup video and others) | Press5elect (OGBox) | GPL-3.0-or-later |
+| Features ported from OGBox (covers, game fixes fetch, boot log in memory, HDR10, the startup video's player and others) | Press5elect (OGBox) | GPL-3.0-or-later |
 | PS5 Vulkan Template (the PS5 layer, the tools this build is made from) | Mihawk; Sascha Willems | MIT |
 | PS5_Vulkan (link recipe, packaging tool, `libc.prx`) and PS5_Mesa (RADV for the console) | Mihawk; Mesa's authors | GPL-3.0; MIT |
 | PS5 platform layer (payload SDK fork) | Mihawk; John Tornblom and ps5-payload-dev | GPL-3.0-or-later |

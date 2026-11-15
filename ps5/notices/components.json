@@ -980,7 +980,7 @@
 		},
 		{
 			"id": "startup-video",
-			"name": "The startup video and its sound (resources/intro): the title's mark behind glass that cracks and shatters, made from OGBox's (OGBox by Press5elect)",
+			"name": "The startup video and its sound (resources/intro): the title's mark put together from its bars, then its name, letter by letter (the name set in Saira ExtraBold, as the title's art is)",
 			"licence": "GPL-3.0-or-later",
 			"copyright": "Copyright (C) 2026 Press5elect",
 			"modifications": "-",
