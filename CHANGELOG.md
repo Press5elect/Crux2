@@ -6,15 +6,13 @@ where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
-## Unreleased
+## v1.0.19 (2026-11-15)
 
-Since v1.0.18. The v1.0.19 and v1.0.20 work was taken out of this branch (883c832) and is not in
-this list; [`docs/history/v1.0.19-v1.0.20-reverted.md`](docs/history/v1.0.19-v1.0.20-reverted.md)
-says what it was and how to bring it back. Nothing below has run on a console yet.
+Since v1.0.18. (An earlier v1.0.19 was built but not published; its work and v1.0.20's are not in
+this version: [`docs/history/v1.0.19-v1.0.20-reverted.md`](docs/history/v1.0.19-v1.0.20-reverted.md).)
 
 - Added: HDR10 output (Settings > Graphics, HDR; off), with highlight and white levels and Adjust
-  HDR brightness; it needs the console's HDR setting, a TV that takes HDR, and RADV built with
-  ps5/patches/mesa-27/0020.
+  HDR brightness; it needs the console's HDR setting and a TV that takes HDR.
 - Added: Debanding (Settings > Graphics; off, Low, High).
 - Added: a startup video of Crux2's own in the start-up animation's place (Settings > Interface,
   Startup video).
@@ -29,12 +27,6 @@ says what it was and how to bring it back. Nothing below has run on a console ye
 - Added: frame generation's pictures a second on the on-screen display, and a log line every 10 s.
 - Added: test builds say "developer build" and their updater offers the release; the updater
   removes files a new version no longer ships.
-- Changed: covers and pictures are downloaded three at a time; the covers on screen load first.
-- Changed: quick taps are held for the game at least 50 ms.
-- Changed: network shares are woken at start; a game on a share that does not answer waits for it
-  with a count on the screen, and a read stuck for 2 s is said on the screen.
-- Changed: an exit, a restart or a state load waits for the writes still under way, with a bar.
-- Changed: settings are written when the menus close, and at a game's start, quit and crash.
 - Added: a light gun choice (Settings > Controllers > Light gun): one GunCon 2 in USB port 1, or two
   in ports 1 and 2, with their buttons set up. Before, a GunCon 2 could only be plugged in by
   editing the settings file.
@@ -59,15 +51,19 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   in the game's own options.
 - Added: Steady 30 for frame generation (off), and a colour filter on the game's picture for colour
   blindness (off).
+- Added: the recomp kit (`Crux2-recomp-kit-<version>.zip`) comes with every release, beside Crux2's
+  ZIP: it makes a game's native modules and Crux2 Recomp's on a PC (Windows or Linux).
+- Changed: covers and pictures are downloaded three at a time; the covers on screen load first.
+- Changed: quick taps are held for the game at least 50 ms.
+- Changed: network shares are woken at start; a game on a share that does not answer waits for it
+  with a count on the screen, and a read stuck for 2 s is said on the screen.
+- Changed: an exit, a restart or a state load waits for the writes still under way, with a bar.
+- Changed: settings are written when the menus close, and at a game's start, quit and crash.
 - Changed: texture packs are held within a memory budget (at most 2 GiB); the least recently used
   textures are let go and read again when needed.
 - Changed: HD texture packs download over 10 connections at once (a game's options > Graphics,
   Download connections: 1 to 16; 1 is one stream as before), each piece on a new connection, with a
   progress bar over the menus (size, percent, speed, connections, time left).
-- Fixed: a backup that could not read a file was written as complete, and with "replace older"
-  the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
-  are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't
-  answer at once.
 - Changed: the payload SDK fork is at `3345cde` (was `b5efad5`): built over the SDK's v0.45 release
   instead of v0.42, so the C++ runtime linked into the title is a newer build; the memory heap grows
   in 2 MiB steps instead of 16, keeps its pieces apart so emptied ones can be given back, and keeps
@@ -85,8 +81,10 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   fixes. Save states made before do not load (PCSX2 changed their version).
 - Changed: the graphics driver (RADV) stays on Mesa main of 2026-10-31 (`0618bfe0ffb`, as v1.0.18):
   the newer Mesa of 2026-11-15 stopped the GPU the first time each game started.
-- Added: the recomp kit (`Crux2-recomp-kit-<version>.zip`) comes with every release, beside Crux2's
-  ZIP: it makes a game's native modules and Crux2 Recomp's on a PC (Windows or Linux).
+- Fixed: a backup that could not read a file was written as complete, and with "replace older"
+  the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
+  are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't
+  answer at once.
 
 ## v1.0.18 (2026-10-31)
 
