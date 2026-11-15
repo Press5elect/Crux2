@@ -11,34 +11,12 @@ item is done or something new is learned; delete what no longer applies.
   anything from it is in the tree.
 - b075fe1 and the work after it are Unreleased ([`CHANGELOG.md`](../../CHANGELOG.md)). **Nothing of
   it has run on a console**; the host tests and the interface crawl pass.
-- The pins are v1.0.18's. PCSX2 is at v2.9.150 while upstream had v2.9.179 on 2026-11-15; Mesa
-  main, the SDK, PS5_Vulkan and PS2Recomp were also moved on in the reverted work and are behind.
-- PS5_Vulkan is pinned at `f410e67` (what v1.0.18 was built with; `vulkan_revision` in
-  `ps5/tools/bootstrap.sh`); the checkout beside the repository is at `ace98a9`.
-- On 2026-11-15 `check-sources.sh` reports six sources behind (PCSX2, Mesa main, PS5_Vulkan, the
-  SDK, PS2Recomp, and the checkout's PS5_Vulkan): the pins are moved before the next build.
-
-## Untested on a console (Unreleased, from b075fe1)
-
-| Item | State / what to check |
-| --- | --- |
-| HDR10 output (Settings > Graphics > HDR, Adjust HDR brightness) | Host test of the passes only. **Needs RADV rebuilt with `ps5/patches/mesa-27/0020`** (`build-radv-crux2.sh`) and `param.json`'s attribute `0x20000000` (in the tree). Check `wsi/videoout: framebuffers HDR10:` and `wsi/videoout: output status` lines |
-| Debanding | Host test of the pass |
-| Startup video (`ps5_intro.cpp`, libvpx) | **On by default** (`[PS5] StartupVideo`), against the rule that untested behaviour changes start off: the owner should confirm or it should default off |
-| Game fixes from GitHub at start | **On by default** (`FixesAtStart`); `ps5/game-fixes.txt` lists no fixes yet, and the title fetches the list from `main`, so nothing is fetched until a list with entries is on `main` |
-| Boot log kept in memory | **The default** (`LogMode = memory`): a run that does not crash leaves no log unless Save the log is chosen. Confirm on a console that a crash, a failed start and the 15 s no-picture case do write it |
-| Save the log in the quick menu | Present (`bp_quick.cpp`); not run |
-| Share stall panel | A read stuck for 2 s is said on the screen and the GS thread keeps presenting (`ps5vfs_stalled_seconds`, the waker in `ps5.patch`); not run |
-| Exit-write bar, settings written when menus close | Not run |
-| Customisable quick menu, Apply changes now | Host test of the layout; not run |
-| Covers three at a time, the cover loader queue | Not run |
-| 50 ms tap hold | Host test; not run |
-| Developer-build label, updater pruning stale files | Host test of the updater; not run |
-| PlayStation Move as GunCon 2 (Move Management) | Off by default; host test against a stand-in producer; needs the Move Management payload (`/home/user/ext/move` on the build machine) |
-| Frame generation's counters | Host test; not run |
-
-## Older items untested on a console
-
+- The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, Mesa main `aead7293cfd`, PS5_Vulkan
+  `7f492b4`, the SDK `3345cde` with upstream v0.45's C++ runtime, PS2Recomp `e563698`); `check-sources.sh`
+  reports every source current. None of it has run on a console. Save states from before don't load.
+- `ps5/recomp/tools/recomp-game.py` (`PS2RECOMP_REVISION`) and the first line of
+  `ps5/recomp/patches/ps2recomp-crux2.patch` still name PS2Recomp `eb8688b`: the kit's own converter build
+  needs them moved to `e563698` (left for the owner's word).
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.

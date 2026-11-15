@@ -66,13 +66,13 @@ Where each pin lives, and its value on this branch (the v1.0.18 tree plus b075fe
 
 | Source | Pinned in | Pin |
 | --- | --- | --- |
-| PCSX2 | `ps5/tools/fetch-pcsx2.sh` (`revision=`) | `6d5e7daacefe` (v2.9.150) |
-| Payload SDK fork | `ps5/tools/setup-sdk.sh` (`sdk_revision=`) | `b5efad5` |
-| PS5_Vulkan | not pinned: the checkout beside this repository is used as it is | v1.0.18 was built with `f410e67` |
+| PCSX2 | `ps5/tools/fetch-pcsx2.sh` (`revision=`) | `0ab00c49b157` (master of 2026-11-14, after v2.9.179; was v2.9.150) |
+| Payload SDK fork | `ps5/tools/setup-sdk.sh` (`sdk_revision=`) | `3345cde` (over upstream's v0.45 release; was `b5efad5`, over v0.42) |
+| PS5_Vulkan | `ps5/tools/bootstrap.sh` (`vulkan_revision=`); the checkout beside this repository is checked against it | `7f492b4` (v1.0.18 was built with `f410e67`) |
 | PS5 Mesa | PS5_Vulkan's `tools/build-radv.sh` (`mesa_revision=`) | `1ba9874` (at PS5_Vulkan `f410e67` and `ace98a9`) |
-| Mesa main (the 27.0-devel merge) | `ps5/patches/mesa-27/0012` | `0618bfe0ffb` (2026-10-31) |
+| Mesa main (the 27.0-devel merge) | `ps5/patches/mesa-27/0012` | `aead7293cfd` (2026-11-15) |
 | paraLLEl-GS, Granite, volk, Vulkan headers | `crux2recomp/ps5/tools/fetch-parallel-gs.sh` | `cc6184a`, `16e7395`, `47cddf7`, `11d6898` |
-| PS2Recomp | `crux2recomp/ps5/tools/fetch-ps2recomp.sh` | `eb8688b` |
+| PS2Recomp | `crux2recomp/ps5/tools/fetch-ps2recomp.sh` (`revision=`) | `e563698` |
 
 The reverted v1.0.19/v1.0.20 work had moved several of these (PCSX2 to v2.9.166, the SDK to
 `e105cf6`, PS5_Vulkan pinned at `ace98a9`, Mesa main to `6b41b56dea2`, PS2Recomp to `e563698`):

@@ -53,7 +53,7 @@ what each patch does and where it comes from. In brief:
 | Patch | What |
 | --- | --- |
 | `0001`-`0011` | Crux2's and PS5CEMU-HAR's driver fixes: start-up breadcrumbs, threaded recording, 120 Hz settle, timed waits, freed buffers waiting for the GPU, wait spin/sleep, queue depth |
-| `0012` | Mesa main (27.0-devel, `0618bfe0ffb`, 2026-10-31) merged into the PS5 RADV (about 59 MB) |
+| `0012` | Mesa main (27.0-devel, `aead7293cfd`, 2026-11-15) merged into the PS5 RADV (about 38 MB: deleted binaries' old contents stripped, see its README) |
 | `0013` | The shader cache's index without MAP_FIXED |
 | `0014` | GFX10.1 hardware workarounds for the console's GPU (`RADV_PS5_GFX101_WORKAROUNDS=0` turns them off) |
 | `0015`-`0017` | VRR: 119.88 Hz on a VRR display, variable refresh on request, found at run time |

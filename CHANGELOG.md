@@ -65,6 +65,26 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   the previous good backup was deleted. Images over 8192 pixels on a side are refused before they
   are decoded. The sandbox helper for USB drives is asked again for a few seconds when it doesn't
   answer at once.
+- Changed: the payload SDK fork is at `3345cde` (was `b5efad5`): built over the SDK's v0.45 release
+  instead of v0.42, so the C++ runtime linked into the title is a newer build; the memory heap grows
+  in 2 MiB steps instead of 16, keeps its pieces apart so emptied ones can be given back, and keeps
+  32 MiB spare before giving any back; more files can stay open at once. Needs a start, a game and a
+  frame-rate check on the console.
+- Changed: PS5_Vulkan is pinned at `7f492b4` (was `f410e67`): its new commits are Wine/Proton
+  graphics work and a driver test; the link recipe, libc.prx, the packaging and its Mesa pin are as
+  they were.
+- Changed: PS2Recomp is at `e563698` (was `eb8688b`) for native modules: GIF packets with the
+  FLG=3 format are taken as image data, as on the PS2; def-jam-vendetta-recomp's patch rebased.
+- Changed: built on PCSX2 v2.9.179 (was v2.9.150; master `0ab00c4`): the PS1 Analog Controller
+  (DualShock 1) as a controller type, depth drawn as a colour target for the Vulkan renderer's
+  depth feedback (not used by default on the PS5: the default depth feedback mode keeps the old
+  path), texture cache and VU cycle fixes, bounds checks in VIF, CDVD and PS1 memory, game database
+  fixes. Save states made before do not load (PCSX2 changed their version).
+- Changed: the graphics driver (RADV) is on Mesa main of 2026-11-15 (`aead7293cfd`; was 2026-10-31):
+  1118 commits, 219 in RADV, ACO, NIR and the Vulkan runtime, among them ACO's scheduler with a wider
+  window that fills memory waits with independent work, cheaper 32x24-bit multiplies, push-constant
+  and descriptor binding reworked, binning fixes, and the compute blit rewritten with DCC/HTILE
+  metadata fixes. Four files conflicted with the PS5 port and were merged by hand.
 
 ## v1.0.18 (2026-10-31)
 
