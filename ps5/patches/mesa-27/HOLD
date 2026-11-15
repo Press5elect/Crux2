@@ -1,0 +1,5 @@
+0618bfe0ffb
+Held by the owner's decision of 2026-11-15: the refresh to Mesa main aead7293cfd (2026-11-15) hung
+the GPU at a game's first start on the console (each game, its first launch with a cold shader
+cache: "radv/ps5: the GPU has not reached submission ..."), while this merge (v1.0.18's) played
+fine in the same build. The refresh is in history (9ad6b51) to bisect before trying again.

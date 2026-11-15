@@ -80,11 +80,8 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   depth feedback (not used by default on the PS5: the default depth feedback mode keeps the old
   path), texture cache and VU cycle fixes, bounds checks in VIF, CDVD and PS1 memory, game database
   fixes. Save states made before do not load (PCSX2 changed their version).
-- Changed: the graphics driver (RADV) is on Mesa main of 2026-11-15 (`aead7293cfd`; was 2026-10-31):
-  1118 commits, 219 in RADV, ACO, NIR and the Vulkan runtime, among them ACO's scheduler with a wider
-  window that fills memory waits with independent work, cheaper 32x24-bit multiplies, push-constant
-  and descriptor binding reworked, binning fixes, and the compute blit rewritten with DCC/HTILE
-  metadata fixes. Four files conflicted with the PS5 port and were merged by hand.
+- Changed: the graphics driver (RADV) stays on Mesa main of 2026-10-31 (`0618bfe0ffb`, as v1.0.18):
+  the newer Mesa of 2026-11-15 stopped the GPU the first time each game started.
 - Added: the recomp kit (`Crux2-recomp-kit-<version>.zip`) comes with every release, beside Crux2's
   ZIP: it makes a game's native modules and Crux2 Recomp's on a PC (Windows or Linux).
 

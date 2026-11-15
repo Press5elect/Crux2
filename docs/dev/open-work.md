@@ -11,7 +11,7 @@ item is done or something new is learned; delete what no longer applies.
   anything from it is in the tree.
 - b075fe1 and the work after it are Unreleased ([`CHANGELOG.md`](../../CHANGELOG.md)). **Nothing of
   it has run on a console**; the host tests and the interface crawl pass.
-- The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, Mesa main `aead7293cfd`, PS5_Vulkan
+- The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, PS5_Vulkan
   `7f492b4`, the SDK `3345cde` with upstream v0.45's C++ runtime, PS2Recomp `e563698`); `check-sources.sh`
   reports every source current. None of it has run on a console. Save states from before don't load.
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
@@ -68,3 +68,12 @@ item is done or something new is learned; delete what no longer applies.
   runner and Vendetta patches in `crux2recomp/ps5/patches/ps2recomp/` (rebased for PS2Recomp e563698).
   The kit is made and its tools start, but no module has been made with it since: check one game on
   Windows and Linux before a release ships it.
+- **Mesa is held at `0618bfe0ffb`** (`ps5/patches/mesa-27/HOLD`, the owner's decision of 2026-11-15).
+  The refresh to Mesa main `aead7293cfd` (commit 9ad6b51; its 0012 is 38 MB with deleted binaries'
+  old contents stripped, `ps5/tools/strip-binary-delete-preimage.py`) hung the GPU on each game's
+  first start with a cold shader cache (`radv/ps5: the GPU has not reached submission ...`); the same
+  build with this merge played fine. Before refreshing again, bisect 0618bfe0ffb..aead7293cfd (ACO's
+  scheduler rework and RADV's push-constant/descriptor rework are the first suspects; the four
+  hand-merged files are listed in 9ad6b51's message) and test a game's first start on the console.
+  `check-sources.sh` reports Mesa as held while 0012 is the HOLD revision.
+

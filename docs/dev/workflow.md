@@ -12,7 +12,8 @@ These are the owner's standing rules. They hold for every session and every agen
    revision PS5_Vulkan pins, PS5_Vulkan, the payload SDK fork, paraLLEl-GS with its Granite and
    volk, and PS2Recomp. `ps5/tools/check-sources.sh` compares each pin with its upstream, and
    `build.sh` runs it first and stops when one is behind (`PS5PX_ALLOW_STALE=1` builds anyway).
-   When a source is behind, **say so and move the pin** (and re-export the patches that sit on it:
+   A source the owner chose to keep is recorded as held (`ps5/patches/mesa-27/HOLD`: the revision,
+   then why) and reported as such. When a source is behind, **say so and move the pin** (and re-export the patches that sit on it:
    `ps5.patch`, the Mesa series). See [`building.md`](building.md#pins-and-the-source-check).
    (The script and its call in `build.sh` went out with the revert to v1.0.18 in 883c832 and were
    restored after it; PS5_Vulkan's pin is `vulkan_revision` in `ps5/tools/bootstrap.sh`.)

@@ -76,7 +76,17 @@ tag=$(timeout 60 git ls-remote --tags --refs https://github.com/PCSX2/pcsx2.git 
 [[ -n $tag ]] && info PCSX2 "newest release tag $tag"
 
 mesa_base=$(sed -n 's/.*main at `\([0-9a-f]\{7,\}\)`.*/\1/p' "$ps5/patches/mesa-27/README.md" | head -1)
-report "Mesa (0012)" "$mesa_base" "$(head_of https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main)" "Mesa main"
+mesa_main=$(head_of https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main)
+# A merge the owner chose to keep (ps5/patches/mesa-27/HOLD: the revision on its first line, the
+# reason after it) is reported as held, not behind, while 0012 is that revision.
+mesa_hold="$ps5/patches/mesa-27/HOLD"
+if [[ -f $mesa_hold && -n $mesa_base && $(head -1 "$mesa_hold") == "$mesa_base"* && -n $mesa_main &&
+        $mesa_main != "$mesa_base"* ]]; then
+    printf '  held    %-18s %s, Mesa main %s (ps5/patches/mesa-27/HOLD: %s)\n' "Mesa (0012)" "${mesa_base:0:12}" \
+        "${mesa_main:0:12}" "$(sed -n 2p "$mesa_hold" | cut -c1-60)..."
+else
+    report "Mesa (0012)" "$mesa_base" "$mesa_main" "Mesa main"
+fi
 
 # PS5 Mesa: the revision PS5_Vulkan pins (its checkout beside this repository, else its newest commit
 # on GitHub), which build-radv-crux2.sh puts Crux2's patches on.
