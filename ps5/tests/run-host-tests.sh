@@ -188,6 +188,8 @@ echo "== quick taps held for the game"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/input/tap_hold_test.cpp" -o "$work/tap_hold_test"
 "$work/tap_hold_test" || status=1
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/input/touch_click_test.cpp" -o "$work/touch_click_test"
+"$work/touch_click_test" || status=1
 
 echo "== the updater (developer builds, the files a new version dropped)"
 # libzip: the PC's (pkg-config) or PCSX2's copy built once; rapidjson: the PC's or PCSX2's.

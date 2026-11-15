@@ -6,6 +6,12 @@ where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## Unreleased
+
+- Fixed: a click on the touch pad's left half could be taken for Start (and the right half for
+  Select) when another finger or a thumb was also on the pad, or when the click came a moment before
+  the finger's position: the finger that touched last decides now.
+
 ## v1.0.19 (2026-11-15)
 
 Since v1.0.18. (An earlier v1.0.19 was built but not published; its work and v1.0.20's are not in

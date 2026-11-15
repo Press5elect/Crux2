@@ -388,4 +388,94 @@ namespace PS5InputLogic
 		uint32_t m_out = 0; // what the game was given last
 		uint64_t m_since_us[32] = {}; // when each button last went down
 	};
+
+	/// Which half of the touch pad a click is on: the left half is Select ("Back"), the right half
+	/// Start ("Touchpad"). The pad reports up to two fingers with an id each, and the click itself as
+	/// one button for the whole pad. The finger that clicks is the one that touched last: a second
+	/// finger (or a thumb resting on the pad) already there is the first in the report, and taking it
+	/// pressed whichever half that finger was on. A reading may also carry the click before it
+	/// carries the finger: then the finger seen last, a moment before, is the one. With no finger
+	/// at all, the click is Start, as before.
+	class TouchClick
+	{
+	public:
+		static constexpr uint16_t MIDDLE = 960;          // the pad is 1920 units wide (DualSense and DualShock 4)
+		static constexpr uint64_t RECENT_US = 200000;    // a finger seen this recently still counts
+
+		/// Each reading's fingers (count 0 to 2; x and id of each), whether or not the pad is clicked.
+		void Touches(unsigned count, const uint16_t* x, const uint8_t* id, uint64_t now_us)
+		{
+			bool seen[2] = {false, false};
+			for (unsigned i = 0; i < count && i < 2; i++)
+			{
+				int slot = -1;
+				for (int s = 0; s < 2; s++)
+					if (m_finger[s].present && m_finger[s].id == id[i])
+						slot = s;
+				if (slot < 0)
+				{
+					for (int s = 0; s < 2 && slot < 0; s++)
+						if (!m_finger[s].present && !seen[s])
+							slot = s;
+					if (slot < 0)
+						slot = 0;
+					m_finger[slot].present = true;
+					m_finger[slot].id = id[i];
+					m_finger[slot].down_us = now_us;
+					m_finger[slot].order = ++m_order;
+				}
+				m_finger[slot].x = x[i];
+				m_finger[slot].seen_us = now_us;
+				seen[slot] = true;
+			}
+			for (int s = 0; s < 2; s++)
+				if (!seen[s])
+					m_finger[s].present = false;
+			if (count > 0)
+			{
+				// The finger that touched last, for a click that comes without one.
+				int newest = -1;
+				for (int s = 0; s < 2; s++)
+					if (m_finger[s].present && (newest < 0 || m_finger[s].order > m_finger[newest].order))
+						newest = s;
+				if (newest >= 0)
+				{
+					m_last_x = m_finger[newest].x;
+					m_last_us = now_us;
+					m_have_last = true;
+				}
+			}
+		}
+
+		/// At the start of a click (after Touches for the same reading): true for the left half.
+		bool LeftHalf(uint64_t now_us) const
+		{
+			int newest = -1;
+			for (int s = 0; s < 2; s++)
+				if (m_finger[s].present && (newest < 0 || m_finger[s].order > m_finger[newest].order))
+					newest = s;
+			if (newest >= 0)
+				return m_finger[newest].x < MIDDLE;
+			if (m_have_last && now_us - m_last_us <= RECENT_US)
+				return m_last_x < MIDDLE;
+			return false;
+		}
+
+		void Reset() { *this = TouchClick(); }
+
+	private:
+		struct Finger
+		{
+			bool present = false;
+			uint8_t id = 0;
+			uint16_t x = 0;
+			uint64_t down_us = 0, seen_us = 0;
+			uint64_t order = 0; // when it touched, as a count: the larger touched later
+		};
+		Finger m_finger[2];
+		uint64_t m_order = 0;
+		bool m_have_last = false;
+		uint16_t m_last_x = 0;
+		uint64_t m_last_us = 0;
+	};
 } // namespace PS5InputLogic
