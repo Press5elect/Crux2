@@ -51,7 +51,8 @@ if [[ -d "$native/radv-release" ]]; then
 	hold=$(mktemp -d "$native/.radv-release-hold.XXXXXX")
 	mv "$native/radv-release" "$hold/"
 fi
-restore() { [[ -n "$hold" && -d "$hold/radv-release" ]] && { rm -rf "$native/radv-release"; mv "$hold/radv-release" "$native/"; rmdir "$hold"; }; }
+# (Ends true: as the EXIT trap's last command it would otherwise be the script's exit status.)
+restore() { [[ -n "$hold" && -d "$hold/radv-release" ]] && { rm -rf "$native/radv-release"; mv "$hold/radv-release" "$native/"; rmdir "$hold"; }; return 0; }
 trap restore EXIT
 (cd "$vulkan" && PS5_MESA_REVISION="$revision" bash tools/build-radv.sh release)
 rm -rf "$native/radv-crux2"
