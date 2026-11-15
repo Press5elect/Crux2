@@ -85,6 +85,8 @@ says what it was and how to bring it back. Nothing below has run on a console ye
   window that fills memory waits with independent work, cheaper 32x24-bit multiplies, push-constant
   and descriptor binding reworked, binning fixes, and the compute blit rewritten with DCC/HTILE
   metadata fixes. Four files conflicted with the PS5 port and were merged by hand.
+- Added: the recomp kit (`Crux2-recomp-kit-<version>.zip`) comes with every release, beside Crux2's
+  ZIP: it makes a game's native modules and Crux2 Recomp's on a PC (Windows or Linux).
 
 ## v1.0.18 (2026-10-31)
 

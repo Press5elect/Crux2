@@ -127,6 +127,12 @@ in the measured scene.
 
 ## The recomp kit
 
-`ps5/tools/make-recomp-kit.sh` packs the native-code-module kit (`ps5/recomp/`), and
-`build-recomp-windows.sh` builds PS2Recomp's converter for Windows for it. Using the kit is
+`ps5/tools/make-recomp-kit.sh <version> [out]` packs the recomp kit (`ps5/recomp/`, with Crux2
+Recomp's runner files and patches), and `build-recomp-windows.sh` builds PS2Recomp's converter for
+Windows for it (needs `g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix`). Both take Crux2
+Recomp's files from a `PS5_Crux2Recomp` checkout beside this one when there is one, else from this
+repository's `crux2recomp/`: its `ps5/patches/ps2recomp/` and `ps5/runner/` (`crux2_recomp_config.h`,
+`tools/vu1_recomp.py`, `tools/build-runner-module.py`; the three taken from recomp kit v1.6.4 on
+2026-11-15, as the GitHub repository PS5_Crux2Recomp is empty). `make-release-zip.py` makes the kit
+for every release (`--no-kit` leaves it out). Using the kit is
 described for users in [`../native-modules.md`](../native-modules.md).

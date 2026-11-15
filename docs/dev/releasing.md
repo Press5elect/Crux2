@@ -35,8 +35,10 @@ message: serials and IDs only. No model identifiers.
 
    `make-release-zip.py` writes the ZIP (every entry mode 777, timestamps set to the date, so the
    same folder gives the same file; tested and checked unpacked), the source archives,
-   `SOURCES.txt` and `SHA256SUMS`. The GitHub releases since v1.0.17 carry **the ZIP and
-   `SHA256SUMS`**; the source is the repository at the tag plus the revisions in
+   `SOURCES.txt`, the recomp kit (`Crux2-recomp-kit-vX.Y.Z.zip`, made by `make-recomp-kit.sh`) and
+   `SHA256SUMS` of them all. The GitHub releases since v1.0.17 carry **the ZIP and
+   `SHA256SUMS`**, and from the next release on **the recomp kit** beside them (the owner's
+   decision of 2026-11-15); the source is the repository at the tag plus the revisions in
    `licenses/components.json`. Note the build identity and build number it prints.
 5. **The notes**: `docs/releases/vX.Y.Z.md`, in the form of the last one
    ([`v1.0.18.md`](../releases/v1.0.18.md), the short form used since v1.0.18): the piracy note,
@@ -44,7 +46,7 @@ message: serials and IDs only. No model identifiers.
    linked), Build versions (Crux2 commit and build number, PCSX2, RADV, PS5_Vulkan, PS5_PayloadSDK,
    paraLLEl-GS, MihawkGen) and the ZIP's SHA-256. Say plainly what was tested on a console. Add a
    row to [`../releases/README.md`](../releases/README.md).
-6. **Hand over** to the owner: the ZIP, `SHA256SUMS`, the notes, and the commit to tag. The tag and
+6. **Hand over** to the owner: the ZIP, the recomp kit, `SHA256SUMS`, the notes, and the commit to tag. The tag and
    the GitHub release are made when the owner says so.
 7. **Read back** once published: fetch the release (`gh api repos/Press5elect/Crux2/releases/tags/vX.Y.Z`),
    compare the asset's SHA-256 with the notes, check the body names no game, and that

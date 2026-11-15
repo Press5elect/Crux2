@@ -19,7 +19,15 @@ version=${1:?version, e.g. v1.1.0}
 ps5=$(cd "$(dirname "$0")/.." && pwd)
 root=$(dirname "$ps5")
 out=${2:-$root/dist}
-recomp_title=${CRUX2_RECOMP_DIR:-$root/../PS5_Crux2Recomp}
+# Crux2 Recomp's runner files and patches: a PS5_Crux2Recomp checkout beside this one when there is
+# one, else this repository's own crux2recomp/ (which carries the same files).
+if [[ -n ${CRUX2_RECOMP_DIR:-} ]]; then
+	recomp_title=$CRUX2_RECOMP_DIR
+elif [[ -d $root/../PS5_Crux2Recomp/ps5/runner ]]; then
+	recomp_title=$root/../PS5_Crux2Recomp
+else
+	recomp_title=$root/crux2recomp
+fi
 sdk="$root/.deps/native/ps5-payload-sdk"
 win=${CRUX2_RECOMP_WINDOWS:-$root/.deps/recomp-windows}
 name="Crux2-recomp-kit-$version"
