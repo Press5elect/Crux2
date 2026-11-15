@@ -88,7 +88,8 @@ elif dir=$(fetched PS5_Vulkan https://github.com/mihawk-99/PS5_Vulkan.git); then
     radv_script=$(git -C "$dir" show FETCH_HEAD:tools/build-radv.sh 2> /dev/null)
 fi
 vk_mesa_pin=$(sed -n 's/^mesa_revision=\${PS5_MESA_REVISION:-\([0-9a-f]*\)}$/\1/p' <<< "$radv_script")
-readme_mesa=$(sed -n 's/.*RADV is PS5 Mesa `\([0-9a-f]\{7,\}\)`.*/\1/p' "$root/README.md" | head -1)
+# The PS5 Mesa revision Crux2's RADV is built from, as docs/dev/building.md's table of pins records it.
+readme_mesa=$(sed -n 's/^| PS5 Mesa | .* | `\([0-9a-f]\{7,\}\)`.*/\1/p' "$root/docs/dev/building.md" | head -1)
 report "PS5 Mesa" "$readme_mesa" "$vk_mesa_pin" "PS5_Vulkan pins"
 fork_head=$(head_of https://github.com/mihawk-99/PS5_Mesa.git)
 [[ -n $fork_head && -n $vk_mesa_pin && $fork_head != "$vk_mesa_pin" ]] &&
