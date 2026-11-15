@@ -14,9 +14,6 @@ item is done or something new is learned; delete what no longer applies.
 - The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, Mesa main `aead7293cfd`, PS5_Vulkan
   `7f492b4`, the SDK `3345cde` with upstream v0.45's C++ runtime, PS2Recomp `e563698`); `check-sources.sh`
   reports every source current. None of it has run on a console. Save states from before don't load.
-- `ps5/recomp/tools/recomp-game.py` (`PS2RECOMP_REVISION`) and the first line of
-  `ps5/recomp/patches/ps2recomp-crux2.patch` still name PS2Recomp `eb8688b`: the kit's own converter build
-  needs them moved to `e563698` (left for the owner's word).
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.

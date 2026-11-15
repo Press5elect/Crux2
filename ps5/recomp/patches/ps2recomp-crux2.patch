@@ -1,4 +1,4 @@
-Crux2 mode for PS2Recomp (ran-j/PS2Recomp eb8688b2fd191129f103a39543002c005b33409c). Copyright (C) 2026 Press5elect.
+Crux2 mode for PS2Recomp (ran-j/PS2Recomp e5636981a1c9de368f6b71e819c3dc188dfedbf4). Copyright (C) 2026 Press5elect.
 GPL-3.0-or-later, with the attribution term of Crux2's NOTICE: keep "Crux2 by Press5elect".
 Also, in both modes: MOVZ and MOVN move the low 64 bits only, as the R5900 does (PS2Recomp moved all
 128, so the upper half of the destination took the source's; found by Crux2's interpreter check).
