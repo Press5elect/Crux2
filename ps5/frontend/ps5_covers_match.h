@@ -1117,6 +1117,21 @@ namespace PS5Covers
 		return size > 64 && std::memcmp(data, signature, sizeof(signature)) == 0;
 	}
 
+	inline bool IsJPEG(const void* data, size_t size)
+	{
+		const unsigned char* const bytes = static_cast<const unsigned char*>(data);
+		return size > 64 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+	}
+
+	/// The line of no-cover.txt for a game the second collection (covers by serial) has no cover
+	/// for either: apart from NoMatchLine's, which has a tab.
+	inline std::string NoSerialCoverLine(std::string_view serial)
+	{
+		std::string line("by-serial ");
+		line += serial;
+		return line;
+	}
+
 	/// libretro keeps one picture for several names as a link, and a link's bytes are the name of
 	/// the file it stands for ("Other Name (Europe).png"). That name when the bytes are one, else "".
 	inline std::string LinkTarget(const void* data, size_t size)

@@ -6,6 +6,12 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## Unreleased
+
+- Added: a second place covers are downloaded from. A game libretro's collection has no box art
+  for is asked for by its serial in the ps2-covers collection (xlenore/ps2-covers on GitHub). Games
+  found missing from libretro's before are tried there too. Not yet run on a console.
+
 ## v1.0.20 (2026-11-16)
 
 - Changed: the interface polished: the button hints in one order on every screen (Circle at the

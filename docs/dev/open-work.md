@@ -107,6 +107,21 @@ item is done or something new is learned; delete what no longer applies.
   probe in [`../../ps5/probes/move/`](../../ps5/probes/move/README.md) (built, never run) calls it with
   the PS4's signatures and logs to `/data/crux2-move-probe.log`. Nothing in the title uses it yet.
 
+## To do (the owner's list)
+
+- **Restore the sandbox helper's reference-count fix** (`fd0a129`, 2026-11-05, from OGBox 0.0.2).
+  The helper for USB drives (`ps5/elevation/payload/main.cpp`) writes the console's root vnode into
+  the title's `fd_rdir` and `fd_jdir` without references: every elevated run's exit releases two it
+  never took, and after many exits with USB drives on the console can go down. The fix was undone
+  by the revert to v1.0.18 (`883c832`) and is in neither v1.0.19 nor v1.0.20. It still applies
+  cleanly (`git diff fd0a129^ fd0a129 | git apply --check`): three files, the helper, its
+  `protocol.hpp` (protocol version 2, `ok_unbalanced`) and `ps5_platform.cpp`; keep v1.0.19's
+  "asked again for a few seconds" retry in `ps5_platform.cpp`. Kernel-side code that cannot be
+  tested on a PC: a test build for the owner before any release.
+- The profiler's sync-wait statistics (`b51d391`: `ps5_sync_stats.h`, hooks in PCSX2's `MTGS.cpp`,
+  `MTVU.cpp` and `Memory.cpp`, about 94 lines) were not brought back either; the owner left them
+  out on 2026-11-16.
+
 ## Known problems
 
 - paraLLEl-GS is slower than PCSX2's renderer in the heaviest game tested, and its picture is
