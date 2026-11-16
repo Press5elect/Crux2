@@ -8,6 +8,10 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Fixed: a game's own settings (Square on Home, a game's page) could take seconds to open with many
+  cheat files on the console (Download Cheats for All Games): looking for one game's files asked
+  the console about every file in the folder, four times. The name is looked at first now. The boot
+  log says when opening them still takes 50 ms or more. Not yet run on a console.
 - Added: a second place covers are downloaded from. A game libretro's collection has no box art
   for is asked for by its serial in the ps2-covers collection (xlenore/ps2-covers on GitHub). Games
   found missing from libretro's before are tried there too. Not yet run on a console.

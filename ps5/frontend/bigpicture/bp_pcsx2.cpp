@@ -1482,6 +1482,7 @@ public:
 		// (The emulator takes a game's own settings only for a game it has a CRC of.)
 		if (game.crc == 0)
 			return false;
+		const auto began = std::chrono::steady_clock::now();
 		SaveOwn();
 		m_game = game;
 		m_game_serial = (game.kind != bp::GameInfo::Program) ? game.serial : std::string();
@@ -1489,8 +1490,14 @@ public:
 		m_game_si->Load();
 		m_own_count = CountValues(m_game_si->GetFileName());
 		m_own_changed = false;
+		const auto loaded = std::chrono::steady_clock::now();
 		LoadPatches();
 		m_pages++;
+		// (This runs on the thread that draws: a slow one is a menu that opens late. Said in the log.)
+		const auto ms = [](auto from, auto to) { return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count()); };
+		if (const auto ended = std::chrono::steady_clock::now(); ms(began, ended) >= 50)
+			ps5px_log("interface: opening %s's settings took %d ms (its file %d ms, its patches and cheats %d ms: %zu and %zu)",
+				m_game_serial.c_str(), ms(began, ended), ms(began, loaded), ms(loaded, ended), m_patches.size(), m_cheats.size());
 		return true;
 	}
 

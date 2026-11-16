@@ -187,7 +187,7 @@ index a44f07a..240d510 100644
  
  bool CrashHandler::Install()
 diff --git a/common/FileSystem.cpp b/common/FileSystem.cpp
-index 24eddeb..76f8916 100644
+index 24eddeb..d8b5728 100644
 --- a/common/FileSystem.cpp
 +++ b/common/FileSystem.cpp
 @@ -23,7 +23,16 @@
@@ -471,7 +471,33 @@ index 24eddeb..76f8916 100644
  	// iterate results
  	struct dirent* pDirEnt;
  	while ((pDirEnt = readdir(pDir)) != nullptr)
-@@ -2178,7 +2364,7 @@ static u32 RecursiveFindFiles(const char* OriginPath, const char* ParentPath, co
+@@ -2166,6 +2352,25 @@ static u32 RecursiveFindFiles(const char* OriginPath, const char* ParentPath, co
+ 				continue;
+ 		}
+ 
++#ifdef DT_REG
++		// PS5: what the listing already says of an entry decides whether it can be a result, before
++		// the stat() below. A folder of thousands of files searched for one game's (the cheats of
++		// every game, the covers) cost a stat() for each of them, every time: seconds on the console.
++		// (Only where the kind is known; a link or an unknown kind takes the old way.)
++		if (pDirEnt->d_type == DT_REG)
++		{
++			if (!(Flags & FILESYSTEM_FIND_FILES))
++				continue;
++			if (hasWildCards ? (!wildCardMatchAll && !StringUtil::WildcardMatch(pDirEnt->d_name, Pattern)) :
++							   (std::strcmp(pDirEnt->d_name, Pattern) != 0))
++				continue;
++		}
++		else if (pDirEnt->d_type == DT_DIR && !(Flags & (FILESYSTEM_FIND_RECURSIVE | FILESYSTEM_FIND_FOLDERS)))
++		{
++			continue;
++		}
++#endif
++
+ 		std::string full_path;
+ 		if (ParentPath)
+ 			full_path = fmt::format("{}/{}/{}/{}", OriginPath, ParentPath, Path, pDirEnt->d_name);
+@@ -2178,7 +2383,7 @@ static u32 RecursiveFindFiles(const char* OriginPath, const char* ParentPath, co
  		outData.Attributes = 0;
  
  		struct stat sDir;
@@ -480,7 +506,7 @@ index 24eddeb..76f8916 100644
  			continue;
  
  		if (S_ISDIR(sDir.st_mode))
-@@ -2297,11 +2483,16 @@ bool FileSystem::FindFiles(const char* path, const char* pattern, u32 flags, Fin
+@@ -2297,11 +2502,16 @@ bool FileSystem::FindFiles(const char* path, const char* pattern, u32 flags, Fin
  
  bool FileSystem::StatFile(const char* path, struct stat* st)
  {
@@ -498,7 +524,7 @@ index 24eddeb..76f8916 100644
  	const int fd = fileno(fp);
  	if (fd < 0)
  		return false;
-@@ -2317,7 +2508,7 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
+@@ -2317,7 +2527,7 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
  
  	// stat file
  	struct stat sysStatData;
@@ -507,7 +533,7 @@ index 24eddeb..76f8916 100644
  		return false;
  
  	// parse attributes
-@@ -2339,6 +2530,17 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
+@@ -2339,6 +2549,17 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
  
  bool FileSystem::StatFile(std::FILE* fp, FILESYSTEM_STAT_DATA* sd)
  {
@@ -525,7 +551,7 @@ index 24eddeb..76f8916 100644
  	const int fd = fileno(fp);
  	if (fd < 0)
  		return false;
-@@ -2373,7 +2575,7 @@ bool FileSystem::FileExists(const char* path)
+@@ -2373,7 +2594,7 @@ bool FileSystem::FileExists(const char* path)
  
  	// stat file
  	struct stat sysStatData;
@@ -534,7 +560,7 @@ index 24eddeb..76f8916 100644
  		return false;
  
  	if (S_ISDIR(sysStatData.st_mode))
-@@ -2390,7 +2592,7 @@ bool FileSystem::DirectoryExists(const char* path)
+@@ -2390,7 +2611,7 @@ bool FileSystem::DirectoryExists(const char* path)
  
  	// stat file
  	struct stat sysStatData;
@@ -543,7 +569,7 @@ index 24eddeb..76f8916 100644
  		return false;
  
  	if (S_ISDIR(sysStatData.st_mode))
-@@ -2423,6 +2625,17 @@ bool FileSystem::DirectoryIsEmpty(const char* path)
+@@ -2423,6 +2644,17 @@ bool FileSystem::DirectoryIsEmpty(const char* path)
  	return true;
  }
  
@@ -561,7 +587,7 @@ index 24eddeb..76f8916 100644
  bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* error)
  {
  	// has a path
-@@ -2431,7 +2644,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
+@@ -2431,7 +2663,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
  		return false;
  
  	// try just flat-out, might work if there's no other segments that have to be made
@@ -570,7 +596,7 @@ index 24eddeb..76f8916 100644
  		return true;
  
  	// check error
-@@ -2440,7 +2653,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
+@@ -2440,7 +2672,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
  	{
  		// check the attributes
  		struct stat sysStatData;
@@ -579,7 +605,7 @@ index 24eddeb..76f8916 100644
  			return true;
  	}
  
-@@ -2462,7 +2675,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
+@@ -2462,7 +2694,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
  		{
  			if (i > 0 && path[i] == '/')
  			{
@@ -588,7 +614,7 @@ index 24eddeb..76f8916 100644
  				{
  					lastError = errno;
  					if (lastError != EEXIST) // fine, continue to next path segment
-@@ -2479,7 +2692,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
+@@ -2479,7 +2711,7 @@ bool FileSystem::CreateDirectoryPath(const char* path, bool recursive, Error* er
  		// re-create the end if it's not a separator, check / as well because windows can interpret them
  		if (path[pathLength - 1] != '/')
  		{
@@ -597,7 +623,7 @@ index 24eddeb..76f8916 100644
  			{
  				lastError = errno;
  				if (lastError != EEXIST)
-@@ -2510,7 +2723,7 @@ bool FileSystem::DeleteFilePath(const char* path, Error* error)
+@@ -2510,7 +2742,7 @@ bool FileSystem::DeleteFilePath(const char* path, Error* error)
  	}
  
  	struct stat sysStatData;
@@ -606,7 +632,7 @@ index 24eddeb..76f8916 100644
  	{
  		Error::SetStringView(error, "File does not exist.");
  		return false;
-@@ -2533,6 +2746,58 @@ bool FileSystem::RenamePath(const char* old_path, const char* new_path, Error* e
+@@ -2533,6 +2765,58 @@ bool FileSystem::RenamePath(const char* old_path, const char* new_path, Error* e
  		return false;
  	}
  
@@ -665,7 +691,7 @@ index 24eddeb..76f8916 100644
  	if (rename(old_path, new_path) != 0)
  	{
  		const int err = errno;
-@@ -2550,7 +2815,7 @@ bool FileSystem::DeleteDirectory(const char* path)
+@@ -2550,7 +2834,7 @@ bool FileSystem::DeleteDirectory(const char* path)
  		return false;
  
  	struct stat sysStatData;
@@ -674,7 +700,7 @@ index 24eddeb..76f8916 100644
  		return false;
  
  	return (rmdir(path) == 0);
-@@ -2626,6 +2891,10 @@ std::string FileSystem::GetProgramPath()
+@@ -2626,6 +2910,10 @@ std::string FileSystem::GetProgramPath()
  		buffer = static_cast<char*>(std::realloc(buffer, curSize + 1));
  	}
  
@@ -685,7 +711,7 @@ index 24eddeb..76f8916 100644
  #elif defined(__FreeBSD__)
  	int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
  	char buffer[PATH_MAX];
-@@ -2643,6 +2912,11 @@ std::string FileSystem::GetProgramPath()
+@@ -2643,6 +2931,11 @@ std::string FileSystem::GetProgramPath()
  
  std::string FileSystem::GetWorkingDirectory()
  {
@@ -697,7 +723,7 @@ index 24eddeb..76f8916 100644
  	std::string buffer;
  	buffer.resize(PATH_MAX);
  	while (!getcwd(buffer.data(), buffer.size()))
-@@ -2675,7 +2949,7 @@ bool FileSystem::CreateSymLink(const char* link, const char* target)
+@@ -2675,7 +2968,7 @@ bool FileSystem::CreateSymLink(const char* link, const char* target)
  bool FileSystem::IsSymbolicLink(const char* path)
  {
  	struct stat sysStatData;
