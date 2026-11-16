@@ -6,7 +6,7 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
-## Unreleased
+## v1.0.20 (2026-11-16)
 
 - Changed: the interface polished: the button hints in one order on every screen (Circle at the
   left, Cross at the right); messages in the top right corner, over the clock, never over the hints
