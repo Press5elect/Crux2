@@ -14,6 +14,7 @@
 #include "bp_settings_text.h"
 
 #include <cstdio>
+#include <map>
 
 namespace bp::settings
 {
@@ -36,15 +37,26 @@ const char* const summaryIds[8][2] = {
 
 const Item* byBase(const std::string& base)
 {
-	for (const Item& it : state().all)
+	// (Each area's card asks for two each frame: by an index made again with the rows.)
+	State& st = state();
+	static std::map<std::string, size_t> index;
+	static int madeFor = -1;
+	static const Item* madeAt = nullptr;
+	static size_t madeSize = 0;
+	if (madeFor != st.builds || madeAt != st.all.data() || madeSize != st.all.size())
 	{
-		if (settingsBaseId(it.o) == base)
-			return &it;
+		madeFor = st.builds;
+		madeAt = st.all.data();
+		madeSize = st.all.size();
+		index.clear();
+		for (size_t i = 0; i < st.all.size(); i++)
+			index.emplace(settingsBaseId(st.all[i].o), i);
 	}
-	return nullptr;
+	const auto found = index.find(base);
+	return (found == index.end()) ? nullptr : &st.all[found->second];
 }
 
-std::string summaryOf(int area)
+std::vector<const Item*> summaryOf(int area)
 {
 	State& st = state();
 	std::vector<const Item*> items;
@@ -64,10 +76,26 @@ std::string summaryOf(int area)
 			}
 		}
 	}
-	std::string out;
-	for (const Item* it : items)
-		out += (out.empty() ? "" : "   \xc2\xb7   ") + it->o.label + " " + valueText(it->o);
-	return out;
+	return items;
+}
+
+// One line of an area's card: a setting's name, then its value, each cut to what is left of `w`
+// (the value has the more of it). They stand still, in focus too: two moving side by side do not
+// read (the area's page has them whole).
+void summaryLine(ImDrawList* dl, float x, float y, float w, const Item& it)
+{
+	const Palette p = palette();
+	const float size = 20, gap = 12;
+	const std::string v = valueText(it.o);
+	const float lw = textSize(regular(), size, it.o.label.c_str()).x, vw = textSize(bold(), size, v.c_str()).x;
+	float labelW = lw, valueW = vw;
+	if (lw + gap + vw > w)
+	{
+		valueW = std::min(vw, std::max(w * 0.55f, w - gap - lw));
+		labelW = std::max(0.f, w - gap - valueW);
+	}
+	textIn(dl, regular(), size, x, y, p.secondary, it.o.label, labelW, false);
+	textIn(dl, bold(), size, x + labelW + gap, y, it.changed ? p.accent : p.text, v, valueW, false);
 }
 
 // Goes to a row's page, the level raised when the row is not shown at the level shown now.
@@ -219,7 +247,7 @@ void askQuery()
 void card(ImDrawList* dl, float x, float y, float w, float h, bool on, bool raised)
 {
 	const Palette p = palette();
-	rect(dl, x, y, w, h, (on || raised) ? p.raised : p.card, 16 * col::round);
+	cardShape(dl, x, y, w, h, (on || raised) ? p.raised : p.card, 16);
 	if (on)
 		focusRing(dl, x, y, w, h, 16);
 }
@@ -349,7 +377,7 @@ void homeScreen(ImDrawList* dl)
 	{
 		const char* chip = "Showing only changed";
 		const float cw = textSize(bold(), 20, chip).x + 32;
-		rect(dl, W - 72 - cw - (st.gameOpen ? 520 : 0), 116, cw, 40, alpha(p.accent, 0.2f), 20 * col::round);
+		rect(dl, W - 72 - cw - (st.gameOpen ? 520 : 0), 116, cw, 40, alpha(p.accent, 0.2f), 20);
 		text(dl, bold(), 20, W - 72 - cw - (st.gameOpen ? 520 : 0) + 16, 125, p.accent, chip);
 	}
 	const float x0 = 72, fullW = W - 144;
@@ -365,33 +393,43 @@ void homeScreen(ImDrawList* dl)
 		text(dl, regular(), 22, x0 + fullW - 28 - hw, y + h / 2 - 13, p.secondary, hint);
 		glyph(dl, Glyph::Square, x0 + fullW - 28 - hw - 46, y + h / 2, 34);
 	}
-	// The eight areas.
-	const float gap = 24, cw = (fullW - 3 * gap) / 4, ch = 200;
+	// The eight areas. (Laid out by the text's measured heights: the name and what is in it from the
+	// top, what is set now, two lines, from the bottom; at every text size.)
+	const float gap = 24, cw = (fullW - 3 * gap) / 4, ch = 224, areasY = 288;
+	const float lineH = textSize(regular(), 20, "Ag").y, nameH = textSize(bold(), 30, "Ag").y;
 	for (int i = 0; i < 8 && i < static_cast<int>(st.areas.size()); i++)
 	{
 		const Area& a = st.areas[static_cast<size_t>(i)];
-		const float x = x0 + (i % 4) * (cw + gap), y = 292 + (i / 4) * (ch + gap);
+		const float x = x0 + (i % 4) * (cw + gap), y = areasY + (i / 4) * (ch + gap);
 		const bool on = (f == 1 + i);
 		const bool can = areaUsable(i);
 		card(dl, x, y, cw, ch, on, false);
 		const ImU32 t1 = can ? p.text : p.faint, t2 = can ? p.secondary : p.faint;
-		text(dl, regular(), 30, x + 28, y + 28, can ? p.accent : p.faint, a.icon);
-		textIn(dl, bold(), 30, x + 28, y + 74, t1, a.name, cw - 56, on);
-		textIn(dl, regular(), 20, x + 28, y + 118, t2, a.about, cw - 56, on);
-		const std::string now = can ? summaryOf(i) : std::string(st.forGame ? "Uses the global settings" : "");
-		textIn(dl, regular(), 20, x + 28, y + 152, can ? p.text : p.faint, now, cw - 56, on);
+		const float nameY = y + 66, aboutY = nameY + nameH + 6;
+		const float nowY = std::max(aboutY + lineH + 10, y + ch - 24 - 2 * lineH - 4);
+		text(dl, regular(), 30, x + 28, y + 24, can ? p.accent : p.faint, a.icon);
+		textIn(dl, bold(), 30, x + 28, nameY, t1, a.name, cw - 56, on);
+		textIn(dl, regular(), 20, x + 28, aboutY, t2, a.about, cw - 56, on);
+		if (can)
+		{
+			const std::vector<const Item*> now = summaryOf(i);
+			for (size_t k = 0; k < now.size() && k < 2; k++)
+				summaryLine(dl, x + 28, nowY + static_cast<float>(k) * (lineH + 4), cw - 56, *now[k]);
+		}
+		else if (st.forGame)
+			textIn(dl, regular(), 20, x + 28, nowY, p.faint, "Uses the global settings", cw - 56, on);
 		if (a.changed > 0)
 		{
 			char pill[32];
 			std::snprintf(pill, sizeof(pill), "%d changed", a.changed);
 			const float pw = textSize(bold(), 18, pill).x + 24;
-			rect(dl, x + cw - 24 - pw, y + 28, pw, 32, p.accent, 16 * col::round);
+			rect(dl, x + cw - 24 - pw, y + 28, pw, 32, p.accent, 16);
 			text(dl, bold(), 18, x + cw - 24 - pw + 12, y + 33, p.onAccent, pill);
 		}
 	}
 	// Pinned, and changed lately.
 	{
-		const float y = 292 + 2 * (ch + gap), h = H - 72 - 24 - y, w = (fullW - gap) / 2;
+		const float y = areasY + 2 * (ch + gap), h = H - 72 - 24 - y, w = (fullW - gap) / 2;
 		const auto list = [&](int which, const char* title, const std::vector<const Item*>& items, int shown, const char* none) {
 			const float x = x0 + which * (w + gap);
 			const bool on = (f == 9 + which);
@@ -412,7 +450,7 @@ void homeScreen(ImDrawList* dl)
 				const bool here = on && i == st.homeInner;
 				if (here)
 				{
-					rect(dl, x + 14, ly - 4, w - 28, lh - 2, p.raised, 10 * col::round);
+					rect(dl, x + 14, ly - 4, w - 28, lh - 2, p.raised, 10);
 					focusRing(dl, x + 14, ly - 4, w - 28, lh - 2, 10);
 				}
 				const std::string v = valueText(it.o);
@@ -426,9 +464,9 @@ void homeScreen(ImDrawList* dl)
 	}
 	endEntrance(content, e);
 
-	std::vector<Hint> hints{{Glyph::Cross, "Open"}, {Glyph::Square, "Search"}, {Glyph::Triangle, st.onlyChanged ? "Show All" : "Only Changed"}};
+	std::vector<Hint> hints{{Glyph::Cross, "Open"}, {Glyph::Square, "Search"}, {Glyph::Triangle, st.onlyChanged ? "Show all" : "Show only changed"}};
 	if (st.gameOpen)
-		hints.push_back({Glyph::TouchPad, st.forGame ? "All Games" : "This Game"});
+		hints.push_back({Glyph::TouchPad, st.forGame ? "All games" : "This game"});
 	hints.push_back({Glyph::Options, "Close"});
 	hints.push_back({Glyph::Circle, "Back"});
 	hintBar(dl, hints);
@@ -547,7 +585,7 @@ void searchScreen(ImDrawList* dl)
 		{
 			const float w = textSize(bold(), 20, chips[i]).x + 36;
 			const bool on = (i == st.chip);
-			rect(dl, x, 284, w, 40, on ? p.accent : p.card, 20 * col::round);
+			rect(dl, x, 284, w, 40, on ? p.accent : p.card, 20);
 			text(dl, bold(), 20, x + 18, 293, on ? p.onAccent : p.secondary, chips[i]);
 			x += w + 10;
 		}
@@ -559,7 +597,7 @@ void searchScreen(ImDrawList* dl)
 	}
 	// The results.
 	const float top = 344, bottom = H - 72 - 24, rh = 76;
-	rect(dl, x0, top, lw, bottom - top, p.card, 16 * col::round);
+	rect(dl, x0, top, lw, bottom - top, p.card, 16);
 	if (list->empty())
 	{
 		const char* none = st.query.empty() && st.chip != 3 ? "Press Cross to type what to look for." : "Nothing found.";
@@ -578,7 +616,7 @@ void searchScreen(ImDrawList* dl)
 		const bool on = (i == st.result);
 		if (on)
 		{
-			rect(dl, x0 + 12, y + 2, lw - 24, rh - 6, p.raised, 12 * col::round);
+			rect(dl, x0 + 12, y + 2, lw - 24, rh - 6, p.raised, 12);
 			focusRing(dl, x0 + 12, y + 2, lw - 24, rh - 6, 12);
 		}
 		const float right = x0 + lw - 32;
@@ -605,7 +643,7 @@ void searchScreen(ImDrawList* dl)
 		if (level > 0)
 		{
 			const float tw = textSize(bold(), 15, levelNames[level]).x + 16;
-			outline(dl, px, y + 44, tw, 24, p.secondary, 12 * col::round, 1.5f);
+			outline(dl, px, y + 44, tw, 24, p.secondary, 12, 1.5f);
 			text(dl, bold(), 15, px + 8, y + 47, p.secondary, levelNames[level]);
 			px += tw + 10;
 		}
@@ -620,7 +658,7 @@ void searchScreen(ImDrawList* dl)
 	}
 	else
 	{
-		rect(dl, dx, 196, dw, bottom - 196, p.card, 16 * col::round);
+		rect(dl, dx, 196, dw, bottom - 196, p.card, 16);
 		text(dl, bold(), 26, dx + 32, 226, p.text, "Search", dw - 64);
 		text(dl, regular(), 21, dx + 32, 272, p.secondary,
 			"Looks through every setting at every level, by its name, its description and its choices, and through the games of the library. "
@@ -637,7 +675,7 @@ void searchScreen(ImDrawList* dl)
 	else
 	{
 		hints.push_back({Glyph::Cross, "Change"});
-		hints.push_back({Glyph::Triangle, "Go To"});
+		hints.push_back({Glyph::Triangle, "Go to its page"});
 		hints.push_back({Glyph::Square, "Pin"});
 	}
 	hints.push_back({Glyph::Circle, "Back"});

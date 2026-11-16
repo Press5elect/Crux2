@@ -889,8 +889,8 @@ void texturePacksDraw(ImDrawList* dl)
 	const float t = m.shown;
 	dl->AddRectFilled(V(0, 0), V(W, H), col::rgba(0, 0, 0, static_cast<int>(180 * t)));
 	const float x = MGR_X, y = MGR_Y + (1 - t) * 24, w = MGR_W, h = MGR_H;
-	glow(dl, x, y, w, h, 26 * col::round, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
-	rect(dl, x, y, w, h, alpha(col::panel, t), 26 * col::round);
+	glow(dl, x, y, w, h, 26, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
+	rect(dl, x, y, w, h, alpha(col::panel, t), 26);
 
 	// The title, and what goes on.
 	text(dl, bold(), 40, x + 48, y + 34, alpha(col::text, t), ICON_FA_IMAGES "   HD texture packs");
@@ -954,7 +954,7 @@ void texturePacksDraw(ImDrawList* dl)
 		}
 		const bool on = static_cast<int>(i) == m.focus;
 		if (on)
-			rect(dl, lx + 8, ry + 4, lw - 16, rh - 8, alpha(m.inItems ? col::panelHi : col::accent, t * (m.inItems ? 1.f : 0.92f)), 16 * col::round);
+			rect(dl, lx + 8, ry + 4, lw - 16, rh - 8, alpha(m.inItems ? col::panelHi : col::accent, t * (m.inItems ? 1.f : 0.92f)), 16);
 		const ImU32 ink = alpha(on && !m.inItems ? col::onAccent : col::text, t);
 		const ImU32 faint = alpha(on && !m.inItems ? col::onAccent : col::dim, t * (on && !m.inItems ? 0.8f : 1.f));
 		float tx = lx + 28;
@@ -984,7 +984,7 @@ void texturePacksDraw(ImDrawList* dl)
 
 	// ---- the right pane
 	const float px = x + 24 + LEFT_W + 24, py = y + 118, pw = w - (px - x) - 32, ph = h - 118 - 24;
-	rect(dl, px, py, pw, ph, alpha(col::sheet, t), 20 * col::round);
+	rect(dl, px, py, pw, ph, alpha(col::sheet, t), 20);
 	const PackRow* row = focused();
 	const std::vector<PackItem> items = itemsFor(row);
 	float sy = py + 30;
@@ -1056,7 +1056,7 @@ void texturePacksDraw(ImDrawList* dl)
 			const PackItem& it = items[i];
 			const bool on = m.inItems && static_cast<int>(i) == sel;
 			if (on)
-				rect(dl, px + 16, yy + 3, pw - 32, ITEM_H - 6, alpha(col::accent, t * 0.92f), 14 * col::round);
+				rect(dl, px + 16, yy + 3, pw - 32, ITEM_H - 6, alpha(col::accent, t * 0.92f), 14);
 			const ImU32 ink = alpha(on ? col::onAccent : col::text, t);
 			const ImU32 dim = alpha(on ? col::onAccent : (it.warn ? col::warm : col::dim), t * (on ? 0.8f : 1.f));
 			textIn(dl, bold(), 24, px + 40, yy + 12, ink, it.label, pw - 80, on);

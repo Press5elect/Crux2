@@ -37,7 +37,7 @@ constexpr const char* FRONT = "PS5UI";
 
 using Names = std::vector<std::string>;
 
-// The level a row is shown from (Settings shown: Normal, Advanced, Expert; Triangle in the Settings).
+// The level a row is shown from (Settings shown: Essentials, More, Everything; Triangle in the Settings).
 Option adv(Option o)
 {
 	o.flags |= Option::Advanced;

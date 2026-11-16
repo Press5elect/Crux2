@@ -36,7 +36,7 @@ and the stack behind it: PS5_Vulkan (the RADV archive, the link recipe, the pack
 > not run on a console yet. If it stops: [If something goes wrong](#if-something-goes-wrong).
 
 What changed in each version: [`CHANGELOG.md`](CHANGELOG.md) (also in the title folder, and in
-Settings > PlayStation 5 > What's new); the release notes are in [`docs/releases/`](docs/releases/README.md).
+Settings > Network > Updates > What's New); the release notes are in [`docs/releases/`](docs/releases/README.md).
 Building Crux2 and working on it: [`docs/`](docs/README.md).
 
 ## What you need
@@ -56,8 +56,8 @@ Building Crux2 and working on it: [`docs/`](docs/README.md).
    ([Where the games are](#where-the-games-are)).
 4. Start Crux2 from the home screen.
 
-To update, copy the new folder over the old one, or let Crux2 do it (Settings > PlayStation 5 >
-Look for a newer Crux2: it downloads the release from GitHub, checks it and replaces only its own
+To update, copy the new folder over the old one, or let Crux2 do it (Settings > Network > Updates >
+Check for Updates: it downloads the release from GitHub, checks it and replaces only its own
 files, removing those a new version no longer ships). Your settings, memory cards, save states and
 `network.cfg` are files the build does not contain, so they stay as they are. To have them out of
 the title folder altogether: [Outside the title folder](#outside-the-title-folder).
@@ -81,7 +81,7 @@ Everything is in the title's folder, `/data/homebrew/PPSA99249/` (which the titl
 | `covers/` | Cover pictures |
 | `pictures/` | Each game's title screen and a picture of it being played (`<serial>.title.png`, `<serial>.snap.png`), fetched from libretro's collection |
 | `about/` | What is known of each disc, looked up on Wikipedia and Wikidata |
-| `backgrounds/` | Yours, if you want them: pictures for behind the screens (PNG, JPEG or WebP; Settings > Interface > Background > My pictures) |
+| `backgrounds/` | Yours, if you want them: pictures for behind the screens (PNG, JPEG or WebP; Settings > Interface > Skins > Background > My pictures) |
 | `cheats/`, `patches/` | Your own cheat and patch files (`.pnach`); a cheat typed in on the console is in `cheats/<serial>_<CRC>_typed.pnach` |
 | `saves/` | Save files to bring in to a memory card, and those written out from one (`.psu`, `.max`, `.cbs`, `.sps`, `.xps`, `.psv`): [The saves on a memory card](#the-saves-on-a-memory-card) |
 | `card-undo/` | Each memory card as it was before the card manager last changed it |
@@ -93,7 +93,7 @@ Everything is in the title's folder, `/data/homebrew/PPSA99249/` (which the titl
 | `network.cfg` | The network shares to read games from (written on the first start) |
 | `startup.wav`, `music/`, `background.wav` / `.mp3` / `.ogg` / `.flac` | Yours, if you want them: a start-up sound in place of the title's own, and the music of the menus |
 | `cheat-sources.txt` | More places to fetch cheats from (written on first use) |
-| `inis/DEV9hdd.raw` | The PlayStation 2's hard drive, once made in Settings > Network |
+| `inis/DEV9hdd.raw` | The PlayStation 2's hard drive, once made in Settings > Network > Network & HDD |
 | `crux2-boot.log` | The last run's start-up steps, the emulator's warnings and errors, and a crash report if the title stopped. *New:* by default it is written only when something went wrong or you choose Save the log ([The logs](#the-logs)) |
 | `crux2-boot.previous.log` | The same for the run before |
 | `logs/emulog.txt` | The emulator's own log |
@@ -117,10 +117,10 @@ a new version without losing anything.
 - `network.cfg`, `cheat-sources.txt` and `backgrounds/` are taken from `/data/crux2` when
   they are there, else from the title folder.
 - The boot log, `startup.wav` and the background sound stay in the title folder.
-- Settings > About > "Crux2's files" says which folder is in use, and the boot log has a line
+- Settings > System > About > **Data Directory** says which folder is in use, and the boot log has a line
   `data folder: ...`. Delete or rename `/data/crux2` and the title folder is used again.
 
-**Settings > Folders** goes further: *Where Crux2 keeps its files* picks a folder of your choice
+**Settings > Games and saves > Folders** goes further: *Where Crux2 keeps its files* picks a folder of your choice
 for the BIOS, memory cards, save states, screenshots and GS dumps, cheats, covers and texture
 replacements (PCSX2's own `[Folders]` settings; checked for writing first, used from the next game
 started), and *Add a game folder* adds game folders anywhere ([Where the games are](#where-the-games-are)).
@@ -215,10 +215,10 @@ Favourites and custom titles are PCSX2's own (its game list keeps them); hidden 
 collections and quick views are kept with the settings.
 
 **The games' pictures** come from libretro's collection of thumbnails, by the game's name, as
-the covers do: after each scan for every PlayStation 2 game that has none yet (Settings > Game
-List > "Fetch game pictures automatically"), or at once with Settings > Game List > "Fetch the
-games' pictures". They show on a game's page, behind the title in the shelves view ("A picture
-of play behind the shelves"), and behind every screen with the background "The game's picture". A
+the covers do: after each scan for every PlayStation 2 game that has none yet (Settings > Games
+and saves > Game List > **Download Game Pictures Automatically**), or at once with **Download Game
+Pictures** there. They show on a game's page, behind the title in the shelves view (Settings > Interface > Library layouts > **Show
+Gameplay Background**), and behind every screen with the background "The game's picture". A
 game the collection has nothing for is remembered and not asked about again until you ask. Covers
 and pictures are downloaded three at a time, those on the screen first (*new*).
 
@@ -251,9 +251,8 @@ them goes to it. Triangle on the home shows only what is changed, everywhere, un
   is shown only at a higher one), Square pins it; a game opens its own settings.
 - **Pins**: Square on any setting pins it to the home, or unpins it.
 
-Elsewhere in this guide, "Settings > Graphics" and the like name the section a setting is in (here
-Picture > Graphics), and some settings are named as they were called before they took PCSX2's names:
-the search finds any of them by a word of its name or description.
+Elsewhere in this guide, "Settings > Picture > Graphics" and the like name an area and its section;
+the search finds any setting by a word of its name or description.
 
 **A game's own settings** (Its settings on a game's page, or Game settings in the quick menu) are the same
 screens for that game, opening on Games and saves, whose first section is the game itself (its
@@ -268,7 +267,7 @@ saves (Patches, Cheats) when `resources/patches.zip` or `cheats/` has any for it
 Every setting's description is PCSX2's own where PCSX2 has the setting, and is written in its
 style where it has not.
 
-**The look.** Settings > Interface has 36 skins (six of the title's own: **Crux**, its warm black,
+**The look.** Settings > Interface > Skins has 36 skins (six of the title's own: **Crux**, its warm black,
 orange and cream, is the default; Midnight is the look of the first builds; Carbon is black, for an
 OLED screen; and the 30 themes of the ps5-homebrew-ui kit), an accent colour, the amount of motion,
 interface and text size, high contrast and colours for colour blindness, and the background: still,
@@ -280,17 +279,17 @@ held larger than 1920 by 1080, and two are held at a time.
 
 **The start-up.** There are four animations, each building the name out of its parts in time
 with the start-up sound and delivering it to the top bar in its own way: **Strike**, **Unfold**,
-**Spin** and **Slash**. A start plays another one than the start before it; Settings > Interface >
-"Which start-up" keeps one. Any button ends it early. *New:* a short startup video of Crux2's own
-plays in the animation's place (Settings > Interface > **Startup video**; it needs the start-up
+**Spin** and **Slash**. A start plays another one than the start before it; Settings > Interface > Interface >
+**Startup Animation Style** keeps one. Any button ends it early. *New:* a short startup video of Crux2's own
+plays in the animation's place (Settings > Interface > Interface > **Startup Video**; it needs the start-up
 animation on and Motion at All). The sound comes with the build (`resources/sounds/silicon-boot.wav`);
 `startup.wav` in the title folder, if you put one there, is played in its place. When the start-up
 is over, music plays for as long as no game is loaded: the files of a `music` folder in the title
-folder (WAV, MP3, Ogg or FLAC, in the order Settings > Interface > "Order of the music" sets) and
+folder (WAV, MP3, Ogg or FLAC, in the order Settings > Sound > Interface sounds > **Music Order** sets) and
 `background.wav`, `.mp3`, `.ogg` or `.flac`, or else the music that comes with the build. Settings >
-Interface has a switch and a volume for each, Next track, and says which files were found.
+Sound > Interface sounds has a switch and a volume for each, Next track, and says which files were found.
 
-**Statistics** (Settings > Statistics) counts what the library holds and what was played: the
+**Statistics** (Settings > System > Statistics) counts what the library holds and what was played: the
 games by kind, place, region and how well they are known to run, their size, the time played in
 all, and the five games played the longest.
 
@@ -304,7 +303,7 @@ there.
 ## Screen care
 
 An OLED television keeps a trace of what stood still on it for hours, and a menu stands still
-whenever nobody touches the controller. Settings > Interface:
+whenever nobody touches the controller. Settings > Interface > Screen care:
 
 - **In the menus, and over a paused game under the quick menu** (on by default): the screens go
   dark when nothing was pressed for a while (1 to 10 minutes; 3 to begin with), and after as long
@@ -344,8 +343,8 @@ The bar at the bottom of each screen names what the buttons do there.
 
 **In the settings:** up and down choose, left and right change a value, **Cross** switches or
 opens a list of choices, **Circle** goes back. In a game's own options **Square** takes the
-game's value away again; on a controller button it removes the button. Settings > Interface >
-"Circle chooses, Cross goes back" exchanges the two in every menu.
+game's value away again; on a controller button it removes the button. Settings > Interface > Interface >
+**Swap OK/Cancel** exchanges the two in every menu.
 
 **In a game** the DualSense is a DualShock 2, button for button, with pressure-sensitive
 buttons reported as fully pressed, and rumble:
@@ -359,8 +358,8 @@ buttons reported as fully pressed, and rumble:
 
 The Create and PS buttons belong to the console and never reach a title, which is why the
 touch pad stands in for Select and Start. Every button can be changed: a game's in
-Settings > Controllers, the quick menu's in Settings > Hotkeys. "Put the buttons back as they
-were" on the controllers page brings this layout back. A quick tap is held for the game at least
+Settings > Controls > Controllers, the quick menu's in Settings > Controls > Hotkeys. **Reset Bindings**
+on the controllers page brings this layout back. A quick tap is held for the game at least
 50 ms, so games that read the pad once a frame see it (*new*).
 
 **The quick menu** says how long the game was played this time and has a row of tiles: **Resume**,
@@ -375,18 +374,18 @@ dump**, **Save the log**, the game's settings, its **Patches and cheats**, the s
 forward and restart. Triangle chooses what More shows and in which order (a game's own settings can
 be put there too), and **Apply changes now**, at the top of More, restarts the game when a setting
 changed that only takes effect at a game's start. An exit, a restart or a state load waits for the
-writes still under way, with a bar. Settings > About > **Quit Crux2** ends the title.
+writes still under way, with a bar. Settings > System > About > **Exit** ends the title.
 
 **Players 2 to 4** are the controllers of the other signed-in users: the user who started
 Crux2 is player 1, the others follow in the order they signed in (sign each one in with the
-PS button of their controller). Settings > Controllers > Players puts them on the PlayStation
+PS button of their controller). Settings > Controls > Controllers > Players puts them on the PlayStation
 2's ports in one step, in the three ways games expect: **One or two players** (ports 1 and 2),
 **Up to four players, multitap in port 1** (1A to 1D, what most four-player games want) and
 **Up to four players, multitap in port 2** (1, then 2A to 2C). A running game sees a multitap
 the next time it starts. (In `inis/PCSX2.ini` the controllers keep the names PCSX2's desktop
 builds give them, `SDL-0` to `SDL-3`, so settings carry over.)
 
-**More in Settings > Controllers:**
+**More in Settings > Controls:**
 
 - **Light bar in the player's colour** (off): each controller's light bar says which player it is,
   in the colours the PlayStation 4 used: blue, red, green, pink.
@@ -406,13 +405,13 @@ builds give them, `SDL-0` to `SDL-3`, so settings carry over.)
   type to **Guitar** and map it. This has not been tried on a console; the boot log's `usb pads:`
   lines say how it went, and when the console refuses, only its own controllers are read.
 
-**Control from a phone** (Settings > Network): a page on your phone or computer, reached by a QR
+**Control from a phone** (Settings > Network > Remote Control): a page on your phone or computer, reached by a QR
 code, works as a controller.
 
-**The PlayStation 2 menu:** Settings > BIOS > **Start the PlayStation 2 menu**, or the list's menu
+**The PlayStation 2 menu:** Settings > Games and saves > BIOS > **Start BIOS**, or the list's menu
 (Square in the library), starts the BIOS with no game: the PS2's browser (its memory cards and
 discs) and its System Configuration. **Quit game** in the quick menu goes back to the library.
-Settings > BIOS also has **Console language**: the language games are told the PlayStation 2 is
+Settings > Games and saves > BIOS also has **Console Language**: the language games are told the PlayStation 2 is
 set to ("As the BIOS has it" keeps the BIOS's own, which is never changed).
 
 ## Where the games are
@@ -420,8 +419,8 @@ set to ("As the BIOS has it" keeps the BIOS's own, which is never changed).
 Disc images as `.iso`, `.chd`, `.cso`, `.zso`, `.gz`, `.bin`, `.mdf`, `.nrg` and `.img`.
 
 Each place below has its chip in the library's filter row (All shows every place at once). The games are looked for when Crux2 starts and after
-each game; **Square** in the library (or Settings > Game List > Scan for games) looks again.
-Settings > Folders > **Add a game folder** opens a folder browser (USB drives, network shares, the
+each game; **Square** in the library (or Settings > Games and saves > Game List > **Scan For New Games**) looks again.
+Settings > Games and saves > Folders > **Add Search Directory** opens a folder browser (USB drives, network shares, the
 console's storage) and adds a folder anywhere; it and its subfolders are searched, and the games
 stay where they are.
 
@@ -433,14 +432,14 @@ stay where they are.
 
 Games are read from a folder named `crux2`, `ps2`, `ps2iso` or `playstation2` at the top of the
 drive (capital letters or not; folders named `pspcsx2` and `pcsx2` are read as well), or from a
-folder added in Settings > Folders. Only those folders are scanned, not the whole drive.
+folder added in Settings > Games and saves > Folders. Only those folders are scanned, not the whole drive.
 
 A title cannot see USB drives from inside its sandbox. When Crux2 starts, it sends the bundled
 `sandbox-elevator.elf` to the payload loader on port 9021, which lets this one title (by its ID)
 out of its sandbox. If the loader is not running, Crux2 says so in the boot log and carries on
 without USB drives; nothing else changes.
 
-This is on by default. Settings > Game List > **USB drives** turns it off (it takes effect at the
+This is on by default. Settings > Games and saves > Game List > **Search USB Drives** turns it off (it takes effect at the
 next start); so does an empty file named `usb-off.txt` next to `eboot.bin`, should the interface
 not come up.
 
@@ -464,7 +463,7 @@ password =
 - Restart Crux2 after changing the file.
 
 A game on a share is read from it as it plays, so the link to the NAS matters while playing: a
-wired connection is the safe choice. Settings > Emulation > **Load the whole disc into memory**
+wired connection is the safe choice. Settings > Emulation > Emulation > **Enable CDVD Precaching**
 loads the whole image into memory before the game starts instead; the start then takes as long as
 copying the image does, with a progress bar, and the NAS is not needed again. A NAS that closes a
 connection that was idle is connected to again the next time anything is asked of the share.
@@ -487,19 +486,19 @@ game is named for what it is and not played.
   takes it away. With a game in each drive, both are on the tab. Audio tracks are silence
   (PlayStation 2 games on CD keep their music in their data).
 - **A locked tray.** Started without a jailbreak, the console locks a USB drive's tray when a
-  disc is in it. Crux2 unlocks every drive's tray when it first sees it, and Settings > Game List >
-  **Eject a disc** unlocks a drive and opens it (not one a game plays from).
-- **Make an image of the disc** (Settings > Game List, Square on the Disc tab, or "Make an image"
+  disc is in it. Crux2 unlocks every drive's tray when it first sees it, and Settings > Games and saves > Game
+  List > **Eject Disc** unlocks a drive and opens it (not one a game plays from).
+- **Make an image of the disc** (Settings > Games and saves > Game List > **Create Disc Image**, Square on the Disc tab, or "Make an image"
   in More on the disc's page) asks which kind: ISO, CHD smallest (LZMA), CHD quickest to load
   (Zstandard) or CSO; then where it goes: the internal storage, a USB drive, or a network share. It
   is named "Title (SLUS-12345).chd" (or .iso, .cso) and is in the library after the next look for
   games.
 - **The Disc tab** shows the disc with its cover, title screen and a picture of it being played, a
   few sentences of the game from Wikipedia, and its developer, publisher, year and genre from
-  Wikidata, kept in the data folder's `about/`; Settings > Game List > "Look up what each game is"
-  switches that off.
+  Wikidata, kept in the data folder's `about/`; Settings > Games and saves > Game List > **Show Game
+  Descriptions** switches that off.
 
-**Experimental.** It ran on one console (mine). Settings > Game List > **Disc drives** (or
+**Experimental.** It ran on one console (mine). Settings > Games and saves > Game List > **Search Disc Drives** (or
 `DiscDrive = false` under `[PS5]` in `inis/PCSX2.ini`) leaves the drives alone. The boot log says
 what happened, in lines beginning `disc:`.
 
@@ -507,13 +506,13 @@ what happened, in lines beginning `disc:`.
 console. So a disc in the drive is read 8 MB ahead of the game, and behind that all of it, from
 where the game is onwards, into memory; once the whole disc is there (a line on the screen says
 so) the drive is not used at all. It takes as much memory as the disc is large and is done only
-when that much can be spared with 2.5 GB left over. Settings > Game List > **Read the disc into
-memory while playing** switches it off (512 MB of what was read last is kept then), and **Keep the
-disc turning** reads a little every 20 seconds so that the drive does not stop.
+when that much can be spared with 2.5 GB left over. Settings > Games and saves > Game List > **Cache Disc in
+Memory** switches it off (512 MB of what was read last is kept then), and **Keep Disc
+Spinning** reads a little every 20 seconds so that the drive does not stop.
 
 ## The network adapter and the hard drive
 
-Settings > Network switches on the PlayStation 2's network adapter (PCSX2's "Sockets" one, the
+Settings > Network > Network & HDD > **Enable Network Adapter** switches on the PlayStation 2's network adapter (PCSX2's "Sockets" one, the
 only kind a console can have): the game gets a network of its own and its traffic goes out
 through the console's connection. The page shows the console's address, what the game is doing
 with the adapter, and takes the two name servers. The **first name server is PS2 Online's**
@@ -534,7 +533,7 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   enlarges it to the output, so the 6x takes effect when FSR is switched off. Automatic quality
   lowers the resolution by itself where the graphics chip falls short. The software renderer and
   **paraLLEl-GS** (the whole GS drawn on the graphics chip in compute shaders, super-sampled 1 to
-  16 times a pixel) are the other choices of Settings > Graphics > Renderer.
+  16 times a pixel) are the other choices of Settings > Picture > Graphics > **Graphics API**.
 - **Memory cards are held in memory.** A game reads and writes a copy of the card, and what
   changed is written to the card's file half a second after the game stops writing, every two
   seconds while it keeps writing, when the game is paused, and when it is closed. "Memory Card ...
@@ -543,9 +542,9 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   it, or pause first. Settings are written when the menus close, and at a game's start, quit and
   crash (*new*).
 - **Speed hacks are as PCSX2 ships them.** If a game falls short of full speed, the first thing
-  to try is Settings > Emulation > **Multi-threaded VU1 (MTVU)**: safe for most games, wrong for a
+  to try is Settings > Emulation > Emulation > **Enable Multithreaded VU1 (MTVU)** (at More): safe for most games, wrong for a
   few.
-- **The performance overlay** (Settings > On-Screen Display; off until a figure is switched on).
+- **The performance overlay** (Settings > Picture > On-Screen Display; off until a figure is switched on).
   **Performance Overlay Size** picks how much of it there is: *Minimal*, a small pill with the frame rate;
   *Compact* (the default when you switch the FPS on), one bar with the frame rate and the GPU, EE,
   GS and VU loads; *Full*, a card with the frame rate large, the frame time and speed, the 1% and
@@ -558,35 +557,35 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   "30 → 60" (the game's, then the screen's). Style still has PCSX2's own lines of text; the
   overlay's place (any corner, top centre...), OSD scale and margin, and moving it from corner to
   corner work as before. Its readability on a television has not been checked on a console yet.
-- **When a game is slow, the overlay says which part is the limit.** Settings > On-Screen Display:
-  turn on Speed, Frames a second, Processor usage and Graphics chip usage (or Performance Overlay Size: Full). Then:
+- **When a game is slow, the overlay says which part is the limit.** Settings > Picture > On-Screen Display:
+  turn on **Show Speed Percentages**, **Show FPS**, **Show CPU Usage** and **Show GPU Usage** (or Performance Overlay Size: Full). Then:
   - *Speed at 100% but the game's own frame rate low:* the game itself is slow, as it would be on
     a PlayStation 2 (a 60 fps patch can ask more of the emulated processor than it has). Settings >
-    Emulation > EE cycle rate above 100% gives the game a faster emulated processor.
+    Emulation > Emulation > **EE Cycle Rate** above 100% gives the game a faster emulated processor.
   - *Speed below 100% and the EE thread near 100%:* the emulated processor is the limit. Try
     Multi-threaded VU1; undo any EE cycle rate above 100%.
   - *Speed below 100% and the GS thread near 100%:* the graphics thread is the limit. Settings >
-    PlayStation 5 > **Graphics driver on its own thread** (on by default) takes the driver's share
-    off it; with the higher blending accuracy levels, Settings > Graphics > **Rasterizer ordered
-    view** matters too.
+    System > PlayStation 5 > **Threaded Graphics Driver** (on by default, at More) takes the driver's share
+    off it; with the higher blending accuracy levels, Settings > Picture > Graphics > **Rasterizer Ordered
+    View** matters too.
   - *Speed below 100% and the GPU near 100%:* a lower internal resolution.
 
   The EE, GS and VU percentages are each thread's own processor time. When it is the graphics
-  thread, Settings > PlayStation 5 > **Profile the next start**, then quit and start Crux2 again,
+  thread, Settings > System > PlayStation 5 > **Profile Next Start**, then quit and start Crux2 again,
   play the slow part for half a minute or more, and quit Crux2 from its own menu (Settings >
-  About): the boot log then says what the graphics thread was busy with. That is the file to send
+  System > About > **Exit**): the boot log then says what the graphics thread was busy with. That is the file to send
   with a report of a slow game.
 - **Shaders compile as a game first needs them**, so a game can stutter the first time an effect
   appears. They are kept (`cache/`, `radv-shader-cache/`) and the next run has them.
 - **Covers:** a picture named like the game's serial or title in `covers/` (`.jpg`, `.png` or
   `.webp`) is used as its cover. Missing covers are fetched after every scan from libretro's
   collection of box arts (`libretro-thumbnails/Sony_-_PlayStation_2`), its region's picture first,
-  and saved as `covers/<serial>.png`. Settings > Game List has **Download covers automatically**
-  and **Download the missing covers now** (which also asks again for the games nothing was found
+  and saved as `covers/<serial>.png`. Settings > Games and saves > Game List has **Download Covers
+  Automatically** and **Download Missing Covers** (which also asks again for the games nothing was found
   for, remembered in `covers/no-cover.txt`). A `CoverURL` of your own under `[PS5]` in
   `inis/PCSX2.ini` is used instead. A game without a cover is shown as a card with its title.
 - **Cheats:** a game's Cheats page (its page > Patches and cheats > Cheats) has **Download cheats for this
-  game**, and Settings > Game List has **Download cheats for all games**. They fetch the game's
+  game**, and Settings > Games and saves > Cheats has **Download Cheats for All Games**. They fetch the game's
   `.pnach` files from four collections on GitHub: `xs1l3n7x/pcsx2_cheats_collection`,
   `complicatiion/pcsx2_europe_cheats_collection`, `heavyjam-code/pcsx2-cheats-n-patches` and
   `TheAdmiester/PCSX2-Cheats`. Cheats go to `cheats/`; a collection's patches go to `patches/` and
@@ -596,21 +595,21 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
 - **A cheat typed in**: the same page has **Type a cheat in**: its name, then its lines one at a
   time as the lists print them (`2034A5B0 00000001`); a line with nothing typed ends it. It has to
   be a raw code. **Take a typed cheat out** removes one.
-- **Game fixes from GitHub** (Settings > PlayStation 5, on; *new*): at each start, the game
+- **Game fixes from GitHub** (Settings > Network > Updates > **Update Game Fixes on Startup**, on; *new*): at each start, the game
   database entries and game patches that changed since this version was made are fetched from
   this project's GitHub, checked, and applied to the games started after they came.
 - **Save states and the console's write limit:** a title writes about 1.3 GiB at full speed in
   one run and is slowed to about 2 MiB/s after that. A long session with dozens of save states can
   reach it, and a save state then takes several seconds.
-- **Accurate floating point** (Settings > Advanced for all games, a game's own Emulation page for
-  one; FPU, VU0, VU1; off): the PS2's exact floating-point results, done in the recompilers, for
+- **Accurate floating point** (Settings > Emulation > Emulation > **Accurate FPU Floating Point** and its VU0 and VU1 rows,
+  for all games or for one; FPU, VU0, VU1; off): the PS2's exact floating-point results, done in the recompilers, for
   games whose AI or physics depend on them. FPU and VU0 cost some speed; VU1 a lot. They are on for
   the FPU and VU0 in the two games known to need them.
 - **Resetting:** delete `inis/PCSX2.ini` to start again from the defaults.
 
 ### RetroAchievements
 
-Settings > **Achievements** (on my console it signed in and found a game's achievements).
+Settings > Network > **Achievements** (on my console it signed in and found a game's achievements).
 **Sign in** asks for the name and the password of your account at retroachievements.org and hands
 them to PCSX2's own sign-in; what is kept is the key RetroAchievements answers with
 (`inis/secrets.ini`), never the password. A game you start is then looked up; an achievement earned
@@ -640,7 +639,7 @@ Shown for all games; not tried on the console one by one.
 
 ### 120 Hz and variable refresh
 
-The picture is 60 Hz by default. Settings > Emulation > **Refresh rate** > "120 Hz when the
+The picture is 60 Hz by default. Settings > Picture > Output and HDR > **Refresh Rate** > "120 Hz when the
 television has it" (from the next start; holding L1 and R1 while Crux2 starts uses 60 Hz once) has
 the title tell the console that it can show 119.88 pictures a second, and take the display's
 fastest mode; it ran at 119.88 Hz on my console. Where the television does not take 120 Hz at 4K,
@@ -653,12 +652,12 @@ game's 50 frames are spread over two and three refreshes, not one and two; frame
 double 60 to 120. Without the menus: `OutputRefresh = 120` (or `60`) under `[PS5]` in
 `inis/PCSX2.ini`.
 
-**Variable refresh (VRR)** (Settings > Emulation, off; experimental): at 120 Hz on a TV with VRR,
+**Variable Refresh Rate (VRR)** (Settings > Picture > Output and HDR, off; experimental): at 120 Hz on a TV with VRR,
 each frame is shown as soon as it is ready. Not tried on a TV that has it.
 
 ### FSR 1
 
-Settings > Graphics > **Upscaling and sharpening** > **FSR 1 from 4x** (the default), **from 3x**
+Settings > Picture > Graphics > **Upscaling and Sharpening** > **FSR 1 from 4x** (the default), **from 3x**
 or **from 2x**. AMD's FidelityFX Super Resolution 1.0 enlarges a picture drawn smaller than it is
 shown with its edge-following filter, then sharpens it. It is for games that do not hold full
 speed at 6x: close to a 4K picture for much less work. Each choice sets the resolution the game is
@@ -669,7 +668,7 @@ has NIS (enlarge and sharpen) and PCSX2's CAS. The filter is AMD's, unchanged
 
 ### Anti-aliasing: FXAA, SMAA and SSAA (new)
 
-Settings > Graphics > Post-processing > **Anti-aliasing** is one choice for all of them:
+Settings > Picture > Graphics > **Anti-Aliasing** is one choice for all of them:
 
 - **FXAA**: quick, a little soft.
 - **SMAA**: sharper edges for a little GPU time.
@@ -690,7 +689,7 @@ samples, so it cannot replace a higher internal resolution. Neither has run on a
 
 ### Frame generation
 
-Settings > Graphics > **Frame generation** (off by default) makes pictures between the game's
+Settings > Picture > Frame generation > **Frame Generation** (off by default) makes pictures between the game's
 own:
 
 - **30 to 60.** Most PlayStation 2 games draw 30 (or 25, or 20) pictures a second and hand each
@@ -720,16 +719,16 @@ made when the game closes).
 
 ### HDR (new)
 
-Settings > Graphics > **HDR** (off) sends the picture to the TV as HDR10 (BT.2020, PQ), with the
-game's brightest parts brighter: **Peak brightness** and **White level** (203 nits, the reference,
+Settings > Picture > Output and HDR > **HDR** (off) sends the picture to the TV as HDR10 (BT.2020, PQ), with the
+game's brightest parts brighter: **HDR Peak Brightness** and **HDR White Level** (203 nits, the reference,
 by default) set how bright, and **Adjust HDR brightness** shows a test picture to set them by. It
 needs the console's own HDR setting on and a TV that takes HDR; otherwise the picture stays SDR and
-a message says why. **Debanding** (Settings > Graphics: Off, Low, High) smooths the colour bands in
+a message says why. **Debanding** (Settings > Picture > Looks: Off, Low, High) smooths the colour bands in
 skies, fog and dark gradients. Neither has run on a console yet.
 
 ### The saves on a memory card
 
-Settings > Memory Cards > **Open the card manager** lists the saves on a card, each with the name
+Settings > Games and saves > Memory Cards > **Memory Card Manager** lists the saves on a card, each with the name
 it gives itself, its size and its date, and how much room is left. From there:
 
 - **Bring a save in from a file.** Save files are looked for in a folder named `saves` on every
@@ -743,12 +742,12 @@ it gives itself, its size and its date, and how much room is left. From there:
 A card is only changed while no game is loaded. Before a card is changed, the whole card as it was
 is copied to `card-undo/`, and **Put the card back as it was** brings it back (one step). A card
 that does not read as sound is never written to; folder cards and PlayStation 1 cards are not
-looked into. Keep a backup (Settings > Backup) before bringing saves in to a card you care about.
+looked into. Keep a backup (Settings > Games and saves > Backups) before bringing saves in to a card you care about.
 Memory cards can also be kept in sync with a share, both ways.
 
 ### A memory card for each game
 
-Settings > Memory Cards > **A memory card for each game** (on by default). Slot 1 holds a card of
+Settings > Games and saves > Memory Cards > **Memory Card per Game** (on by default). Slot 1 holds a card of
 the game's own: 8 MB, named by the game's serial (`memcards/SLUS-12345.ps2`), made the first time
 the game starts. Games that read each other's saves, as PCSX2's game database lists them, share one
 card, named by the smallest serial among them. Slot 2 stays as it is set. Switching the option off
@@ -759,15 +758,15 @@ card they were made on: put that card in slot 2 to copy them over in the PlaySta
 
 ### A state saved by itself, and undoing a load
 
-Settings > Advanced:
+Settings > Games and saves > Save states:
 
-- **Save a state by itself** (off, or every 2, 5, 10 or 15 minutes of play): the running game's
+- **Auto Save State** (off, or every 2, 5, 10 or 15 minutes of play): the running game's
   state is saved to a place of its own beside the slots, each time over the one before; it is
   **Load the auto-save** in the quick menu. The game may stand still for a moment each time; the
   boot log says for how long (`auto-save:`). Never while a memory card is being written to.
-- **Undo for a loaded state** (on): before a state is loaded into a running game, the game as it
+- **Undo Load State** (on): before a state is loaded into a running game, the game as it
   is, is kept, and **Undo the last load** in the quick menu brings it back.
-- **Sleep-safe saving** (on): the game's state is saved when you open the PS5 menu and every five
+- **Save State for Rest Mode** (on): the game's state is saved when you open the PS5 menu and every five
   minutes, so you can go on after the console went to rest mode.
 
 ### Texture packs
@@ -779,13 +778,13 @@ folder may be in the title folder, on a USB drive or on a network share:
     <USB drive>/Crux2/textures/SLUS-12345/replacements/...            or PSPCSX2/, PS2/, or textures/... at the top
     <share>/Crux2/textures/SLUS-12345/replacements/...                the same four, on each share of network.cfg
 
-The first of them that holds anything is the one used; Settings > Graphics > **Load textures**
-switches packs on (for every game, or in one game's options), and **Precache replacements** reads
+The first of them that holds anything is the one used; Settings > Games and saves > Texture packs > **Load Textures**
+switches packs on (for every game, or in one game's options), and **Precache Textures** reads
 all of a pack before the game begins. A game's options say where its pack was found. Texture dumps
 always go to the title folder.
 
-**HD texture packs** (the library's Square menu; Settings > Graphics; or a game's options >
-Graphics, where it opens on that game) is the texture pack manager:
+**HD texture packs** (the library's Square menu; Settings > Games and saves > Texture packs > **HD Texture
+Packs**; or a game's page > Texture packs, where it opens on that game) is the texture pack manager:
 
 - **Installed**: every pack on the console, each USB drive and each share, by game (its cover and
   name from your library, or its serial), with its size, its number of files, where it is, and
@@ -820,11 +819,11 @@ archive kept; the bar shows how far it is, its speed, the connections and the ti
 
 PCSX2's desktop builds come with a collection of game patches (`patches.zip`: widescreen,
 no-interlacing, 60 fps and others). It is not in this package, because the repository it comes
-from states no licence. Settings > Game List > **Download PCSX2's patches** takes `patches.zip`
+from states no licence. Settings > Games and saves > Patches > **Download Game Patches** takes `patches.zip`
 from the latest release of [PCSX2/pcsx2_patches](https://github.com/PCSX2/pcsx2_patches/releases)
 and puts it in the title folder's `resources/` (copying the file there by hand does the same). A
-game's patches are then in its options, under Patches. The first download switches **Widescreen
-patches** on (Settings > Graphics) once. The fixes PCSX2's game database applies by itself do not
+game's patches are then in its options, under Patches. The first download switches **Apply Widescreen
+Patches** on (Settings > Picture > Graphics) once. The fixes PCSX2's game database applies by itself do not
 need the collection. It worked on my console.
 
 ### What the database recommends for a game
@@ -837,7 +836,7 @@ blending accuracy; "Back to the Settings for everything" on the same page undoes
 
 ## Backups of memory cards and saved states
 
-Settings > **Backup** copies the memory cards and the saved states to a USB drive or to a network
+Settings > Games and saves > Backups > **Back Up Now** copies the memory cards and the saved states to a USB drive or to a network
 share. Each backup is a folder of its own, named by its date and time, in `Crux2-backup` at the top
 of the drive or share:
 
@@ -861,7 +860,7 @@ On my console, backups to a share worked.
 
 ## The logs
 
-Settings > **Log** shows what Crux2 wrote down, on the TV: the log of this run, of the run before,
+Settings > System > **Log** shows what Crux2 wrote down, on the TV: the log of this run, of the run before,
 and PCSX2's own log, each opening at its end (the directions move a line, L1 / R1 a page, L2 / R2
 to the start and the end; errors and warnings stand out). **Copy the logs to...** puts the files in
 `Crux2-logs/<date and time>/` on a USB drive or a share. When the run before ended in a crash,
@@ -898,7 +897,7 @@ the quick menu). "Always written" writes every line as it comes, as before (from
 
 ## If something goes wrong
 
-Settings > Log shows the logs and copies them to a USB drive or a share ([The logs](#the-logs));
+Settings > System > Log shows the logs and copies them to a USB drive or a share ([The logs](#the-logs));
 choose **Save the log** first if the run did not crash. By hand: copy `crux2-boot.log` (after the
 next start it is `crux2-boot.previous.log`; the one before that is gone) and `logs/emulog.txt` from
 `/data/homebrew/PPSA99249/`. Never send game files, BIOS files or `network.cfg` with them.
@@ -910,7 +909,7 @@ next start it is `crux2-boot.previous.log`; the one before that is gone) and `lo
   `usb-off.txt` next to `eboot.bin` and start again.
 - **"files are missing from the title folder's resources":** the copy was cut short; copy the
   whole folder again.
-- **No BIOS found:** the file has to be in `bios/` and be a real dump; Settings > BIOS lists what
+- **No BIOS found:** the file has to be in `bios/` and be a real dump; Settings > Games and saves > BIOS lists what
   PCSX2 recognises.
 - **USB drive not found:** the boot log has a line "USB drives: ..." with the reason, and one line
   per drive with the folders it found.

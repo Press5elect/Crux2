@@ -267,7 +267,11 @@ struct Hint
 	Glyph glyph;
 	const char* label;
 };
+/// The hint bar at the foot: the hints in one order on every screen (Circle at the left, then the
+/// shoulders, directions, sticks, touch pad, OPTIONS, Square, Triangle, and Cross at the right).
 void hintBar(ImDrawList* dl, const std::vector<Hint>& hints);
+/// That order, for a screen that draws its hints itself (the quick menu).
+void orderHints(std::vector<Hint>& hints);
 
 // ------------------------------------------------------------------ input
 
@@ -441,7 +445,10 @@ struct HomeGame
 {
 	const GameInfo* info;
 	std::string title;    // as the library shows it
+	size_t index = 0;     // the library's own entry (good until its games are made again)
 };
+/// A game of Home's lists drawn as the library draws its cover (no search by its path).
+void drawHomeCover(ImDrawList* dl, const HomeGame& game, float x, float y, float w, float h, float r, float lift);
 /// The games played, the latest first (hidden ones and a set's other discs left out), at most `most`.
 std::vector<HomeGame> recentGames(int most);
 /// The library's games that are listed anywhere (not hidden), and their number on each place.

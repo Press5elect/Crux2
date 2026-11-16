@@ -1,13 +1,20 @@
 # Crux2 - what changed
 
 A short entry for each version, newest first. The build copies this file into the title folder,
-where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)` headings and the
+where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (date)` headings and the
 `- Added:` / `- Changed:` / `- Fixed:` bullets (a heading without a version, such as Unreleased, is
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
 ## Unreleased
 
+- Changed: the interface polished: the button hints in one order on every screen (Circle at the
+  left, Cross at the right); messages in the top right corner, over the clock, never over the hints
+  or what a screen shows; the settings' home cards show what is set on two lines, at every text
+  size; the same corners on every card (skins with rounder or squarer corners had them doubled);
+  screens change quicker, and only fade with Motion: Less. Change disc offers the disc in a drive
+  again (L1 / R1 and the filter row); L3 on a pinned setting in the quick menu uses the global
+  setting again. Not yet run on a console.
 - Changed: the top bar's tabs are Home, Library and Disc (with a disc in a drive), L1 / R1; Options
   opens the settings as before. Home is the first screen after the start-up: the game played last
   with Resume (from its newest saved state) and its game page, what goes on right now (texture pack

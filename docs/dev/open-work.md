@@ -26,8 +26,8 @@ item is done or something new is learned; delete what no longer applies.
   kept across starts ([PS5UI] Pins, RecentChanges); the search's keyboard (a USB or the phone's one
   too); readability at Text size Largest and Interface size 70%; the skins (light ones: Brutal,
   Clay, Gloss) on the new layout; how fast the home is drawn (what is changed is looked at again every
-  half second: about 700 values). The README's other sections still name some settings by their old
-  labels and old pages.
+  half second: about 700 values, twice; see phase 5 for the PC's figure). The README names settings
+  by their area, section and PCSX2-style labels since phase 5.
 - The interface revamp, phase 4A (bp_home.cpp; the top bar, the library's filter row and strip in
   bp_library.cpp): checked on the PC only (crawl, shots). Not run on a console. To check there: Home
   after the start-up, its Resume (the newest state: the one made at closing or a slot) and Game page;
@@ -37,7 +37,7 @@ item is done or something new is learned; delete what no longer applies.
   at once) with USB drives and a share, and its Favourites / Never played / Collections chips; the
   strip's save state count (Backend::states for the focused game, once per game); choosing a disc
   for a running game (the filter row's places, L1 / R1); how fast Home is drawn with a few thousand
-  games (it sorts the played ones every frame).
+  games (since phase 5 its lists and counts are made once per change of the library, not every frame).
 - The interface revamp, phase 4B (a game's page in bp_library.cpp, the quick menu in bp_quick.cpp):
   checked on the PC only (crawl, shots). Not run on a console. To check there: how long a game's page
   takes to open (it opens the game's own settings once to count them, its patches, cheats and memory
@@ -48,6 +48,18 @@ item is done or something new is learned; delete what no longer applies.
   menu (written to the running game's own settings where a game can have one, as the Settings do;
   Apply changes now for those the game takes at its start); how fast the quick menu is drawn with
   several settings pinned (their rows are made once when it opens, from every page).
+- The interface revamp, phase 5 (polish): checked on the PC only (crawl, shots, inventory, host
+  tests). Not run on a console. What changed: one order of the hints on every screen (bp_draw.cpp
+  hintBar/orderHints); messages (toasts) in the top right corner over the clock; the settings' home
+  cards' two summary lines; corner radii no longer multiplied twice by a skin's roundness; the cards'
+  hairline edge (light skins, Contrast); entrances 0.2 s (0.14 s and fades only with Motion: Less);
+  Home's lists and counts and the settings' id lookups cached; Change disc offers the drive's disc
+  again (a Disc chip, L1 / R1); L3 on a game's own pinned value in the quick menu. On the PC the
+  changed-from-default scan took 75 microseconds on average (470 at most) for 392 rows, every half
+  second. To check there: readability of the toasts over the clock and over a running game; that a
+  toast never hides something one needs (the Disc tab's R1 glyph sits close to it with three tabs);
+  the skin sheets (shots 71-*) against the television; Change disc from an image to the drive's disc
+  and back, and from the drive to an image; L3 in the quick menu on a game's own value.
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.
@@ -113,13 +125,16 @@ item is done or something new is learned; delete what no longer applies.
   the tree now (`settings-text.yaml` is back, made again from the code: the interface revamp's
   phase 1, [`settings-inventory.md`](settings-inventory.md)). b075fe1's boot log in memory overlaps with the
   v1.0.19 log settings; reconcile before restoring either.
-- The interface revamp: phase 1 (the inventory, the no-loss test, `settings-text.yaml`) is in;
-  phase 2 (Crux2's descriptions rewritten in PCSX2's voice, PCSX2's taken word for word) and phase 3
-  (the eight areas on the screen, the interface reading `bp_settings_text.h`) are not. 60 rows' area
-  or section is a guess (`ps5/tools/settings-text.py doubtful`), for the owner. About 18 of today's
-  descriptions (game fixes and a few graphics fixes, copied from PCSX2) name games; phase 2 should
-  word them without. The inventory does not see rows of states its fakes do not make (a typed cheat,
-  saved controller profiles, backups on the drive, multitap ports, a share being changed).
+- The interface revamp: phases 1 to 4 are in (1: the inventory, the no-loss test,
+  `settings-text.yaml`; 2: every setting's words, PCSX2's word for word where it has the setting and
+  in its voice elsewhere; 3: the settings' home, the eight areas, the search and the performance
+  overlay's sizes; 4: Home, the top bar of places, the library's filter row and strip, a game's page,
+  the quick menu), and phase 5's polish. All of it is checked on the PC only (crawl, shots,
+  inventory); nothing of it has run on a console (the items above say what to look at there). 60
+  rows' area or section is a guess (`ps5/tools/settings-text.py doubtful`), for the owner. PCSX2's
+  own descriptions keep the games they name (the owner's decision of 2026-11-15). The inventory does
+  not see rows of states its fakes do not make (a typed cheat, saved controller profiles, backups on
+  the drive, multitap ports, a share being changed).
 - Porpoise ports in progress (networking, input/aim, texture-pack memory cap, steady 30,
   colour-blind filter, trophy pop-ups, launch arguments, recommended settings, backups,
   screenshots): see the Unreleased changelog as they land.

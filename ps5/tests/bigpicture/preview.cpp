@@ -2290,6 +2290,52 @@ struct Harness
 		wait(settle);
 	}
 
+	// A sheet of small pictures (a quarter of the screen each, six to a row): the same screen in
+	// every skin, or in each way of seeing it, side by side.
+	struct Sheet
+	{
+		int cols = 6, cellW = 480, cellH = 270, gap = 8, n = 0;
+		Frame picture{6 * 488 + 8, 6 * 278 + 8};
+	};
+	void cell(Sheet& sheet)
+	{
+		Frame picture(width, height);
+		frame(0, &picture, false);
+		const int col = sheet.n % sheet.cols, row = sheet.n / sheet.cols;
+		sheet.n++;
+		const int x0 = sheet.gap + col * (sheet.cellW + sheet.gap), y0 = sheet.gap + row * (sheet.cellH + sheet.gap);
+		if (y0 + sheet.cellH > sheet.picture.height)
+			return;
+		const int fx = width / sheet.cellW, fy = height / sheet.cellH;
+		for (int y = 0; y < sheet.cellH; y++)
+		{
+			for (int x = 0; x < sheet.cellW; x++)
+			{
+				for (int c = 0; c < 3; c++)
+				{
+					float sum = 0;
+					for (int dy = 0; dy < fy; dy++)
+					{
+						for (int dx = 0; dx < fx; dx++)
+							sum += picture.rgb[(static_cast<size_t>(y * fy + dy) * width + static_cast<size_t>(x * fx + dx)) * 3 + c];
+					}
+					sheet.picture.rgb[(static_cast<size_t>(y0 + y) * sheet.picture.width + static_cast<size_t>(x0 + x)) * 3 + c] = sum / static_cast<float>(fx * fy);
+				}
+			}
+		}
+	}
+	void writeSheet(Sheet& sheet, const char* name)
+	{
+		const int rows = (sheet.n + sheet.cols - 1) / sheet.cols;
+		Frame cut(sheet.picture.width, sheet.gap + rows * (sheet.cellH + sheet.gap));
+		std::copy(sheet.picture.rgb.begin(), sheet.picture.rgb.begin() + static_cast<std::ptrdiff_t>(cut.rgb.size()), cut.rgb.begin());
+		const std::string path = out + "/" + name + ".ppm";
+		if (!writePPM(path, cut))
+			std::fprintf(stderr, "cannot write %s\n", path.c_str());
+		else
+			std::printf("  %s\n", path.c_str());
+	}
+
 	void shot(const char* name)
 	{
 		Frame picture(width, height);
@@ -4007,6 +4053,141 @@ void shots(Harness& h)
 		look(0, 100, 0);
 		b.setString(0, "PS5UI", "Pins", pinsWere);
 		leaveAll();
+
+		// ---- Change disc (the quick menu's) with a disc in a drive: the drive is one of the places
+		// (L1 / R1 and the filter row), whether the game runs from an image or from the drive.
+		b.putDisc(1);
+		h.wait(40);
+		b.start(game("SLUS-29008"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(4);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Disc, "Change disc opens the library to choose one");
+		for (int i = 0; i < 6 && bp::librarySource() != bp::DiscDrive; i++)
+			h.press(P::R1, 20);
+		g_check.expect(bp::librarySource() == bp::DiscDrive, "R1 reaches the disc in the drive as the next disc of a game run from an image");
+		h.shot("70-change-disc-the-drive-as-a-place");
+		h.press(P::R1, 20);
+		g_check.expect(bp::librarySource() != bp::DiscDrive, "and R1 goes on from it, round to the images");
+		leaveAll();
+		b.start(b.drive.games.front(), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(4);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Disc && bp::librarySource() == bp::DiscDrive,
+			"Change disc of a game run from the drive opens on the drive");
+		h.press(P::Up, 20);
+		g_check.expect(bp::libraryChip() >= 0, "Up there reaches the places");
+		h.shot("70b-change-disc-from-the-drive");
+		h.press(P::Down, 10);
+		h.press(P::L1, 20);
+		g_check.expect(bp::librarySource() != bp::DiscDrive, "and L1 goes to another place for an image");
+		leaveAll();
+		b.putDisc(0);
+		h.wait(30);
+
+		// ---- phase 5: each new screen in every skin (a sheet of 36: the skins in their order,
+		// six to a row), and in each way of seeing it (Interface size 70 %, Text size Largest and
+		// Smallest, Colours for colour blindness, High contrast); the special skins whole.
+		{
+			struct Place
+			{
+				const char* name;
+				std::function<void()> open;
+			};
+			const auto library = [&](int viewNumber) {
+				leaveAll();
+				b.setInt(0, "PS5UI", "View", viewNumber);
+				bp::loadOptions();
+				bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+				h.wait(30);
+			};
+			const auto settingsHome = [&] {
+				leaveAll();
+				bp::showLibraryTab(bp::TabHome);
+				h.wait(10);
+				h.press(P::Options, 30);
+			};
+			const std::vector<Place> places = {
+				{"home", [&] { leaveAll(); bp::showLibraryTab(bp::TabHome); h.wait(30); }},
+				{"grid", [&] { library(1); }},
+				{"list", [&] { library(2); }},
+				{"shelves", [&] { library(0); }},
+				{"game-page", [&] { page("SLUS-29001"); }},
+				{"settings-home", settingsHome},
+				{"settings-area", [&] { settingsHome(); bp::settingsFocus("Graphics", "Blending accuracy"); h.wait(20); }},
+				{"settings-search", [&] { settingsHome(); bp::settingsSearchFor("vsync", 0); h.wait(10); h.press(P::Down, 20); }},
+				{"quick-menu", [&] {
+					 leaveAll();
+					 b.start(game("SLUS-29001"), INT_MIN, 0);
+					 h.wait(360);
+					 bp::openQuickMenu();
+					 h.wait(40);
+				 }},
+			};
+			const std::string pinsWere5 = b.getString(0, "PS5UI", "Pins").value_or("");
+			b.setString(0, "PS5UI", "Pins", "EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar");
+			const int special[] = {skinNamed("Carbon"), skinNamed("Brutal"), skinNamed("Clay"), skinNamed("Gloss"), skinNamed("Blueprint"),
+				skinNamed("Contrast"), skinNamed("Pixel")};
+			for (const Place& place : places)
+			{
+				place.open();
+				Harness::Sheet sheet;
+				for (int skin = 0; skin < bp::SkinCount; skin++)
+				{
+					look(skin, 100, 0);
+					h.wait(16);
+					h.cell(sheet);
+					if (std::find(std::begin(special), std::end(special), skin) != std::end(special) &&
+						(std::strcmp(place.name, "home") == 0 || std::strcmp(place.name, "settings-home") == 0 || std::strcmp(place.name, "game-page") == 0 ||
+							std::strcmp(place.name, "quick-menu") == 0))
+					{
+						char name[80];
+						std::snprintf(name, sizeof(name), "71-%s-skin-%02d-%s", place.name, skin, bp::skins[skin].name);
+						h.shot(name);
+					}
+				}
+				char name[64];
+				std::snprintf(name, sizeof(name), "71-%s-every-skin", place.name);
+				h.writeSheet(sheet, name);
+				// The ways of seeing it: 70 %, Largest, Smallest, colour blindness, high contrast.
+				Harness::Sheet seeing;
+				seeing.cols = 3;
+				const auto way = [&](int size, int textSize, bool blind, bool contrast) {
+					b.setBool(0, "PS5UI", "ColourBlind", blind);
+					b.setBool(0, "PS5UI", "HighContrast", contrast);
+					look(0, size, textSize);
+					h.wait(16);
+					h.cell(seeing);
+				};
+				way(100, 0, false, false);
+				way(70, 0, false, false);
+				way(100, 2, false, false);
+				way(100, -2, false, false);
+				way(100, 0, true, false);
+				way(100, 0, false, true);
+				std::snprintf(name, sizeof(name), "72-%s-ways-of-seeing", place.name);
+				h.writeSheet(seeing, name);
+				// (Largest text at 70 %, whole: the tightest the layout gets.)
+				b.setBool(0, "PS5UI", "ColourBlind", false);
+				b.setBool(0, "PS5UI", "HighContrast", false);
+				look(0, 70, 2);
+				h.wait(16);
+				std::snprintf(name, sizeof(name), "73-%s-70-largest", place.name);
+				h.shot(name);
+				look(0, 100, 0);
+			}
+			b.setString(0, "PS5UI", "Pins", pinsWere5);
+			leaveAll();
+			b.setInt(0, "PS5UI", "View", 0);
+			bp::loadOptions();
+		}
 	}
 }
 

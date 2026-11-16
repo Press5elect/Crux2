@@ -503,7 +503,7 @@ pages:
         rows:
           - id: "PS5.USBDrives"
             label: "Search USB Drives"
-            desc: "Shows a USB tab for the games in a \"Crux2\" or \"PS2\" folder on a USB drive."
+            desc: "Shows the games in a \"Crux2\" or \"PS2\" folder on a USB drive in the game list."
             kind: "toggle"
             area: "Games and saves"
             section: "Game List"

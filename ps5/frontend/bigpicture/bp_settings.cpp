@@ -1055,12 +1055,26 @@ void noteChanged(const Option& o)
 
 Item* findItem(const std::string& id)
 {
-	for (Item& it : st.all)
+	// (Asked many times a frame by the home, the quick menu and the search: by an index of the ids,
+	// made again with the rows; the first row of an id is the one, as a search from the top finds.)
+	static std::map<std::string, size_t> index;
+	static int madeFor = -1;
+	static const Item* madeAt = nullptr;
+	static size_t madeSize = 0;
+	if (madeFor != st.builds || madeAt != st.all.data() || madeSize != st.all.size())
 	{
-		if (focusable(it.o) && settingsIdOf(it.o) == id)
-			return &it;
+		madeFor = st.builds;
+		madeAt = st.all.data();
+		madeSize = st.all.size();
+		index.clear();
+		for (size_t i = 0; i < st.all.size(); i++)
+		{
+			if (focusable(st.all[i].o))
+				index.emplace(settingsIdOf(st.all[i].o), i);
+		}
 	}
-	return nullptr;
+	const auto found = index.find(id);
+	return (found == index.end()) ? nullptr : &st.all[found->second];
 }
 
 bool placeOf(const std::string& id, int& area, int& section)
@@ -1365,6 +1379,23 @@ void pinnedActivate(PinnedRow& row)
 		activate(o);
 }
 
+bool pinnedHasOwn(const PinnedRow& row)
+{
+	if (!row.forGame)
+		return false;
+	const Layered layered(row.forGame);
+	const Option& o = row.item.o;
+	return isSetting(o) && o.kind != Option::Bind && layer(o) == Own && hasOwn(o);
+}
+
+void pinnedUseGlobal(PinnedRow& row)
+{
+	if (!pinnedHasOwn(row))
+		return;
+	const Layered layered(row.forGame);
+	reset(row.item.o);
+}
+
 // ---- drawing
 
 Palette palette()
@@ -1399,7 +1430,13 @@ Palette palette()
 void focusRing(ImDrawList* dl, float x, float y, float w, float h, float r)
 {
 	const float off = 5;
-	outline(dl, x - off, y - off, w + 2 * off, h + 2 * off, palette().accent, (r + off) * col::round, 3);
+	outline(dl, x - off, y - off, w + 2 * off, h + 2 * off, palette().accent, r + off, 3);
+}
+
+void cardShape(ImDrawList* dl, float x, float y, float w, float h, ImU32 fill, float r, float a)
+{
+	rect(dl, x, y, w, h, alpha(fill, a), r);
+	outline(dl, x, y, w, h, alpha(palette().line, a), r, 1.5f);
 }
 
 void header(ImDrawList* dl, const char* where, bool levels)
@@ -1424,13 +1461,13 @@ void header(ImDrawList* dl, const char* where, bool levels)
 		for (const std::string& n : names)
 			total += textSize(bold(), 21, n.c_str()).x + 36;
 		const float x0 = right - total;
-		rect(dl, x0 - 4, y - 4 + 4, total + 8, h - 8 + 8, p.card, (h / 2) * col::round);
+		rect(dl, x0 - 4, y - 4 + 4, total + 8, h - 8 + 8, p.card, h / 2);
 		float x = x0;
 		for (size_t i = 0; i < names.size(); i++)
 		{
 			const float w = textSize(bold(), 21, names[i].c_str()).x + 36;
 			if (static_cast<int>(i) == on)
-				rect(dl, x, y + 4, w, h - 8, p.accent, ((h - 8) / 2) * col::round);
+				rect(dl, x, y + 4, w, h - 8, p.accent, (h - 8) / 2);
 			const ImVec2 ts = textSize(bold(), 21, names[i].c_str());
 			text(dl, bold(), 21, x + 18, y + h / 2 - ts.y / 2, static_cast<int>(i) == on ? p.onAccent : p.secondary, names[i].c_str());
 			x += w;
@@ -1450,7 +1487,7 @@ void describe(ImDrawList* dl, const Item& item, float x, float y, float w, float
 {
 	const Palette p = palette();
 	const Option& o = item.o;
-	rect(dl, x, y, w, h, p.card, 16 * col::round);
+	rect(dl, x, y, w, h, p.card, 16);
 	dl->PushClipRect(V(x, y), V(x + w, y + h), true);
 	const float pad = 32, tw = w - 2 * pad;
 	float cy = y + 30;
@@ -1459,7 +1496,7 @@ void describe(ImDrawList* dl, const Item& item, float x, float y, float w, float
 	{
 		const char* tag = levelNames[std::clamp(t->level, 0, 2)];
 		const float tagW = textSize(bold(), 17, tag).x + 20;
-		outline(dl, x + pad, cy, tagW, 28, p.secondary, 14 * col::round, 1.5f);
+		outline(dl, x + pad, cy, tagW, 28, p.secondary, 14, 1.5f);
 		text(dl, bold(), 17, x + pad + 10, cy + 4, p.secondary, tag);
 		cy += 40;
 	}
@@ -1712,7 +1749,7 @@ void areaScreen(ImDrawList* dl)
 			const bool on = (i == st.section);
 			if (on)
 			{
-				rect(dl, sx, y, sw, sh - 8, st.inRows ? p.card : p.raised, 12 * col::round);
+				rect(dl, sx, y, sw, sh - 8, st.inRows ? p.card : p.raised, 12);
 				if (!st.inRows)
 					focusRing(dl, sx, y, sw, sh - 8, 12);
 				else
@@ -1728,7 +1765,7 @@ void areaScreen(ImDrawList* dl)
 	// ---- the rows
 	const float dw = 560, dx = W - 72 - dw;
 	const float rx = sx + sw + 28, rw = dx - 28 - rx;
-	rect(dl, rx, top, rw, bottom - top, p.card, 16 * col::round);
+	rect(dl, rx, top, rw, bottom - top, p.card, 16);
 	const float rowH = 64, headH = 52;
 	std::vector<float> ys;
 	float total = 0, focusY = 0, focusH = rowH;
@@ -1760,7 +1797,7 @@ void areaScreen(ImDrawList* dl)
 	const float y0 = top + 12 - st.scroll;
 	if (st.inRows && !shown.rows.empty())
 	{
-		rect(dl, rx + 12, y0 + st.rowY + 2, rw - 24, focusH - 4, p.raised, 12 * col::round);
+		rect(dl, rx + 12, y0 + st.rowY + 2, rw - 24, focusH - 4, p.raised, 12);
 		focusRing(dl, rx + 12, y0 + st.rowY + 2, rw - 24, focusH - 4, 12);
 	}
 	for (size_t v = 0; v < visible.size(); v++)
@@ -1842,7 +1879,7 @@ void areaScreen(ImDrawList* dl)
 			labelRoom -= tagW + 14;
 			const ImVec2 ls = textSize(bold(), 25, o.label.c_str());
 			const float tagX = rx + 44 + std::min(ls.x, std::max(0.f, labelRoom)) + 14;
-			rect(dl, tagX, cy - 13, tagW, 26, alpha(p.accent, 0.18f), 13 * col::round);
+			rect(dl, tagX, cy - 13, tagW, 26, alpha(p.accent, 0.18f), 13);
 			text(dl, bold(), 15, tagX + 9, cy - 9, p.accent, tag);
 		}
 		const ImU32 labelColour = !can ? p.faint : (o.kind == Option::Info || (follows && !on)) ? p.secondary : p.text;
@@ -1864,7 +1901,7 @@ void areaScreen(ImDrawList* dl)
 			describe(dl, focused, dx, top, dw, bottom - top);
 		else
 		{
-			rect(dl, dx, top, dw, bottom - top, p.card, 16 * col::round);
+			rect(dl, dx, top, dw, bottom - top, p.card, 16);
 			text(dl, bold(), 30, dx + 32, top + 30, p.text, shown.name.c_str(), dw - 64);
 			int settingsCount = 0, changedCount = 0;
 			for (const Item& it : shown.rows)
@@ -1913,13 +1950,13 @@ void areaScreen(ImDrawList* dl)
 				break;
 		}
 		if (hasOwn(o) && o.kind != Option::Bind)
-			hints.push_back({Glyph::L3, "Use Global"});
+			hints.push_back({Glyph::L3, "Use global setting"});
 		if (isSetting(o) || o.kind == Option::Action)
 			hints.push_back({Glyph::Square, pinned(o) ? "Unpin" : "Pin"});
 		hints.push_back({Glyph::Triangle, "Level"});
 	}
 	if (st.gameOpen)
-		hints.push_back({Glyph::TouchPad, st.forGame ? "All Games" : "This Game"});
+		hints.push_back({Glyph::TouchPad, st.forGame ? "All games" : "This game"});
 	hints.push_back({Glyph::Circle, "Back"});
 	hintBar(dl, hints);
 }

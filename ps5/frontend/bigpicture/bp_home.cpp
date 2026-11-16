@@ -107,7 +107,7 @@ std::string joined(const std::vector<std::string>& parts)
 
 void card(ImDrawList* dl, float x, float y, float w, float h, ImU32 c)
 {
-	rect(dl, x, y, w, h, c, 22);
+	settings::cardShape(dl, x, y, w, h, c, 16);
 }
 
 // A pill button; its width. `main`: the accent's.
@@ -211,7 +211,7 @@ void drawRightNow(ImDrawList* dl, float x, float y, float w, float h, bool focus
 	const Palette p = palette();
 	card(dl, x, y, w, h, focus ? p.raised : p.card);
 	if (focus)
-		focusRing(dl, x, y, w, h, 22);
+		focusRing(dl, x, y, w, h, 16);
 	text(dl, bold(), 20, x + 36, y + 34, p.secondary, "RIGHT NOW");
 	const std::vector<Fact> facts = rightNow();
 	const float rowH = 56;
@@ -363,7 +363,7 @@ void drawHero(ImDrawList* dl, const HomeGame* hero, float x, float y, float w, f
 			hs.heroPath = g.path;
 			hs.heroFade = (motion() == MotionOff) ? 1.f : 0.f;
 		}
-		hs.heroFade = approach(hs.heroFade, 1, 6);
+		hs.heroFade = approach(hs.heroFade, 1, 12);
 		Texture art = options().heroPlay ? be->picture(g, 1) : Texture();
 		if (!art.valid())
 			art = be->picture(g, 0);
@@ -418,7 +418,7 @@ void drawRow(ImDrawList* dl, const std::vector<HomeGame>& row, bool played, floa
 		if (x > W || x + cw < 0)
 			continue;
 		const bool on = (hs.row == 1 && static_cast<int>(i) == hs.cover);
-		drawGameCover(dl, *row[i].info, x, top, cw, ch, 14, on ? 1.f : 0.f);
+		drawHomeCover(dl, row[i], x, top, cw, ch, 14, on ? 1.f : 0.f);
 		if (on)
 			focusRing(dl, x, top, cw, ch, 14);
 		textIn(dl, bold(), 21, x, top + ch + 14, on ? p.text : p.secondary, row[i].title, cw, on);
@@ -471,7 +471,8 @@ void homeFrame(ImDrawList* dl)
 			open = savedState(g, state) ? "Resume" : "Play";
 	}
 	std::vector<Hint> hints{{Glyph::Circle, "Quit"}, {Glyph::L1R1, "Sections"}, {Glyph::Options, "Settings"}};
-	if (hero != nullptr || !row.empty())
+	// (Square and Triangle act on the game in focus: the hero's, or a cover of the row.)
+	if ((hs.row == 0 && hero != nullptr) || (hs.row == 1 && !row.empty()))
 	{
 		hints.push_back({Glyph::Square, "Game settings"});
 		hints.push_back({Glyph::Triangle, "Game page"});

@@ -1614,6 +1614,7 @@ void hideOrList(Game& g)
 	if (info.hidden)
 	{
 		g.info.hidden = false;
+		libraryGeneration++;
 		be->setHidden(info, false);
 		lib.details = false;
 		toast("It is listed again.", 3.f);
@@ -1898,7 +1899,7 @@ void detailsInput(Game& g, bool selectDisc)
 void factCard(ImDrawList* dl, const settings::Palette& p, float x, float y, float w, float h, float t, const char* what, const std::string& fact,
 	const std::string& note)
 {
-	rect(dl, x, y, w, h, alpha(p.card, t), 16 * col::round);
+	settings::cardShape(dl, x, y, w, h, p.card, 16, t);
 	text(dl, bold(), 17, x + 28, y + 26, alpha(p.secondary, t), what);
 	textIn(dl, bold(), 27, x + 28, y + 60, alpha(p.text, t), fact, w - 56, false);
 	textIn(dl, regular(), 20, x + 28, y + h - 48, alpha(p.secondary, t), note, w - 56, false);
@@ -1908,7 +1909,7 @@ void factCard(ImDrawList* dl, const settings::Palette& p, float x, float y, floa
 void tabRow(ImDrawList* dl, const settings::Palette& p, float x, float y, float w, float h, float t, bool on, const char* icon,
 	const std::string& name, const std::string& right)
 {
-	rect(dl, x, y, w, h, alpha(on ? p.raised : p.card, t), 14 * col::round);
+	settings::cardShape(dl, x, y, w, h, on ? p.raised : p.card, 14, t);
 	if (on)
 		settings::focusRing(dl, x, y, w, h, 14);
 	text(dl, regular(), 24, x + 26, y + h / 2 - 14, alpha(on ? p.accent : p.secondary, t), icon);
@@ -1945,7 +1946,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 	const GameFacts& f = det.facts;
 	const float top = 96, bottom = H - 72;
 	dl->AddRectFilled(V(0, top), V(W, bottom), alpha(p.ground, t));
-	const float oy = (1 - t) * 40;
+	const float oy = (motion() == MotionFull) ? (1 - t) * 40 : 0.f;
 	const float x0 = 72, y0 = 124 + oy;
 	const float limit = bottom - 24 + oy;
 
@@ -1960,7 +1961,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 		// The picture the focused state was saved with.
 		const StateInfo& state = det.states[static_cast<size_t>(std::clamp(det.row, 0, static_cast<int>(det.states.size()) - 1))];
 		const Texture picture = be->statePicture(state);
-		rect(dl, x0, y0, cw, ch, alpha(p.card, t), 16 * col::round);
+		settings::cardShape(dl, x0, y0, cw, ch, p.card, 16, t);
 		if (picture.valid())
 			imageFit(dl, picture, x0, y0, cw, ch, 8, alpha(col::white, t));
 		else
@@ -1982,7 +1983,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 			drawCover(dl, g, x0, y0, cw, ch, 16, 1);
 		else
 		{
-			rect(dl, x0, y0, cw, ch, alpha(p.card, t), 16 * col::round);
+			settings::cardShape(dl, x0, y0, cw, ch, p.card, 16, t);
 			imageFit(dl, shots[det.picture], x0, y0, cw, ch, 8, alpha(col::white, t));
 			const char* const what = (det.picture == 1) ? "Its title screen" : "In play";
 			const ImVec2 ws = textSize(bold(), 18, what);
@@ -2020,7 +2021,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 								buttons[i] == ButtonResume ? ICON_FA_PLAY "   Resume" :
 								buttons.size() == 1        ? ICON_FA_PLAY "   Play" :
 															 "Start from the beginning";
-			rect(dl, x0, by, cw, bh, alpha(primary ? p.accent : p.raised, t), (bh / 2) * col::round);
+			rect(dl, x0, by, cw, bh, alpha(primary ? p.accent : p.raised, t), bh / 2);
 			if (on)
 				settings::focusRing(dl, x0, by, cw, bh, bh / 2);
 			const float size = primary ? 27 : 24;
@@ -2086,7 +2087,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 		}
 		glyph(dl, Glyph::R1, x + 10, tabY + tabH / 2 - 2, 30);
 		rect(dl, tx, tabY + tabH, tw, 1, alpha(p.line, t));
-		det.tabAt = (motion() == MotionOff || det.tabAt <= 0) ? onX : approach(det.tabAt, onX, 22);
+		det.tabAt = (motion() != MotionFull || det.tabAt <= 0) ? onX : approach(det.tabAt, onX, 22);
 		rect(dl, det.tabAt, tabY + tabH - 3, onW, 4, alpha(p.accent, t), 2);
 	}
 	const float cy = tabY + tabH + 28;
@@ -2211,7 +2212,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 					continue;
 				const bool on = det.side == 1 && i == det.row;
 				const StateInfo& state = det.states[static_cast<size_t>(i)];
-				rect(dl, tx, ry, tw, rowH - 10, alpha(on ? p.raised : p.card, t), 14 * col::round);
+				rect(dl, tx, ry, tw, rowH - 10, alpha(on ? p.raised : p.card, t), 14);
 				if (on)
 					settings::focusRing(dl, tx, ry, tw, rowH - 10, 14);
 				const std::string when = formatWhen(state.when);
@@ -3980,7 +3981,12 @@ std::vector<Chip> chipsNow(bool selectDisc)
 		place("USB", Usb);
 	place("Share", Network);
 	if (selectDisc)
+	{
+		// (The disc in a drive can be the next disc of the running game, as can an image.)
+		if (!drive.games.empty())
+			place("Disc", DiscDrive);
 		return chips;
+	}
 	chips.push_back({"Favourites", ChipFavourites, 0, nar.show == ShowFavourites});
 	chips.push_back({"Never played", ChipNever, 0, nar.played == 1});
 	chips.push_back({nar.collection.empty() ? std::string("Collections") : nar.collection, ChipCollections, 0, !nar.collection.empty()});
@@ -4034,14 +4040,45 @@ float chipWidth(const Chip& chip)
 	return std::min(textSize(bold(), CHIP_TYPE, chip.name.c_str()).x, 420.f) + 44;
 }
 
+// At the row's right: how many games, in which order, and the view.
+std::string chipsCount(bool selectDisc)
+{
+	static const char* const orderWords[] = {"by name", "last played first", "most played first", "largest first", "newest file first"};
+	const size_t count = lib.flat.size(); // (made for every view)
+	return std::to_string(count) + (count == 1 ? " game" : " games") +
+		   (selectDisc ? std::string() : std::string("  \xc2\xb7  ") + orderWords[std::clamp(options().sort, 0, 4)]);
+}
+
+// Where the chips have to end: left of the count and the view.
+float chipsRight(bool selectDisc)
+{
+	float right = W - 64;
+	if (!selectDisc)
+		right -= textSize(bold(), CHIP_TYPE, viewNames[view()]).x + 44 + 20;
+	return right - textSize(regular(), CHIP_TYPE, chipsCount(selectDisc).c_str()).x;
+}
+
+// How many of the chips are drawn (the rest has no room): only those can have the focus.
+size_t chipsThatFit(const std::vector<Chip>& chips, bool selectDisc)
+{
+	const float right = chipsRight(selectDisc);
+	float x = 64;
+	for (size_t i = 0; i < chips.size(); i++)
+	{
+		if (right - 28 - x < 90)
+			return i;
+		x += std::min(chipWidth(chips[i]), right - 28 - x) + 12;
+		if (chips[i].kind == ChipPlace && i + 1 < chips.size() && chips[i + 1].kind != ChipPlace)
+			x += 20;
+	}
+	return chips.size();
+}
+
 void drawChips(ImDrawList* dl, const std::vector<Chip>& chips, bool selectDisc)
 {
 	const settings::Palette p = settings::palette();
 	// At the right: how many games, in which order, and the view.
-	static const char* const orderWords[] = {"by name", "last played first", "most played first", "largest first", "newest file first"};
-	const size_t count = lib.flat.size(); // (made for every view)
-	const std::string games = std::to_string(count) + (count == 1 ? " game" : " games") +
-							  (selectDisc ? std::string() : std::string("  \xc2\xb7  ") + orderWords[std::clamp(options().sort, 0, 4)]);
+	const std::string games = chipsCount(selectDisc);
 	const char* const layout = viewNames[view()];
 	const float lw = textSize(bold(), CHIP_TYPE, layout).x + 44;
 	float right = W - 64;
@@ -4236,54 +4273,87 @@ bool standsAlone(const Game& g)
 }
 } // namespace
 
-std::vector<HomeGame> recentGames(int most)
+namespace
 {
-	std::vector<size_t> played;
+// What Home asks of the library each frame, made again only when the games change (refreshGames,
+// the disc sets, a favourite or a hidden game: libraryGeneration moves) or the sets are grouped
+// otherwise: the games played, the newest, and their number on each place.
+struct HomeLists
+{
+	size_t generation = 0;
+	bool grouped = false;
+	std::vector<size_t> played, newest;
+	int count[SourceCount + 1] = {};
+};
+
+const HomeLists& homeLists()
+{
+	static HomeLists h;
+	const bool grouped = grouping(false);
+	if (h.generation == libraryGeneration && h.grouped == grouped)
+		return h;
+	h.generation = libraryGeneration;
+	h.grouped = grouped;
+	h.played.clear();
+	h.newest.clear();
+	for (int& c : h.count)
+		c = 0;
 	for (size_t i = 0; i < games.size(); i++)
 	{
-		if (standsAlone(games[i]) && games[i].info.lastPlayed > 0)
-			played.push_back(i);
+		if (!standsAlone(games[i]))
+			continue;
+		h.newest.push_back(i);
+		if (games[i].info.lastPlayed > 0)
+			h.played.push_back(i);
+		const int source = games[i].info.source;
+		if (source >= 0 && source < SourceCount)
+			h.count[source]++;
+		h.count[SourceCount]++;
 	}
-	std::sort(played.begin(), played.end(), [](size_t a, size_t b) {
+	std::sort(h.played.begin(), h.played.end(), [](size_t a, size_t b) {
 		return games[a].info.lastPlayed != games[b].info.lastPlayed ? games[a].info.lastPlayed > games[b].info.lastPlayed : byTitle(a, b);
 	});
+	std::sort(h.newest.begin(), h.newest.end(), [](size_t a, size_t b) {
+		return games[a].info.added != games[b].info.added ? games[a].info.added > games[b].info.added : byTitle(a, b);
+	});
+	return h;
+}
+
+std::vector<HomeGame> firstOf(const std::vector<size_t>& which, int most)
+{
 	std::vector<HomeGame> out;
-	for (size_t i : played)
+	for (size_t i : which)
 	{
-		if (static_cast<int>(out.size()) >= most)
+		if (static_cast<int>(out.size()) >= most || i >= games.size())
 			break;
-		out.push_back({&games[i].info, games[i].title});
+		out.push_back({&games[i].info, games[i].title, i});
 	}
 	return out;
+}
+} // namespace
+
+void drawHomeCover(ImDrawList* dl, const HomeGame& game, float x, float y, float w, float h, float r, float lift)
+{
+	if (game.index < games.size() && &games[game.index].info == game.info)
+		drawCover(dl, games[game.index], x, y, w, h, r, lift);
+	else
+		drawGameCover(dl, *game.info, x, y, w, h, r, lift);
+}
+
+std::vector<HomeGame> recentGames(int most)
+{
+	return firstOf(homeLists().played, most);
 }
 
 std::vector<HomeGame> newestGames(int most)
 {
-	std::vector<size_t> all;
-	for (size_t i = 0; i < games.size(); i++)
-	{
-		if (standsAlone(games[i]))
-			all.push_back(i);
-	}
-	std::sort(all.begin(), all.end(), [](size_t a, size_t b) {
-		return games[a].info.added != games[b].info.added ? games[a].info.added > games[b].info.added : byTitle(a, b);
-	});
-	std::vector<HomeGame> out;
-	for (size_t i : all)
-	{
-		if (static_cast<int>(out.size()) >= most)
-			break;
-		out.push_back({&games[i].info, games[i].title});
-	}
-	return out;
+	return firstOf(homeLists().newest, most);
 }
 
 int libraryCount(int source)
 {
-	int n = 0;
-	for (const Game& g : games)
-		n += (standsAlone(g) && (source < 0 || g.info.source == source)) ? 1 : 0;
-	return n;
+	const HomeLists& h = homeLists();
+	return (source < 0 || source >= SourceCount) ? h.count[SourceCount] : h.count[source];
 }
 
 void goToGame(const GameInfo& game, bool page)
@@ -4609,8 +4679,10 @@ void libraryScreen(bool selectDisc)
 	// The details are of one game: gone from under the focus (the list was made again), they close.
 	if (lib.details && (focused == nullptr || focused->info.path != det.path))
 		lib.details = false;
-	// The filter row (not on the Disc tab, which is one disc).
-	std::vector<Chip> chips = (lib.source != DiscDrive) ? chipsNow(selectDisc) : std::vector<Chip>();
+	// The filter row (not on the Disc tab, which is one disc; while a disc is chosen for the running
+	// game, the places, the drive's among them). Only the chips that are drawn can have the focus.
+	std::vector<Chip> chips = (lib.source != DiscDrive || selectDisc) ? chipsNow(selectDisc) : std::vector<Chip>();
+	chips.resize(chipsThatFit(chips, selectDisc));
 	if (chipFocus >= static_cast<int>(chips.size()))
 		chipFocus = static_cast<int>(chips.size()) - 1;
 	if (lib.details)

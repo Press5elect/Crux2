@@ -4347,7 +4347,7 @@ public:
 		{
 			rows.push_back(Heading("WHERE GAMES ARE"));
 			rows.push_back(Toggle("USB drives",
-				"Shows a USB tab for games in a folder named Crux2 or PS2 on a USB drive.", "PS5",
+				"Shows the games in a \"Crux2\" or \"PS2\" folder on a USB drive in the game list.", "PS5",
 				"USBDrives", true, A | bp::Option::Restart));
 			rows.push_back(Toggle("Disc drives",
 				"Checks the console's disc drive and USB DVD drives for PS2 discs and shows them on their own tab. USB DVD "

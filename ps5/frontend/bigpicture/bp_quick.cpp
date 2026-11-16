@@ -674,7 +674,7 @@ void quickScreen()
 		qm.pinnedFor.clear();
 		qm.patchesFor.clear();
 	}
-	qm.open = approach(qm.open, 1, 14);
+	qm.open = approach(qm.open, 1, 18);
 	const float t = qm.open;
 	refreshStates(running);
 
@@ -1147,6 +1147,12 @@ void quickScreen()
 					settings::pinnedActivate(row);
 					pinChanged = true;
 				}
+				// L3: the game's own value gone, the global setting used again (as in the settings).
+				if (in.l3 && settings::pinnedHasOwn(row))
+				{
+					settings::pinnedUseGlobal(row);
+					pinChanged = true;
+				}
 				if (in.r1 && n > 0)
 					qm.zone = 2;
 				break;
@@ -1210,7 +1216,7 @@ void quickScreen()
 	// More, the hints
 	const settings::Palette p = settings::palette();
 	dl->AddRectFilled(V(0, 0), V(W, H), alpha(p.ground, 0.86f * t));
-	const float slide = (1 - t) * 60;
+	const float slide = (motion() == MotionFull) ? (1 - t) * 60 : 0.f;
 	const float m = 60, x0 = m, fullW = W - 2 * m;
 	const int rowsShown = std::clamp(4 + static_cast<int>((H - 1080) / 66), 4, 8);
 	const float rowH = 66, headH = 54;
@@ -1268,8 +1274,8 @@ void quickScreen()
 		const float cx = x0 + fullW - cw, cy = 40;
 		if (cy + chh <= headY - 20)
 		{
-			rect(dl, cx, cy, cw, chh, alpha(p.card, 0.98f * t), 16 * col::round);
-			rect(dl, cx + 16, cy + 16, iw, ih, alpha(p.raised, t), 10 * col::round);
+			settings::cardShape(dl, cx, cy, cw, chh, p.card, 16, 0.98f * t);
+			rect(dl, cx + 16, cy + 16, iw, ih, alpha(p.raised, t), 10);
 			if (of != nullptr)
 			{
 				const Texture picture = be->statePicture(*of);
@@ -1301,7 +1307,7 @@ void quickScreen()
 			const QuickItem& it = *tiles[static_cast<size_t>(i)];
 			const float x = x0 + i * (tw + gap);
 			const bool on = qm.zone == 0 && i == qm.tile && !qm.edit;
-			rect(dl, x, tileY, tw, tileH, alpha(on ? p.accent : p.card, t), 16 * col::round);
+			settings::cardShape(dl, x, tileY, tw, tileH, on ? p.accent : p.card, 16, t);
 			if (on)
 				settings::focusRing(dl, x, tileY, tw, tileH, 16);
 			const ImU32 c = on ? p.onAccent : it.enabled ? p.text : p.faint;
@@ -1314,7 +1320,7 @@ void quickScreen()
 	// The two panels: the pinned settings, and More.
 	const float pw = (fullW - 18) / 2;
 	const auto panel = [&](float x, const char* title, const char* aside) {
-		rect(dl, x, panelY, pw, panelH, alpha(p.card, 0.98f * t), 16 * col::round);
+		settings::cardShape(dl, x, panelY, pw, panelH, p.card, 16, 0.98f * t);
 		text(dl, bold(), 17, x + 26, panelY + 20, alpha(p.secondary, t), title);
 		if (aside != nullptr && aside[0] != '\0')
 		{
@@ -1350,6 +1356,8 @@ void quickScreen()
 				aside = std::string(qm.pinned[static_cast<size_t>(qm.pin)].forGame && !(o.flags & Option::Front) ? "This game" : "All games") +
 						"  \xc2\xb7  " + settings::takesEffect(o);
 			}
+			else if (std::any_of(qm.pinned.begin(), qm.pinned.end(), [](const settings::PinnedRow& row) { return row.forGame; }))
+				aside = "Changes apply to this game";
 			panel(x, "YOUR PINNED SETTINGS", aside.c_str());
 			if (pinsCount == 0)
 			{
@@ -1366,7 +1374,7 @@ void quickScreen()
 				const bool on = qm.zone == 1 && i == qm.pin;
 				if (on)
 				{
-					rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12 * col::round);
+					rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12);
 					settings::focusRing(dl, x + 10, ry, pw - 20, rowH - 6, 12);
 				}
 				const bool can = settings::pinnedUsable(row);
@@ -1394,7 +1402,7 @@ void quickScreen()
 			const float cyRow = ry + (rowH - 6) / 2;
 			if (on)
 			{
-				rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12 * col::round);
+				rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12);
 				settings::focusRing(dl, x + 10, ry, pw - 20, rowH - 6, 12);
 			}
 			// (While the menu is edited, an entry that cannot be chosen now is not shown fainter.)
@@ -1440,6 +1448,8 @@ void quickScreen()
 				hints.push_back({Glyph::DPadLR, "Change"});
 				if (pinsCount > 0 && qm.pinned[static_cast<size_t>(qm.pin)].item.o.kind == Option::Action)
 					hints.back() = {Glyph::Cross, "Run"};
+				if (pinsCount > 0 && settings::pinnedHasOwn(qm.pinned[static_cast<size_t>(qm.pin)]))
+					hints.push_back({Glyph::L3, "Use global setting"});
 				if (n > 0)
 					hints.push_back({Glyph::R1, "More"});
 			}
@@ -1455,6 +1465,7 @@ void quickScreen()
 			hints.push_back({Glyph::Triangle, "Edit this menu"});
 			hints.push_back({Glyph::Circle, "Resume"});
 		}
+		orderHints(hints);
 		const Layer words = beginLayer(dl);
 		float x = x0 + fullW;
 		for (auto it = hints.rbegin(); it != hints.rend(); ++it)

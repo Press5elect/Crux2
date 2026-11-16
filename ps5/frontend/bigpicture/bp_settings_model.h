@@ -147,6 +147,9 @@ struct Palette
 Palette palette();
 /// The 3-unit focus outline, a little outside the shape.
 void focusRing(ImDrawList* dl, float x, float y, float w, float h, float r);
+/// A card of the new screens: its ground and the skin's hairline round it (what keeps a card apart
+/// from the page on the light skins and on Contrast, whose cards are the page's colour).
+void cardShape(ImDrawList* dl, float x, float y, float w, float h, ImU32 fill, float r, float a = 1.f);
 /// The settings' top bar under the title's: the breadcrumb, the switch of all games and the game,
 /// the level switch (levels: whether to show it).
 void header(ImDrawList* dl, const char* where, bool levels);
@@ -178,5 +181,9 @@ bool pinnedChanged(const PinnedRow& row);
 bool pinnedUsable(const PinnedRow& row);
 void pinnedChange(PinnedRow& row, int dir, int repeats);
 void pinnedActivate(PinnedRow& row);
+/// Whether the row is the game's own value (forGame, and the game has one); L3 takes it away, as in
+/// the settings (Use Global Setting).
+bool pinnedHasOwn(const PinnedRow& row);
+void pinnedUseGlobal(PinnedRow& row);
 
 } // namespace bp::settings
