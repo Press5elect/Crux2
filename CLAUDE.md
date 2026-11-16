@@ -26,6 +26,8 @@ all documentation is [`docs/README.md`](docs/README.md).
    `SHA256SUMS`; notes in `docs/releases/` in the existing style ([`docs/dev/releasing.md`](docs/dev/releasing.md)).
 7. **Untestable behaviour changes go behind default-off settings.** Say plainly what was and wasn't
    tested on a console.
+8. **The top bar holds places only** (Home, Library, Disc): Settings is the Options button, storage
+   is a library filter, tools (texture packs) live in Settings, the game page and the library.
 
 ## Commands
 

@@ -39,6 +39,11 @@ These are the owner's standing rules. They hold for every session and every agen
 7. **Behaviour-changing features that cannot be verified without a console go behind a setting
    that is off by default.** Say plainly what was and was not tested on a console, in the commit,
    the changelog and the notes.
+8. **The interface's top bar holds places, not tools** (the owner's decision, 2026-11-16): Home,
+   Library, and Disc while a disc is in. Settings is the Options button, everywhere, so it is no
+   tab. Storage (console, USB, the share) is a filter in the library, never a tab; tools such as
+   the texture pack manager are reached from Settings, a game's page and the library, never from
+   the top bar. Keep like things with like, and don't give one thing two doors that look alike.
 
 ## The loop for a change
 
