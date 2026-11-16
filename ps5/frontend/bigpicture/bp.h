@@ -451,6 +451,10 @@ public:
 	virtual void makeImage(const GameInfo& game) {}
 	/// An image of a disc is being made.
 	virtual bool imageBusy() { return false; }
+	/// A screenshot of the running game's picture, without the menus over it, as the hotkey "Save
+	/// Screenshot" takes one (the quick menu's tile); what came of it is said in a toast. False when
+	/// there is no such thing here.
+	virtual bool screenshot() { return false; }
 };
 
 /// The interface's sounds (Backend::cue).

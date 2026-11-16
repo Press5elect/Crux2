@@ -450,7 +450,10 @@ void loadOptions()
 	if (be != nullptr)
 	{
 		o.view = std::clamp(be->getInt(Shared, UI, "View").value_or(o.view), 0, 9);
-		o.source = std::clamp(be->getInt(Shared, UI, "Source").value_or(o.source), 0, static_cast<int>(Network));
+		// (SourceCount: every place at once, the library's "All".)
+		o.source = std::clamp(be->getInt(Shared, UI, "Source").value_or(o.source), 0, static_cast<int>(SourceCount));
+		if (o.source == DiscDrive)
+			o.source = Internal;
 		o.groupDiscs = be->getBool(Shared, UI, "GroupDiscs").value_or(o.groupDiscs);
 		o.splash = be->getBool(Shared, UI, "Splash").value_or(o.splash);
 		// ("Look", not the "Skin" of the builds before Crux: their numbers named other skins.)
@@ -1450,16 +1453,13 @@ void endScreen()
 
 // --------------------------------------------------------------- top bar
 
-// The tabs, left to right; USB only while USB drives are on in the settings, Disc only while a
-// disc is in a disc drive (the console's own or a USB one).
+// The tabs, left to right; Disc only while a disc is in a disc drive (the console's own or a USB
+// one). (Where the games are, the console, USB and the share, is the library's filter row.)
 std::vector<TopTab> topTabs()
 {
-	std::vector<TopTab> tabs{{Internal, ICON_FA_HARD_DRIVE, "Internal"}};
-	if (be != nullptr && be->usbWanted())
-		tabs.push_back({Usb, ICON_FA_PLUG, "USB"});
-	tabs.push_back({Network, ICON_FA_NETWORK_WIRED, "Network"});
+	std::vector<TopTab> tabs{{TabHome, ICON_FA_HOUSE, "Home"}, {TabLibrary, ICON_FA_TABLE_CELLS_LARGE, "Library"}};
 	if (discNow().present)
-		tabs.push_back({DiscDrive, ICON_FA_COMPACT_DISC, "Disc"});
+		tabs.push_back({TabDisc, ICON_FA_COMPACT_DISC, "Disc"});
 	return tabs;
 }
 
@@ -1642,7 +1642,7 @@ void topBar(ImDrawList* dl, int active_tab, bool inGame, Reach reach)
 		const bool on = (active_tab == tabs[i].id);
 		const bool reachable = on || reach == Reach::All;
 		const ImU32 colour = on ? col::onAccent : reachable ? col::dim : col::faint;
-		if (tabs[i].id == DiscDrive)
+		if (tabs[i].id == TabDisc)
 		{
 			// The disc itself, turning, where the others have an icon.
 			const float iconWidth = textSize(bold(), 26, tabs[i].icon).x;

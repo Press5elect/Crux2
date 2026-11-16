@@ -158,4 +158,25 @@ void searchScreen(ImDrawList* dl);
 void areaScreen(ImDrawList* dl);
 void openSearch(View from);
 
+// ---- the pinned settings outside the settings: the quick menu's (bp_quick.cpp)
+/// A pinned row there: of the running game's own settings where a game can have one of its own
+/// (forGame), else of the settings of all games.
+struct PinnedRow
+{
+	Item item;
+	bool forGame = false;
+};
+/// The rows [PS5UI] Pins names, in its order, at every level: made for `game` (its own settings open,
+/// Backend::openGame) where they can be, else for all games; with no game, all for all games. Made
+/// anew at each call (the caller keeps them); what the settings' screens have is left as it was.
+std::vector<PinnedRow> pinnedRows(const GameInfo* game);
+/// Its value in words, whether it is changed (the game's own value; from its default for all games),
+/// whether it can be changed now, and left / right and Cross on it: as the settings do them, in the
+/// layer the row is of (Cross goes to the next choice, round, where the settings would ask in a list).
+std::string pinnedValue(const PinnedRow& row);
+bool pinnedChanged(const PinnedRow& row);
+bool pinnedUsable(const PinnedRow& row);
+void pinnedChange(PinnedRow& row, int dir, int repeats);
+void pinnedActivate(PinnedRow& row);
+
 } // namespace bp::settings

@@ -80,6 +80,7 @@ set(PS5PX_FRONTEND_SOURCES
 	# and their Backend over PCSX2, which is also PCSX2's FullscreenUI on the console.
 	bigpicture/bp_draw.cpp
 	bigpicture/bp_library.cpp
+	bigpicture/bp_home.cpp
 	bigpicture/bp_options.cpp
 	bigpicture/bp_pcsx2.cpp
 	bigpicture/bp_care.cpp

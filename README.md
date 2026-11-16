@@ -128,9 +128,17 @@ started), and *Add a game folder* adds game folders anywhere ([Where the games a
 ## The interface
 
 PCSX2's own Big Picture interface is not in this build. In its place is the front end written
-for PSFlyCast, made over for a PlayStation 2 emulator: a library with a tab for each place games
-come from (**Internal**, **USB**, **Network**, and **Disc** when a disc is in a drive), a game's
-details with its saved states, a loading screen with the progress of a disc image being read, a
+for PSFlyCast, made over for a PlayStation 2 emulator. The top bar's tabs (L1 / R1) are **Home**
+(the first screen after the start-up: the game played last with **Resume**, which starts it from
+its newest saved state, and **Game page**; what goes on right now, such as a texture pack being
+downloaded, which Cross there opens the texture pack manager on, or a disc in a drive; the games
+played lately), **Library** and **Disc** (when a disc is in a drive). **Options** opens the
+settings from every screen. The library has a filter
+row under the bar (Up from the first row of games reaches it): **All**, **Console**, **USB** (when
+USB drives are on), **Share**, **Favourites**, **Never played** and **Collections**, and at its
+right the number of games, their order and the view; the views without the game's details show
+them in a strip at the bottom. There is a game's
+page with its tabs (its saved states, its own settings, its patches and cheats), a loading screen with the progress of a disc image being read, a
 quick menu over the paused game, and one settings screen that serves every game and, opened from a
 game, that game alone (see **The settings** below). The name in the top bar is drawn by the
 interface: C, R, U, the mark, 2.
@@ -171,15 +179,22 @@ on the shelf.
   title folder.
 - **Collection**: only the games of one of your collections; renaming and deleting them is
   here too.
-- **View**, **A game at random** (it opens that game's details), the scan for new games, and the
+- **View**, **A game at random** (it opens that game's page), the scan for new games, and the
   PlayStation 2 menu.
 
 What is set shows as a chip at the top right; **Circle** shows all games again.
 
-**In a game's details** (Triangle): **L1** makes it a favourite (a star on its cover, and a
-shelf of its own) and **R1** hides it from the library after asking; Show > Hidden games brings
-the hidden ones up, where R1 lists a game again. **Up and down** put the game's title screen or
-a picture of it being played in the cover's place, where it has them. **More** has:
+**A game's page** (Triangle) has its cover with **Resume** (from the state it was closed with, or
+its newest saved state) and **Start from the beginning** under it (**Play** for a game with no
+state), its name with what is known of it (region, serial, how well it runs, the time played, when
+it was last played), and tabs, **L1** / **R1**: **Overview** (where you left off, how many of its
+own settings differ from the global ones, its memory card, its patches and cheats on, its texture
+pack, its file, and what it is, as the Disc tab says it), **Save states** (start from one with
+Cross, delete one with Triangle; the picture each was saved with is in the cover's place), **Its
+settings**, **Patches and cheats** and **Texture packs** (each opens that game's page of the
+settings, or the texture pack manager on it). **Left** and **right** go between the cover's buttons
+and the tab's rows; **L2** / **R2** put the game's title screen or a picture of it being played in
+the cover's place, where it has them; **Circle** goes back. **More** (Square) has:
 
 - **Start with...**: the game straight away, or the console's own start-up first.
 - **Rename**: another title for the lists, typed on the keyboard (PCSX2's own custom title);
@@ -189,6 +204,12 @@ a picture of it being played in the cover's place, where it has them. **More** h
   the settings; a game is known by its serial, so it stays in its collections when its file
   moves to another drive.
 - **Fetch its pictures**: looks for this game's title screen and picture of play again.
+- **A favourite** (a star on its cover, and a shelf of its own) or not any more; **Hide it** from
+  the library, after asking (Show > Hidden games brings the hidden ones up, where More > **List it
+  again** lists a game again).
+- **The next disc** of a game of several discs, **Make an image of the disc** for the disc in a
+  drive, and, for a game closed with a state, **Delete the state it was closed with, and start from
+  the beginning**.
 
 Favourites and custom titles are PCSX2's own (its game list keeps them); hidden games,
 collections and quick views are kept with the settings.
@@ -196,7 +217,7 @@ collections and quick views are kept with the settings.
 **The games' pictures** come from libretro's collection of thumbnails, by the game's name, as
 the covers do: after each scan for every PlayStation 2 game that has none yet (Settings > Game
 List > "Fetch game pictures automatically"), or at once with Settings > Game List > "Fetch the
-games' pictures". They show in a game's details, behind the title in the shelves view ("A picture
+games' pictures". They show on a game's page, behind the title in the shelves view ("A picture
 of play behind the shelves"), and behind every screen with the background "The game's picture". A
 game the collection has nothing for is remembered and not asked about again until you ask. Covers
 and pictures are downloaded three at a time, those on the screen first (*new*).
@@ -234,7 +255,7 @@ Elsewhere in this guide, "Settings > Graphics" and the like name the section a s
 Picture > Graphics), and some settings are named as they were called before they took PCSX2's names:
 the search finds any of them by a word of its name or description.
 
-**A game's own settings** (Details > Options, or Game options in the quick menu) are the same
+**A game's own settings** (Its settings on a game's page, or Game settings in the quick menu) are the same
 screens for that game, opening on Games and saves, whose first section is the game itself (its
 serial, its file, what the database recommends, clearing its settings). A setting the game does not
 have uses the global setting and is shown fainter; changing it gives the game a value of its own,
@@ -308,14 +329,16 @@ The bar at the bottom of each screen names what the buttons do there.
 | | DualSense |
 |---|---|
 | Move | D-pad or left stick |
-| The tab before / after (Internal, USB, Network, Disc) | **L1** / **R1** |
+| The tab before / after (Home, Library, Disc) | **L1** / **R1** |
+| The filter row (All, Console, USB, Share, Favourites, Never played, Collections) | **up** from the first row, then **left** / **right** and **Cross**; **down** or **Circle** back |
 | The previous / next letter (hold to keep going) | **L2** / **R2** |
 | The next view (ten of them, shelves to discs) | click the **touch pad** |
 | The next quick view; after the last, all games again | **R3** (press the right stick) |
-| The game's details: saved states, its own options, More | **Triangle** |
+| The game's page: its tabs, saved states, its own settings, More | **Triangle** |
 | The list's menu: search, quick views, order, filters, collections, view, a game at random, scan, the PlayStation 2 menu | **Square** |
-| In a game's details: favourite or not / hide or list again | **L1** / **R1** |
-| In a game's details: its cover, its title screen, a picture of play | **up** / **down** |
+| On a game's page: the tab before / after | **L1** / **R1** |
+| On a game's page: its cover, its title screen, a picture of play | **L2** / **R2** |
+| On a game's page: More (start with, rename, collections, favourite, hide, ...) | **Square** |
 | Settings | **Options** |
 | Start the game | **Cross** |
 
@@ -340,12 +363,17 @@ Settings > Controllers, the quick menu's in Settings > Hotkeys. "Put the buttons
 were" on the controllers page brings this layout back. A quick tap is held for the game at least
 50 ms, so games that read the pad once a frame see it (*new*).
 
-**The quick menu** has resume, save and load state with the slot to use, **Load the auto-save**
-and **Undo the last load** when there is one, **Achievements** and **Leaderboards** for a game that
-has them, the disc change, the game's options, its **Cheats** and its **Patches**, the settings,
-fast forward, restart, **Record a GS dump**, and **Quit game**, which asks whether to save a state
-to go on from and returns to the library. *New:* its entries can be shown, hidden and put in order
-(Triangle), it has **Save the log**, and **Apply changes now** restarts the game when a setting
+**The quick menu** says how long the game was played this time and has a row of tiles: **Resume**,
+**Save state** and **Load state** (the slot and when it was saved), **Screenshot** (the game's
+picture without the menu, as Options + Square takes it), **Change disc** and **Quit game**, which
+asks whether to save a state to go on from and returns to the library. Under them, **Your pinned
+settings**: the settings pinned with Square in the Settings, changed in place with left and right
+(the game's own value, where a game can have one; down from the tiles, or L1). And **More** (R1, or
+down from the right-hand tiles): the slot to use, **Load the auto-save** and **Undo the last load**
+when there is one, **Achievements** and **Leaderboards** for a game that has them, **Record a GS
+dump**, **Save the log**, the game's settings, its **Patches and cheats**, the settings, fast
+forward and restart. Triangle chooses what More shows and in which order (a game's own settings can
+be put there too), and **Apply changes now**, at the top of More, restarts the game when a setting
 changed that only takes effect at a game's start. An exit, a restart or a state load waits for the
 writes still under way, with a bar. Settings > About > **Quit Crux2** ends the title.
 
@@ -391,7 +419,7 @@ set to ("As the BIOS has it" keeps the BIOS's own, which is never changed).
 
 Disc images as `.iso`, `.chd`, `.cso`, `.zso`, `.gz`, `.bin`, `.mdf`, `.nrg` and `.img`.
 
-Each place below has its tab in the library. The games are looked for when Crux2 starts and after
+Each place below has its chip in the library's filter row (All shows every place at once). The games are looked for when Crux2 starts and after
 each game; **Square** in the library (or Settings > Game List > Scan for games) looks again.
 Settings > Folders > **Add a game folder** opens a folder browser (USB drives, network shares, the
 console's storage) and adds a folder anywhere; it and its subfolders are searched, and the games
@@ -462,7 +490,7 @@ game is named for what it is and not played.
   disc is in it. Crux2 unlocks every drive's tray when it first sees it, and Settings > Game List >
   **Eject a disc** unlocks a drive and opens it (not one a game plays from).
 - **Make an image of the disc** (Settings > Game List, Square on the Disc tab, or "Make an image"
-  in the disc's details) asks which kind: ISO, CHD smallest (LZMA), CHD quickest to load
+  in More on the disc's page) asks which kind: ISO, CHD smallest (LZMA), CHD quickest to load
   (Zstandard) or CSO; then where it goes: the internal storage, a USB drive, or a network share. It
   is named "Title (SLUS-12345).chd" (or .iso, .cso) and is in the library after the next look for
   games.
@@ -557,7 +585,7 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   and **Download the missing covers now** (which also asks again for the games nothing was found
   for, remembered in `covers/no-cover.txt`). A `CoverURL` of your own under `[PS5]` in
   `inis/PCSX2.ini` is used instead. A game without a cover is shown as a card with its title.
-- **Cheats:** a game's Cheats page (Details > Options > Cheats) has **Download cheats for this
+- **Cheats:** a game's Cheats page (its page > Patches and cheats > Cheats) has **Download cheats for this
   game**, and Settings > Game List has **Download cheats for all games**. They fetch the game's
   `.pnach` files from four collections on GitHub: `xs1l3n7x/pcsx2_cheats_collection`,
   `complicatiion/pcsx2_europe_cheats_collection`, `heavyjam-code/pcsx2-cheats-n-patches` and

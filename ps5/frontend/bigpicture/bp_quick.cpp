@@ -5,18 +5,23 @@
 //
 // From PSFlyCast's shell/ps5/bigpicture.cpp (GPL-2.0-or-later), used here under GPL-3.0.
 //
-// The quick menu slides in from the right over the paused game: resume, the saved states (with
-// the picture each was saved with), another disc, this game's own options, the settings, and
-// the ways out.
+// The quick menu over the paused game (laid out anew in the interface's revamp, phase 4): at the foot
+// of the veiled picture, how long the game was played this time and its name; a row of tiles, always
+// there (Resume, Save state, Load state, Screenshot, Change disc, Quit game), each with what it would
+// do now; the settings pinned in the Settings ([PS5UI] Pins: bp_settings.cpp's rows, changed with
+// left and right as there, the game's own value where a game can have one); and More, the rest of
+// the menu's entries.
 //
-// Triangle in the menu chooses what it shows and in which order (bp_quick_layout.h): its own
+// Triangle in the menu chooses what More shows and in which order (bp_quick_layout.h): its own
 // entries, and any of the game's own options, changed there with left and right. A setting that a
 // running game takes only when it starts (Option::NextStart), changed while it runs, puts "Apply
-// changes now" at the top: the game is closed with its state saved and started again from it.
+// changes now" at the top of More: the game is closed with its state saved and started again from it.
 
 #include "bp_internal.h"
 #include "bp_quick_layout.h"
+#include "bp_settings_model.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -103,7 +108,34 @@ struct QuickState
 	bool applying = false;
 	GameInfo applyGame;
 	time_t applyBefore = -1; // when the state made as it closes was saved before (-1: there was none)
+	// Where the focus is: 0 the tiles, 1 the pinned settings, 2 More (`focus` is More's row, `first`
+	// the first of them shown); the tile, the pinned row and the first of those shown.
+	int zone = 0;
+	int tile = 0;
+	int pin = 0;
+	int pinFirst = 0;
+	// The pinned settings as they were last made, and what for (the game, its settings open, the
+	// pages, the pins).
+	std::vector<settings::PinnedRow> pinned;
+	std::string pinnedFor;
+	// How many of the game's patches and cheats are on (More says it), and for which game.
+	int patchesOn = 0;
+	std::string patchesFor;
 } qm;
+
+// The tiles, always there, in this order: the rest of the menu's entries are More's.
+const char* const tileIds[] = {"resume", "save", "load", "screenshot", "disc", "quit"};
+
+bool isTile(const std::string& id)
+{
+	return std::any_of(std::begin(tileIds), std::end(tileIds), [&id](const char* tile) { return id == tile; });
+}
+
+std::vector<std::string> withoutTiles(std::vector<std::string> ids)
+{
+	std::erase_if(ids, isTile);
+	return ids;
+}
 
 // ---- what the menu shows: [PS5UI] QuickLayout (empty: the menu as it comes)
 
@@ -125,7 +157,11 @@ void endEdit()
 	if (!qm.edit)
 		return;
 	qm.edit = false;
-	keepLayout(qm.editing.layout());
+	// (More as it comes, whatever the tiles' places in the line: kept as the menu as it comes.)
+	std::vector<std::string> ids = qm.editing.layout();
+	if (withoutTiles(ids) == withoutTiles(quicklayout::defaults()))
+		ids = quicklayout::defaults();
+	keepLayout(ids);
 	qm.focus = 0;
 	qm.focusId.clear();
 }
@@ -631,26 +667,66 @@ void quickScreen()
 		qm.focusId.clear();
 		qm.first = 0;
 		qm.edit = false; // (it opens as the menu, never in its editing)
+		qm.zone = 0;
+		qm.tile = 0;
+		qm.pin = 0;
+		qm.pinFirst = 0;
+		qm.pinnedFor.clear();
+		qm.patchesFor.clear();
 	}
 	qm.open = approach(qm.open, 1, 14);
 	const float t = qm.open;
 	refreshStates(running);
 
-	// What the menu shows, and the game's own settings while it shows any of them.
+	// What the menu shows, and the game's own settings while it shows any of them (its options, or
+	// pinned settings, which are the game's own where a game can have them).
 	const std::vector<std::string> layout = layoutNow();
-	if (qm.edit || std::any_of(layout.begin(), layout.end(), quicklayout::isOption))
-	{
-		if (openOwn(running))
-			makeOptions(running);
-	}
-	else
-	{
-		closeOwn();
-	}
+	const std::string pinsLine = be->getString(Shared, "PS5UI", "Pins").value_or(std::string());
+	// (Again after the input, which may have closed them to run an entry that stays in the menu.)
+	const auto prepare = [&] {
+		if (qm.edit || !pinsLine.empty() || std::any_of(layout.begin(), layout.end(), quicklayout::isOption))
+		{
+			if (openOwn(running))
+				makeOptions(running);
+		}
+		else
+		{
+			closeOwn();
+		}
+		// The pinned settings ([PS5UI] Pins), as the settings have them.
+		const std::string key = runId(running) + (qm.ownOpen ? "/own/" : "/all/") + std::to_string(be->pagesGeneration()) + "/" + pinsLine;
+		if (key != qm.pinnedFor)
+		{
+			qm.pinnedFor = key;
+			const GameInfo game = runningGame(running, false);
+			qm.pinned = pinsLine.empty() ? std::vector<settings::PinnedRow>() : settings::pinnedRows(qm.ownOpen ? &game : nullptr);
+		}
+	};
+	prepare();
 	if (qm.entered)
 	{
 		qm.entered = false;
 		checkApply(running);
+		qm.pinnedFor.clear();
+		qm.patchesFor.clear();
+		prepare();
+	}
+	if (qm.ownOpen && qm.patchesFor != runId(running))
+	{
+		// How many of its patches and cheats are on, for More.
+		qm.patchesFor = runId(running);
+		qm.patchesOn = 0;
+		const bool cheats = be->getBool(Own, "EmuCore", "EnableCheats").value_or(be->getBool(Shared, "EmuCore", "EnableCheats").value_or(false));
+		for (int page = 0; page < 2; page++)
+		{
+			if (page == 1 && !cheats)
+				continue;
+			for (const Option& o : be->patchesPage(page == 1).rows)
+			{
+				if (o.kind == Option::Bool && (o.flags & Option::OneGame) && be->getBool(Own, o.section.c_str(), o.key.c_str()).value_or(false))
+					qm.patchesOn++;
+			}
+		}
 	}
 
 	int& slot = options().stateSlot;
@@ -659,21 +735,22 @@ void quickScreen()
 	const std::string slotName = "Slot " + std::to_string(slot);
 
 	std::vector<QuickItem> items;
-	items.push_back({ICON_FA_PLAY, "Resume", "", true, [] { resumeGame(); }});
+	items.push_back({ICON_FA_PLAY, "Resume", "Back to the game", true, [] { resumeGame(); }});
 	items.back().id = "resume";
 	{
-		QuickItem item{ICON_FA_DOWNLOAD, "Save state", slotName, running.canSaveState, [] {
-						   be->saveState(options().stateSlot);
-						   qm.statesAt = -10;
-						   resumeGame();
-					   }};
+		QuickItem item{ICON_FA_DOWNLOAD, "Save state", running.canSaveState ? slotName + (saved != nullptr ? "  \xc2\xb7  in use" : "  \xc2\xb7  empty") : std::string("Not for this game"),
+			running.canSaveState, [] {
+				be->saveState(options().stateSlot);
+				qm.statesAt = -10;
+				resumeGame();
+			}};
 		item.state = true;
 		item.id = "save";
 		items.push_back(std::move(item));
 	}
 	{
-		QuickItem item{ICON_FA_CLOCK_ROTATE_LEFT, "Load state", saved == nullptr ? "Empty slot" : slotName, running.canSaveState && saved != nullptr,
-			[] {
+		QuickItem item{ICON_FA_CLOCK_ROTATE_LEFT, "Load state", saved == nullptr ? slotName + " is empty" : slotName + "  \xc2\xb7  " + formatWhen(saved->when),
+			running.canSaveState && saved != nullptr, [] {
 				if (const StateInfo* state = slotState(options().stateSlot))
 				{
 					be->loadStateFile(*state);
@@ -682,6 +759,21 @@ void quickScreen()
 			}};
 		item.state = true;
 		item.id = "load";
+		items.push_back(std::move(item));
+	}
+	{
+		// The game's picture, without this menu (the hotkey's own, Options + Square unless changed).
+		Option hotkey;
+		hotkey.kind = Option::Bind;
+		hotkey.section = "Hotkeys";
+		hotkey.key = "Screenshot";
+		const std::string bound = be->binding(Shared, hotkey);
+		QuickItem item{ICON_FA_CAMERA, "Screenshot", bound.empty() ? std::string("To the snaps folder") : bound, running.valid, [] {
+						   if (!be->screenshot())
+							   toast("Screenshots are not taken here.");
+					   }};
+		item.stays = true;
+		item.id = "screenshot";
 		items.push_back(std::move(item));
 	}
 	{
@@ -713,6 +805,7 @@ void quickScreen()
 						 }});
 		items.back().id = "autosave";
 		items.back().applies = (self != nullptr && running.canSaveState);
+		items.back().state = true;
 	}
 	{
 		// The game as it was just before a state was last loaded into it.
@@ -738,7 +831,11 @@ void quickScreen()
 		items.push_back(std::move(boards));
 	}
 	{
-		QuickItem item{ICON_FA_COMPACT_DISC, "Change disc", "", true, [] { setScreen(Screen::Disc); }};
+		// Another disc for the game: this one's place in its set, when the library has it as one.
+		int disc = 0, discs = 0;
+		const bool inSet = libraryDiscOf(running.path, disc, discs);
+		QuickItem item{ICON_FA_COMPACT_DISC, "Change disc", inSet ? "Disc " + std::to_string(disc) + " of " + std::to_string(discs) : std::string("Another disc image"),
+			true, [] { setScreen(Screen::Disc); }};
 		item.stays = true;
 		item.id = "disc";
 		items.push_back(std::move(item));
@@ -766,22 +863,22 @@ void quickScreen()
 		items.push_back(std::move(item));
 	}
 	{
-		// This game's own options: in effect at once (but those it takes at its start), and kept for
+		// This game's own settings: in effect at once (but those it takes at its start), and kept for
 		// this game only.
 		const GameInfo game = runningGame(running, false);
-		QuickItem item{ICON_FA_SLIDERS, "Game options", "", running.canSaveState, [game] { openSettings(&game, Screen::Quick); }};
+		QuickItem item{ICON_FA_SLIDERS, "Game settings", "Every setting, for this game", running.canSaveState, [game] { openSettings(&game, Screen::Quick); }};
 		item.stays = true;
 		item.id = "gameoptions";
 		items.push_back(std::move(item));
-		// Its patches and cheats, which are a page of those options: straight to it.
-		QuickItem patches{ICON_FA_BOLT, "Patches and cheats", "", running.canSaveState,
-			[game] { openSettings(&game, Screen::Quick, "Patches"); }};
+		// Its patches and cheats, which are a page of those settings: straight to it.
+		QuickItem patches{ICON_FA_BOLT, "Patches and cheats", qm.ownOpen ? (qm.patchesOn == 0 ? std::string("None on") : std::to_string(qm.patchesOn) + " on") : std::string(),
+			running.canSaveState, [game] { openSettings(&game, Screen::Quick, "Patches"); }};
 		patches.stays = true;
 		patches.id = "patches";
 		items.push_back(std::move(patches));
 	}
 	{
-		QuickItem item{ICON_FA_WRENCH, "Settings", "", true, [] { openSettings(nullptr, Screen::Quick); }};
+		QuickItem item{ICON_FA_WRENCH, "Settings", "Of every game", true, [] { openSettings(nullptr, Screen::Quick); }};
 		item.stays = true;
 		item.id = "settings";
 		items.push_back(std::move(item));
@@ -820,7 +917,7 @@ void quickScreen()
 	}
 	{
 		const bool canSave = running.canSaveState;
-		QuickItem item{ICON_FA_RIGHT_FROM_BRACKET, "Quit game", "", true, [canSave] {
+		QuickItem item{ICON_FA_RIGHT_FROM_BRACKET, "Quit game", canSave ? "Can save where you are" : "", true, [canSave] {
 						   const auto ask = [canSave] {
 							   if (!canSave)
 							   {
@@ -873,7 +970,7 @@ void quickScreen()
 	}
 	// A setting the game takes at its start was changed while it runs: the game is closed with its
 	// state saved, and started again from it (render(), once it is closed).
-	QuickItem apply{ICON_FA_ROTATE, "Apply changes now", "", true, [running] {
+	QuickItem apply{ICON_FA_ROTATE, "Apply changes now", "Restarts the game from here", true, [running] {
 						if (be->memoryCardBusy())
 						{
 							toast("The game is writing to a memory card: not now.");
@@ -890,12 +987,12 @@ void quickScreen()
 	apply.stays = true;
 	apply.id = "apply";
 
-	// Every entry there can be, for the editing: the menu's own, and the game's options.
+	// Every entry More can show, for the editing: the menu's own (not the tiles), and the game's options.
 	const auto allIds = [&items] {
 		std::vector<std::string> all;
 		for (const QuickItem& item : items)
 		{
-			if (!item.option)
+			if (!item.option && !isTile(item.id))
 				all.push_back(item.id);
 		}
 		for (const QuickOpt& q : qm.opts)
@@ -903,8 +1000,17 @@ void quickScreen()
 		return all;
 	};
 
-	// ---- what is shown: the layout's entries that are there now, Apply changes now above them; while
-	// the menu is edited, every entry there can be, shown or not
+	// ---- the tiles, always there; More: the layout's entries that are there now, Apply changes now
+	// above them; while the menu is edited, every entry More can show, shown or not
+	std::vector<const QuickItem*> tiles;
+	for (const char* id : tileIds)
+	{
+		for (const QuickItem& item : items)
+		{
+			if (item.id == id)
+				tiles.push_back(&item);
+		}
+	}
 	std::vector<const QuickItem*> shown;
 	std::vector<QuickItem> unknown; // (an entry being edited that is not there any more: its name)
 	// (Made again after the editing's input, which moves its rows.)
@@ -933,19 +1039,16 @@ void quickScreen()
 			shown.push_back(&apply);
 		std::vector<std::string> have;
 		for (const QuickItem& item : items)
-			have.push_back(item.applies ? item.id : std::string());
+			have.push_back(item.applies && !isTile(item.id) ? item.id : std::string());
 		for (const int i : quicklayout::order(layout, have))
 			shown.push_back(&items[static_cast<size_t>(i)]);
 	}
 
 	// ---- input
-	const int n = static_cast<int>(shown.size());
-	if (n == 0)
-	{
-		endScreen();
-		return;
-	}
-	if (!qm.edit)
+	int pinsCount = static_cast<int>(qm.pinned.size());
+	const int tilesCount = static_cast<int>(tiles.size());
+	int n = static_cast<int>(shown.size());
+	if (!qm.edit && n > 0)
 	{
 		// (On the entry it was on, by name, when one comes or goes above it.)
 		std::vector<std::string> ids;
@@ -953,17 +1056,24 @@ void quickScreen()
 			ids.push_back(item->id);
 		qm.focus = quicklayout::keepFocus(ids, qm.focusId, qm.focus);
 	}
-	qm.focus = std::clamp(qm.focus, 0, n - 1);
-	if (in.up)
-		qm.focus = (qm.focus + n - 1) % n;
-	if (in.down)
-		qm.focus = (qm.focus + 1) % n;
-	const QuickItem& now = *shown[static_cast<size_t>(qm.focus)];
+	qm.focus = std::clamp(qm.focus, 0, std::max(0, n - 1));
+	qm.tile = std::clamp(qm.tile, 0, std::max(0, tilesCount - 1));
+	qm.pin = std::clamp(qm.pin, 0, std::max(0, pinsCount - 1));
+	if (qm.zone == 1 && pinsCount == 0)
+		qm.zone = 0;
+	if (qm.zone == 2 && n == 0)
+		qm.zone = 0;
+	bool pinChanged = false;
 	if (qm.edit)
 	{
 		// Cross shows or hides the entry, left and right (L1 and R1) move it, Square brings back the
 		// menu as it comes; Triangle, Circle and the menu's own button end the editing, and the menu
 		// with it (resumeGame keeps what was chosen).
+		qm.zone = 2;
+		if (in.up && qm.focus > 0)
+			qm.focus--;
+		if (in.down && qm.focus < n - 1)
+			qm.focus++;
 		if (in.triangle || in.back)
 			resumeGame();
 		else if (in.accept)
@@ -980,8 +1090,8 @@ void quickScreen()
 	}
 	else if (in.triangle)
 	{
-		// Choosing what the menu shows: the game's options are among what there is (none for a game
-		// that cannot have options of its own).
+		// Choosing what More shows: the game's options are among what there is (none for a game that
+		// cannot have options of its own).
 		if (openOwn(running))
 		{
 			makeOptions(running);
@@ -994,28 +1104,93 @@ void quickScreen()
 		qm.editing = quicklayout::Edit::of(layout, allIds());
 		qm.edit = true;
 		qm.focus = 0;
+		qm.zone = 2;
+	}
+	else if (in.back)
+	{
+		resumeGame();
 	}
 	else
 	{
-		qm.focusId = now.id;
-		if (now.side && now.enabled && (in.left || in.right))
-			now.side(in.left ? -1 : 1);
+		const QuickItem* run = nullptr;
+		switch (qm.zone)
+		{
+			case 0:
+				if (in.left && qm.tile > 0)
+					qm.tile--;
+				if (in.right && qm.tile < tilesCount - 1)
+					qm.tile++;
+				if (in.down)
+					qm.zone = (pinsCount > 0 && (qm.tile < tilesCount / 2 || n == 0)) ? 1 : (n > 0 ? 2 : 0);
+				if (in.accept && tilesCount > 0 && tiles[static_cast<size_t>(qm.tile)]->enabled)
+					run = tiles[static_cast<size_t>(qm.tile)];
+				break;
+			case 1:
+			{
+				settings::PinnedRow& row = qm.pinned[static_cast<size_t>(qm.pin)];
+				if (in.up)
+				{
+					if (qm.pin > 0)
+						qm.pin--;
+					else
+						qm.zone = 0;
+				}
+				if (in.down && qm.pin < pinsCount - 1)
+					qm.pin++;
+				if (in.left || in.right)
+				{
+					settings::pinnedChange(row, in.left ? -1 : 1, in.repeats);
+					pinChanged = true;
+				}
+				if (in.accept)
+				{
+					settings::pinnedActivate(row);
+					pinChanged = true;
+				}
+				if (in.r1 && n > 0)
+					qm.zone = 2;
+				break;
+			}
+			default:
+			{
+				const QuickItem& now = *shown[static_cast<size_t>(qm.focus)];
+				if (in.up)
+				{
+					if (qm.focus > 0)
+						qm.focus--;
+					else
+						qm.zone = 0;
+				}
+				if (in.down && qm.focus < n - 1)
+					qm.focus++;
+				if (now.side && now.enabled && (in.left || in.right))
+					now.side(in.left ? -1 : 1);
+				else if (in.left && pinsCount > 0)
+					qm.zone = 1;
+				if (in.l1 && pinsCount > 0)
+					qm.zone = 1;
+				if (in.accept && now.enabled && now.run)
+					run = &now;
+				// An option the game takes at its start, changed here: Apply changes now comes, or goes.
+				if (now.option && (in.accept || in.left || in.right) && qm.snapFor == runId(running))
+					qm.applyPending = running.canSaveState && fingerprint() != qm.snapshot;
+				if (qm.zone == 2)
+					qm.focusId = shown[static_cast<size_t>(qm.focus)]->id;
+				break;
+			}
+		}
 		// (The quick menu's own button closes it too: openQuickMenu(), when the button is let go.)
-		if (in.accept && now.enabled && now.run)
+		if (run != nullptr)
 		{
 			// (What is run may open the settings, which open the game's own themselves.)
-			if (!now.option)
+			if (!run->option)
 				closeOwn();
-			now.run();
+			run->run();
 		}
-		else if (in.back)
-		{
-			resumeGame();
-		}
-		// An option the game takes at its start, changed here: Apply changes now comes, or goes.
-		if (now.option && (in.accept || in.left || in.right) && qm.snapFor == runId(running))
-			qm.applyPending = running.canSaveState && fingerprint() != qm.snapshot;
 	}
+	// A pinned setting the game takes at its start, changed here: Apply changes now comes, or goes.
+	if (pinChanged && qm.snapFor == runId(running))
+		qm.applyPending = running.canSaveState && fingerprint() != qm.snapshot;
 	if (screen != Screen::Quick)
 	{
 		endScreen();
@@ -1023,176 +1198,300 @@ void quickScreen()
 	}
 	if (qm.edit)
 		showEditing();
-	if (shown.empty())
+	n = static_cast<int>(shown.size());
+	qm.focus = std::clamp(qm.focus, 0, std::max(0, n - 1));
+	prepare();
+	pinsCount = static_cast<int>(qm.pinned.size());
+	qm.pin = std::clamp(qm.pin, 0, std::max(0, pinsCount - 1));
+	if (qm.zone == 1 && pinsCount == 0)
+		qm.zone = 0;
+
+	// ---- drawing: the paused game, veiled; at the foot, the game, the tiles, the pinned settings and
+	// More, the hints
+	const settings::Palette p = settings::palette();
+	dl->AddRectFilled(V(0, 0), V(W, H), alpha(p.ground, 0.86f * t));
+	const float slide = (1 - t) * 60;
+	const float m = 60, x0 = m, fullW = W - 2 * m;
+	const int rowsShown = std::clamp(4 + static_cast<int>((H - 1080) / 66), 4, 8);
+	const float rowH = 66, headH = 54;
+	const float hintsCy = H - m - 18 + slide;
+	const float panelH = headH + rowsShown * rowH + 14;
+	const float panelY = hintsCy - 18 - 24 - panelH;
+	const float tileH = 156, tileY = panelY - 24 - tileH;
+	const float headY = tileY - 24 - 92;
+
+	// The game: paused for how long, its name; what it runs with, on the right.
 	{
-		endScreen();
-		return;
-	}
-	const int count = static_cast<int>(shown.size());
-	qm.focus = std::clamp(qm.focus, 0, count - 1);
-	const QuickItem& cur = *shown[static_cast<size_t>(qm.focus)];
-
-	// ---- the paused game, dimmed
-	dl->AddRectFilled(V(0, 0), V(W, H), col::rgba(0, 0, 0, static_cast<int>(140 * t)));
-
-	// ---- the panel, sliding in from the right
-	const float pw = 640;
-	const float px = W - pw * (0.15f + 0.85f * t);
-	gradientH(dl, px - 120, 0, 120, H, col::rgba(0, 0, 0, 0), col::rgba(0, 0, 0, static_cast<int>(120 * t)));
-	rect(dl, px, 0, pw, H, alpha(col::sheet, 0.97f * t));
-	rect(dl, px, 0, 1, H, col::line);
-
-	// The game.
-	{
-		GameInfo game;
-		if (const GameInfo* listed = libraryGame(running.path))
-			game = *listed;
+		std::string paused = "PAUSED";
+		if (qm.edit)
+			paused = ICON_FA_PEN "  CHOOSING WHAT MORE SHOWS";
+		else if (const std::string played = formatPlayed(running.sessionSeconds); !played.empty())
+		{
+			std::string upper = played;
+			for (char& c : upper)
+				c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+			paused += "  \xc2\xb7  " + upper + " THIS TIME";
+		}
+		text(dl, bold(), 19, x0, headY, alpha(qm.edit ? p.accent : col::good, t), paused.c_str());
+		std::vector<std::string> facts;
+		if (!running.hardware)
+			facts.push_back("Software renderer");
 		else
 		{
-			game.path = running.path;
-			game.title = running.title;
+			std::optional<float> scale = qm.ownOpen ? be->getFloat(Own, "EmuCore/GS", "upscale_multiplier") : std::nullopt;
+			if (!scale)
+				scale = be->getFloat(Shared, "EmuCore/GS", "upscale_multiplier");
+			char upscale[32];
+			std::snprintf(upscale, sizeof(upscale), "%gx resolution", static_cast<double>(scale.value_or(6.f)));
+			facts.push_back(upscale);
 		}
-		const float gx = px + 48;
-		drawGameCover(dl, game, gx, 44, 120, 170, 10, 0.5f);
-		const std::string title = !running.title.empty() ? running.title : std::string("No disc");
-		const float titleH = textIn(dl, bold(), 32, gx + 148, 52, col::text, title, pw - 48 - 148 - 40, true).y;
-		float y = 52 + titleH + 12;
+		if (!running.frameLimit)
+			facts.push_back("Fast forward");
 		if (!running.serial.empty())
-		{
-			text(dl, regular(), 22, gx + 148, y, col::dim, running.serial.c_str());
-			y += 32;
-		}
-		const std::string played = formatPlayed(running.sessionSeconds);
-		if (!played.empty())
-		{
-			text(dl, regular(), 22, gx + 148, y, col::faint, ("This time: " + played).c_str());
-			y += 32;
-		}
-		if (qm.edit)
-			text(dl, regular(), 22, gx + 148, y, col::accent, ICON_FA_PEN "  Choosing what the menu shows");
-		else
-			text(dl, regular(), 22, gx + 148, y, col::good, ICON_FA_PAUSE "  Paused");
+			facts.push_back(running.serial);
+		std::string line;
+		for (const std::string& fct : facts)
+			line += (line.empty() ? "" : "  \xc2\xb7  ") + fct;
+		const float lw = std::min(textSize(regular(), 21, line.c_str()).x, fullW * 0.4f);
+		textIn(dl, regular(), 21, x0 + fullW - lw, headY + 52, alpha(p.secondary, t), line, fullW * 0.4f, false);
+		const std::string title = !running.title.empty() ? running.title : std::string("No disc");
+		textIn(dl, bold(), 50, x0, headY + 32, alpha(p.text, t), title, fullW - lw - 48, true);
 	}
 
-	// The items.
-	const float itemsTop = 244;
-	// (As high as there is room for: every item is on the screen, however many a game has, down to
-	// rows 38 high (56 while the menu is edited); with more, the rows move with the cursor.)
-	const float room = H - itemsTop - 100;
-	const float ih = std::clamp(room / static_cast<float>(count), qm.edit ? 56.f : 38.f, 78.f);
-	const int fits = std::max(1, static_cast<int>(room / ih));
-	if (qm.focus < qm.first)
-		qm.first = qm.focus;
-	if (qm.focus >= qm.first + fits)
-		qm.first = qm.focus - fits + 1;
-	qm.first = std::clamp(qm.first, 0, std::max(0, count - fits));
-	qm.focusAnim = approach(qm.focusAnim, static_cast<float>(qm.focus), 22);
-	const float lit = std::clamp(qm.focusAnim - static_cast<float>(qm.first), 0.f, static_cast<float>(fits - 1));
-	rect(dl, px + 32, itemsTop + lit * ih, pw - 64, ih - 8, col::accent, 12);
-	for (int i = qm.first; i < count && i < qm.first + fits; i++)
+	// The state in the slot, when what is in focus is of it: a card at the top right.
+	const QuickItem* focusedItem = qm.zone == 0 ? (tilesCount > 0 ? tiles[static_cast<size_t>(qm.tile)] : nullptr) :
+								   qm.zone == 2 && n > 0 ? shown[static_cast<size_t>(qm.focus)] : nullptr;
+	if (focusedItem != nullptr && focusedItem->state && running.canSaveState && !qm.edit)
 	{
-		const QuickItem& it = *shown[static_cast<size_t>(i)];
-		// The offsets below are for a row 78 high: a lower row is moved up by half the difference.
-		const float y = itemsTop + (i - qm.first) * ih + (ih - 78) / 2;
-		const bool on = (i == qm.focus);
-		// (While the menu is edited, an entry that cannot be chosen now is not shown fainter.)
-		const ImU32 c = (!it.enabled && !qm.edit) ? col::faint : on ? col::text : col::dim;
-		text(dl, regular(), 28, px + 64, y + 20, c, it.icon);
-		// While the menu is edited: whether the entry is shown (Resume and Quit always are), and of
-		// an option, its page of the settings.
-		std::string detail = it.detail;
-		float right = px + pw - 64;
-		if (qm.edit)
+		const StateInfo* const of = focusedItem->id == "autosave" ? slotState(-2) : saved;
+		const float cw = 380, iw = cw - 32, ih = iw * 9 / 16, chh = ih + 32 + 52;
+		const float cx = x0 + fullW - cw, cy = 40;
+		if (cy + chh <= headY - 20)
 		{
-			const quicklayout::Edit::Row& row = qm.editing.rows[static_cast<size_t>(i)];
-			detail = quicklayout::fixed(row.id) ? std::string("Always shown") : it.page;
-			if (!quicklayout::fixed(row.id))
+			rect(dl, cx, cy, cw, chh, alpha(p.card, 0.98f * t), 16 * col::round);
+			rect(dl, cx + 16, cy + 16, iw, ih, alpha(p.raised, t), 10 * col::round);
+			if (of != nullptr)
 			{
-				drawSwitch(dl, right, y + 39, row.shown, on);
-				right -= 68 + 20;
+				const Texture picture = be->statePicture(*of);
+				if (picture.valid())
+					imageFill(dl, picture, cx + 16, cy + 16, iw, ih, 10, alpha(col::white, t));
 			}
-		}
-		float labelRoom = right - (px + 120) - 16;
-		if (!detail.empty())
-		{
-			const ImVec2 rs = textSize(regular(), 24, detail.c_str());
-			const float rx = right - rs.x;
-			labelRoom = rx - (it.side && on && it.enabled && !qm.edit ? 34 : 16) - (px + 120);
-			if (it.side && on && it.enabled && !qm.edit)
-			{
-				dl->AddTriangleFilled(V(rx - 26, y + 35), V(rx - 14, y + 25), V(rx - 14, y + 45), col::text);
-				dl->AddTriangleFilled(V(px + pw - 44, y + 35), V(px + pw - 56, y + 25), V(px + pw - 56, y + 45), col::text);
-			}
-			text(dl, regular(), 24, rx, y + 23, (on && (it.enabled || qm.edit)) ? col::text : col::faint, detail.c_str());
-		}
-		// (An option's label, and any while the menu is edited, is cut short where the row has no more
-		// room; the menu's own entries are drawn as they always were.)
-		const std::string label = (it.option || qm.edit) ? fit(bold(), 28, it.label, std::max(40.f, labelRoom)) : it.label;
-		text(dl, bold(), 28, px + 120, y + 19, c, label.c_str());
-	}
-
-	// The state in the slot: a card beside the panel while a state row is focused.
-	if (cur.state && running.canSaveState && !qm.edit)
-	{
-		const float cw = 432, chh = 320;
-		const float cx = px - 32 - cw;
-		const float rowY = itemsTop + lit * ih + (ih - 8) / 2;
-		const float cy = std::clamp(rowY - chh / 2, 40.f, H - chh - 40);
-		glow(dl, cx, cy, cw, chh, 18, col::rgba(0, 0, 0, 200), 24);
-		rect(dl, cx, cy, cw, chh, alpha(col::sheetHi, 0.98f), 18);
-		const float iw = cw - 32, ihh = iw * 9 / 16;
-		rect(dl, cx + 16, cy + 16, iw, ihh, col::card, 12);
-		if (saved != nullptr)
-		{
-			const Texture picture = be->statePicture(*saved);
-			if (picture.valid())
-				imageFill(dl, picture, cx + 16, cy + 16, iw, ihh, 12);
-		}
-		else
-		{
-			const char* empty = ICON_FA_BOX_OPEN "   Empty slot";
-			const ImVec2 es = textSize(regular(), 26, empty);
-			text(dl, regular(), 26, cx + 16 + (iw - es.x) / 2, cy + 16 + (ihh - es.y) / 2, col::faint, empty);
-		}
-		text(dl, bold(), 26, cx + 20, cy + ihh + 32, col::text, slotName.c_str());
-		if (saved != nullptr)
-		{
-			const std::string when = formatWhen(saved->when);
-			const ImVec2 ws = textSize(regular(), 22, when.c_str());
-			text(dl, regular(), 22, cx + cw - 20 - ws.x, cy + ihh + 36, col::dim, when.c_str());
-		}
-	}
-
-	// Hints, in the panel.
-	{
-		float x = px + 48;
-		const float y = H - 52;
-		const auto hint = [&](Glyph gl, const char* label) {
-			x += glyph(dl, gl, x, y, 30) + 10;
-			x += text(dl, regular(), 22, x, y - 13, col::text, label).x + 30;
-		};
-		if (qm.edit)
-		{
-			hint(Glyph::Cross, "Show");
-			hint(Glyph::DPadLR, "Move");
-			hint(Glyph::Square, "Default");
-			hint(Glyph::Triangle, "Done");
-		}
-		else
-		{
-			if (cur.option)
-				hint(Glyph::DPadLR, "Change");
 			else
 			{
-				hint(Glyph::Cross, "Select");
-				if (cur.side)
-					hint(Glyph::DPadLR, "Slot");
+				const char* empty = ICON_FA_BOX_OPEN "   Empty slot";
+				const ImVec2 es = textSize(regular(), 24, empty);
+				text(dl, regular(), 24, cx + 16 + (iw - es.x) / 2, cy + 16 + (ih - es.y) / 2, alpha(p.faint, t), empty);
 			}
-			hint(Glyph::Triangle, "Edit menu");
-			hint(Glyph::Circle, "Resume");
+			const std::string name = focusedItem->id == "autosave" ? std::string("Saved by itself") : slotName;
+			text(dl, bold(), 22, cx + 20, cy + ih + 30, alpha(p.text, t), name.c_str());
+			if (of != nullptr)
+			{
+				const std::string when = formatWhen(of->when);
+				const ImVec2 ws = textSize(regular(), 20, when.c_str());
+				text(dl, regular(), 20, cx + cw - 20 - ws.x, cy + ih + 32, alpha(p.secondary, t), when.c_str());
+			}
 		}
 	}
+
+	// The tiles.
+	{
+		const float gap = 18, tw = (fullW - gap * (tilesCount - 1)) / std::max(1, tilesCount);
+		for (int i = 0; i < tilesCount; i++)
+		{
+			const QuickItem& it = *tiles[static_cast<size_t>(i)];
+			const float x = x0 + i * (tw + gap);
+			const bool on = qm.zone == 0 && i == qm.tile && !qm.edit;
+			rect(dl, x, tileY, tw, tileH, alpha(on ? p.accent : p.card, t), 16 * col::round);
+			if (on)
+				settings::focusRing(dl, x, tileY, tw, tileH, 16);
+			const ImU32 c = on ? p.onAccent : it.enabled ? p.text : p.faint;
+			text(dl, regular(), 26, x + 22, tileY + 20, alpha(on ? p.onAccent : it.enabled ? p.accent : p.faint, t), it.icon);
+			textIn(dl, bold(), 24, x + 22, tileY + 62, alpha(c, t), it.label, tw - 44, on);
+			textIn(dl, regular(), 19, x + 22, tileY + tileH - 42, alpha(on ? p.onAccent : it.enabled ? p.secondary : p.faint, t), it.detail, tw - 44, false);
+		}
+	}
+
+	// The two panels: the pinned settings, and More.
+	const float pw = (fullW - 18) / 2;
+	const auto panel = [&](float x, const char* title, const char* aside) {
+		rect(dl, x, panelY, pw, panelH, alpha(p.card, 0.98f * t), 16 * col::round);
+		text(dl, bold(), 17, x + 26, panelY + 20, alpha(p.secondary, t), title);
+		if (aside != nullptr && aside[0] != '\0')
+		{
+			const float aw = std::min(textSize(regular(), 17, aside).x, pw * 0.55f);
+			textIn(dl, regular(), 17, x + pw - 26 - aw, panelY + 20, alpha(p.faint, t), aside, pw * 0.55f, false);
+		}
+	};
+	// (A list with more rows than there is room for moves with the focus.)
+	const auto firstShown = [&](int& first, int focus, int count) {
+		if (focus < first)
+			first = focus;
+		if (focus >= first + rowsShown)
+			first = focus - rowsShown + 1;
+		first = std::clamp(first, 0, std::max(0, count - rowsShown));
+	};
+	{
+		const float x = x0;
+		if (qm.edit)
+		{
+			panel(x, "HOW IT IS CHOSEN", nullptr);
+			text(dl, regular(), 21, x + 26, panelY + headH + 10, alpha(p.secondary, t),
+				"Cross shows an entry in More or takes it out; left and right move it up and down; Square brings back More as it comes. "
+				"Resume, the states, the screenshot, the disc and Quit are always there, as tiles; any of this game's own settings can be "
+				"added (they are changed with left and right).",
+				pw - 52);
+		}
+		else
+		{
+			std::string aside;
+			if (qm.zone == 1 && pinsCount > 0)
+			{
+				const Option& o = qm.pinned[static_cast<size_t>(qm.pin)].item.o;
+				aside = std::string(qm.pinned[static_cast<size_t>(qm.pin)].forGame && !(o.flags & Option::Front) ? "This game" : "All games") +
+						"  \xc2\xb7  " + settings::takesEffect(o);
+			}
+			panel(x, "YOUR PINNED SETTINGS", aside.c_str());
+			if (pinsCount == 0)
+			{
+				text(dl, regular(), 21, x + 26, panelY + headH + 10, alpha(p.secondary, t),
+					"Nothing is pinned yet. In the Settings, Square on a setting pins it: it is then here too, to change without leaving the "
+					"game (this game's own value, where a game can have one).",
+					pw - 52);
+			}
+			firstShown(qm.pinFirst, qm.pin, pinsCount);
+			for (int i = qm.pinFirst; i < pinsCount && i < qm.pinFirst + rowsShown; i++)
+			{
+				const settings::PinnedRow& row = qm.pinned[static_cast<size_t>(i)];
+				const float ry = panelY + headH + (i - qm.pinFirst) * rowH;
+				const bool on = qm.zone == 1 && i == qm.pin;
+				if (on)
+				{
+					rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12 * col::round);
+					settings::focusRing(dl, x + 10, ry, pw - 20, rowH - 6, 12);
+				}
+				const bool can = settings::pinnedUsable(row);
+				const std::string v = row.item.o.kind == Option::Action ? (row.item.o.info ? row.item.o.info() : std::string()) + "  " ICON_FA_CHEVRON_RIGHT : settings::pinnedValue(row);
+				const float room = pw * 0.42f;
+				const float vw = std::min(textSize(bold(), 23, v.c_str()).x, room);
+				const float right = x + pw - 26 - (on && can ? 26 : 0);
+				const float cyRow = ry + (rowH - 6) / 2;
+				textIn(dl, bold(), 23, right - vw, cyRow - 14, alpha(!can ? p.faint : settings::pinnedChanged(row) ? p.accent : p.text, t), v, room, on);
+				if (on && can && row.item.o.kind != Option::Action)
+					drawArrows(dl, right - vw, right, cyRow, alpha(p.accent, t));
+				textIn(dl, bold(), 23, x + 26, cyRow - 14, alpha(can ? p.text : p.faint, t), row.item.o.label, right - vw - 40 - (x + 26), on);
+			}
+		}
+	}
+	{
+		const float x = x0 + pw + 18;
+		panel(x, qm.edit ? "MORE: SHOWN OR NOT" : "MORE", nullptr);
+		firstShown(qm.first, qm.focus, n);
+		for (int i = qm.first; i < n && i < qm.first + rowsShown; i++)
+		{
+			const QuickItem& it = *shown[static_cast<size_t>(i)];
+			const float ry = panelY + headH + (i - qm.first) * rowH;
+			const bool on = qm.zone == 2 && i == qm.focus;
+			const float cyRow = ry + (rowH - 6) / 2;
+			if (on)
+			{
+				rect(dl, x + 10, ry, pw - 20, rowH - 6, alpha(p.raised, t), 12 * col::round);
+				settings::focusRing(dl, x + 10, ry, pw - 20, rowH - 6, 12);
+			}
+			// (While the menu is edited, an entry that cannot be chosen now is not shown fainter.)
+			const bool can = it.enabled || qm.edit;
+			const ImU32 c = !can ? p.faint : (&it == &apply) ? p.accent : p.text;
+			text(dl, regular(), 22, x + 26, cyRow - 13, alpha(can ? p.accent : p.faint, t), it.icon);
+			std::string detail = it.detail;
+			float right = x + pw - 26;
+			if (qm.edit)
+			{
+				const quicklayout::Edit::Row& row = qm.editing.rows[static_cast<size_t>(i)];
+				detail = it.page;
+				drawSwitch(dl, right, cyRow, row.shown, on, 0.85f);
+				right -= 58 + 16;
+			}
+			float labelRoom = right - (x + 70) - 16;
+			if (!detail.empty())
+			{
+				const bool arrows = it.side && on && it.enabled && !qm.edit;
+				const float room = pw * 0.4f;
+				const float dw = std::min(textSize(regular(), 21, detail.c_str()).x, room);
+				const float dx = right - dw - (arrows ? 26 : 0);
+				textIn(dl, regular(), 21, dx, cyRow - 13, alpha(on && can ? p.text : p.secondary, t), detail, room, false);
+				if (arrows)
+					drawArrows(dl, dx, dx + dw, cyRow, alpha(p.accent, t));
+				labelRoom = dx - (arrows ? 30 : 16) - (x + 70);
+			}
+			textIn(dl, bold(), 23, x + 70, cyRow - 14, alpha(c, t), it.label, std::max(40.f, labelRoom), on);
+		}
+		if (n == 0 && !qm.edit)
+			text(dl, regular(), 21, x + 26, panelY + headH + 10, alpha(p.secondary, t), "Nothing else is chosen to be here: Triangle chooses.", pw - 52);
+	}
+
+	// The hints, at the foot on the right.
+	{
+		std::vector<Hint> hints;
+		if (qm.edit)
+			hints = {{Glyph::Cross, "Show"}, {Glyph::DPadLR, "Move"}, {Glyph::Square, "As it comes"}, {Glyph::Triangle, "Done"}};
+		else
+		{
+			if (qm.zone == 1)
+			{
+				hints.push_back({Glyph::DPadLR, "Change"});
+				if (pinsCount > 0 && qm.pinned[static_cast<size_t>(qm.pin)].item.o.kind == Option::Action)
+					hints.back() = {Glyph::Cross, "Run"};
+				if (n > 0)
+					hints.push_back({Glyph::R1, "More"});
+			}
+			else
+			{
+				hints.push_back({Glyph::Cross, "Choose"});
+				const QuickItem* now = qm.zone == 2 && n > 0 ? shown[static_cast<size_t>(qm.focus)] : nullptr;
+				if (now != nullptr && now->side)
+					hints.push_back({Glyph::DPadLR, now->option ? "Change" : "Slot"});
+				if (qm.zone == 2 && pinsCount > 0)
+					hints.push_back({Glyph::L1, "Pinned"});
+			}
+			hints.push_back({Glyph::Triangle, "Edit this menu"});
+			hints.push_back({Glyph::Circle, "Resume"});
+		}
+		const Layer words = beginLayer(dl);
+		float x = x0 + fullW;
+		for (auto it = hints.rbegin(); it != hints.rend(); ++it)
+		{
+			const ImVec2 ts = textSize(regular(), 22, it->label);
+			x -= ts.x;
+			text(dl, regular(), 22, x, hintsCy - ts.y / 2, alpha(p.text, t), it->label);
+			x -= 10;
+			x -= glyph(dl, it->glyph, 0, -1000, 30);
+			glyph(dl, it->glyph, x, hintsCy, 30);
+			x -= 34;
+		}
+		endLayer(words, steadyAlpha());
+	}
 	endScreen();
+}
+
+bool quickFocus(const std::string& id)
+{
+	for (int i = 0; i < static_cast<int>(std::size(tileIds)); i++)
+	{
+		if (id == tileIds[i])
+		{
+			qm.zone = 0;
+			qm.tile = i;
+			return true;
+		}
+	}
+	if (id.rfind("pin:", 0) == 0)
+	{
+		qm.zone = 1;
+		qm.pin = std::atoi(id.c_str() + 4);
+		return qm.pin >= 0 && qm.pin < static_cast<int>(qm.pinned.size());
+	}
+	qm.zone = 2;
+	qm.focusId = id;
+	return true;
 }
 
 // ------------------------------------------------------------- which screen

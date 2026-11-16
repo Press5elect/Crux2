@@ -757,6 +757,13 @@ public:
 		g_check.expect(run.valid, "a GS dump is recorded in a running game");
 		gsDumps++;
 	}
+	bool screenshot() override
+	{
+		g_check.expect(run.valid, "a screenshot is taken of a running game");
+		screenshots++;
+		bp::toast("Screenshot saved: snaps/" + run.serial + "/2026-11-16_21-40-00.png");
+		return true;
+	}
 	bool memoryCardBusy() override { return busyCard; }
 	bool canUndoLoad() override { return undo && run.valid; }
 	void undoLoad() override { undone++; }
@@ -1814,7 +1821,7 @@ public:
 	int addresses = 0;
 	int backups = 0, restores = 0, logsShown = 0;
 	bool undo = false;
-	int undone = 0, cheevos = 0, overlay = 0, gsDumps = 0;
+	int undone = 0, cheevos = 0, overlay = 0, gsDumps = 0, screenshots = 0;
 	int loadedSlot = 0; // the slot of the state last loaded into the running game
 	std::string signedIn;
 	bool recommended = false;
@@ -2392,6 +2399,123 @@ void shots(Harness& h)
 	until(5.30f, "00h-startup-5.30");
 	h.wait(120);
 	g_check.expect(b.sounded[0] && !b.sounded[1] && b.sounded[2], "a start-up left alone begins and opens the library");
+	g_check.expect(bp::libraryTab() == bp::TabHome, "the start-up hands over to Home");
+	h.shot("00i-home");
+	// ---- the revamp's Home and library chrome (phase 4A): the library's filter row and the focused
+	// game's strip in several views, on all places with USB drives on; Home with games, with none
+	// played and with none at all; the Right now card opening the texture pack manager; then with a light skin, the interface at
+	// 70% and the largest text, and with another skin.
+	{
+		const auto viewShot = [&](int view, const char* name) {
+			b.setInt(0, "PS5UI", "View", view);
+			bp::loadOptions();
+			h.wait(40);
+			h.shot(name);
+		};
+		const auto revampShots = [&](const char* tag) {
+			char name[64];
+			bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+			const int views[] = {1, 2, 0, 3, 5, 8, 4, 9, 6, 7};
+			const char* const viewNames[] = {"grid", "list", "shelves", "flow", "table", "wall", "bookcase", "discs", "showcase", "wheel"};
+			for (int i = 0; i < 10; i++)
+			{
+				std::snprintf(name, sizeof(name), "4a-%s-library-%s", tag, viewNames[i]);
+				viewShot(views[i], name);
+			}
+			b.setInt(0, "PS5UI", "View", 0);
+			bp::loadOptions();
+			bp::showLibraryTab(bp::TabHome);
+			h.wait(40);
+			std::snprintf(name, sizeof(name), "4a-%s-home", tag);
+			h.shot(name);
+		};
+		const bool usbWas = b.wantUsb;
+		b.wantUsb = true;
+		revampShots("default");
+		g_check.expect(bp::libraryTab() == bp::TabHome, "the preview's hook opens Home");
+		// The covers' row in focus, and a game page from it.
+		h.press(P::Down, 30);
+		h.press(P::Right, 30);
+		h.shot("4a-home-recent-focus");
+		// The chips in focus in the grid, and Favourites chosen there.
+		bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+		b.setInt(0, "PS5UI", "View", 1);
+		bp::loadOptions();
+		h.wait(20);
+		for (int i = 0; i < 8 && bp::libraryChip() < 0; i++)
+			h.press(P::Up, 8);
+		g_check.expect(bp::libraryChip() == 0, "Up from the grid's first row is on the All chip");
+		h.shot("4a-default-grid-chips");
+		for (int i = 0; i < 4; i++)
+			h.press(P::Right, 6);
+		h.press(P::Cross, 30);
+		h.shot("4a-default-grid-favourites");
+		h.press(P::Cross, 30); // (and off again)
+		h.press(P::Down, 20);
+		b.setInt(0, "PS5UI", "View", 0);
+		bp::loadOptions();
+		// A texture pack being downloaded: Home's "Right now" card says so, and Cross on it opens the
+		// texture pack manager (the top bar holds places only: the manager is no tab).
+		bp::showLibraryTab(bp::TabHome);
+		b.findTexturePacks();
+		b.download.got = (1240ull << 20) - (3u << 20) * 30;
+		h.wait(30);
+		h.press(P::Up, 10);
+		for (int i = 0; i < 3; i++)
+			h.press(P::Right, 10);
+		h.shot("4a-home-right-now-download");
+		h.press(P::Cross, 40);
+		g_check.expect(bp::texturePacksOpen(), "Cross on Home's Right now card opens the texture pack manager");
+		h.press(P::Circle, 30);
+		b.stopTexturePack();
+		h.wait(30);
+		h.press(P::Left, 10);
+		h.press(P::Left, 10);
+		// The top bar: L1 / R1 go between Home and the Library (no Settings tab: OPTIONS opens them).
+		h.press(P::R1, 30);
+		g_check.expect(bp::libraryTab() == bp::TabLibrary, "R1 from Home is the Library");
+		h.press(P::R1, 30);
+		g_check.expect(bp::libraryTab() == bp::TabHome, "and R1 again is Home, round and round");
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings, "OPTIONS on Home opens the Settings");
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Library && bp::libraryTab() == bp::TabHome, "and closes them, back on Home");
+		// Home with no game played yet, and with no game at all.
+		{
+			const std::vector<bp::GameInfo> kept = b.list;
+			for (bp::GameInfo& g : b.list)
+				g.lastPlayed = 0;
+			b.generation++;
+			bp::showLibraryTab(bp::TabHome);
+			h.wait(40);
+			h.shot("4a-home-none-played");
+			b.list.clear();
+			b.generation++;
+			h.wait(40);
+			h.shot("4a-home-empty");
+			b.list = kept;
+			b.generation++;
+			h.wait(20);
+		}
+		// A light skin, the interface at 70% and the largest text; then another skin.
+		b.setInt(0, "PS5UI", "Look", 8);
+		b.setInt(0, "PS5UI", "InterfaceSize", 70);
+		b.setInt(0, "PS5UI", "TextSize", 2);
+		bp::loadOptions();
+		revampShots("clay-70-largest");
+		b.setInt(0, "PS5UI", "InterfaceSize", 100);
+		b.setInt(0, "PS5UI", "TextSize", 0);
+		b.setInt(0, "PS5UI", "Look", 12);
+		bp::loadOptions();
+		revampShots("blueprint");
+		b.setInt(0, "PS5UI", "Look", 0);
+		bp::loadOptions();
+		b.wantUsb = usbWas;
+		bp::showLibraryTab(bp::TabLibrary, bp::Internal);
+		bp::showLibraryTab(bp::TabHome);
+		h.wait(40);
+	}
+
 	// Circle, with nothing to go back to: the question.
 	h.press(P::Circle, 30);
 	h.shot("01-quit-question");
@@ -2405,18 +2529,23 @@ void shots(Harness& h)
 	h.press(P::Cross, 20);
 	g_check.expect(b.quits == 1, "Yes closes the title");
 	b.quits = 0;
-	// A disc is put in the drive: it is said, and it has its tab.
+	// R1: from Home to the Library.
+	h.press(P::R1, 40);
+	g_check.expect(bp::libraryTab() == bp::TabLibrary, "R1 goes from Home to the Library");
+	// A disc is put in the drive: it is said, and it has its tab (after the Library's).
 	b.putDisc(1);
 	h.wait(40);
 	h.shot("01b-disc-put-in");
-	h.press(P::L1, 40);
+	h.press(P::R1, 40);
+	g_check.expect(bp::libraryTab() == bp::TabDisc, "R1 goes from the Library to the Disc tab");
 	h.shot("01c-disc-tab");
 	h.press(P::Triangle, 40);
 	h.shot("01d-disc-details");
-	// The disc's details have its image to make; so does Square on the tab.
-	h.press(P::Right, 6);
-	h.press(P::Right, 6);
-	h.press(P::Right, 20);
+	// The disc's page has its image to make (More, Square: its seventh row); so does Square on the tab.
+	h.press(P::Square, 20);
+	for (int i = 0; i < 6; i++)
+		h.press(P::Down, 4);
+	h.wait(10);
 	h.shot("01d2-disc-details-image");
 	h.press(P::Cross, 20);
 	g_check.expect(b.imagesAsked == 1, "Make an image in the disc's details asks for an image");
@@ -2431,7 +2560,7 @@ void shots(Harness& h)
 	h.shot("01e-disc-taken-out");
 	b.putDisc(2);
 	h.wait(20);
-	h.press(P::L1, 40);
+	h.press(P::R1, 40);
 	h.shot("01f-disc-not-a-game");
 	// A USB DVD drive beside the console's own: a CD in it, a DVD in the other.
 	// (The Disc tab is open from the shot before.)
@@ -2470,24 +2599,23 @@ void shots(Harness& h)
 	h.press(P::Left);
 	h.press(P::Triangle, 30);
 	h.shot("04-details");
-	h.press(P::Right);
-	h.press(P::Cross, 20);
+	// (R1: the Save states tab, its rows in focus.)
+	h.press(P::R1);
 	h.press(P::Down);
 	h.shot("05-details-states");
-	h.press(P::Circle);
-	h.press(P::Right);
-	h.press(P::Right);
-	h.press(P::Cross, 20);
+	h.press(P::L1);
+	// Square: More.
+	h.press(P::Square, 20);
 	h.shot("06-details-more");
 	h.press(P::Cross, 20);
 	h.shot("06b-details-start-with");
 	h.press(P::Circle);
-	// The game's other pictures, in the cover's place.
-	h.press(P::Down, 20);
+	// The game's other pictures, in the cover's place (L2 / R2).
+	h.press(P::R2, 20);
 	h.shot("06c-details-title-screen");
-	h.press(P::Down, 20);
+	h.press(P::R2, 20);
 	h.shot("06d-details-in-play");
-	h.press(P::Down, 10);
+	h.press(P::R2, 10);
 	h.press(P::Circle, 30);
 
 	// The other views.
@@ -2532,13 +2660,24 @@ void shots(Harness& h)
 	h.press(P::TouchPad, 40);
 	g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 0, "the touch pad goes through the ten views and comes back to the shelves");
 
-	// The other tabs.
-	h.press(P::R1, 40);
+	// The other places (the filter row: Up from the first shelf, then the chips).
+	for (int i = 0; i < 6 && bp::libraryChip() < 0; i++)
+		h.press(P::Up, 20);
+	g_check.expect(bp::libraryChip() >= 0, "Up from the first shelf goes to the filter row");
+	h.press(P::Right, 10); // (from Console, the place shown, to USB)
+	h.shot("09a-filter-row");
+	h.press(P::Cross, 40);
+	g_check.expect(bp::librarySource() == bp::Usb, "the USB chip shows the USB drives' games");
 	h.shot("09-usb-not-available");
-	h.press(P::R1, 40);
+	h.press(P::Right, 10);
+	h.press(P::Cross, 40);
+	g_check.expect(bp::librarySource() == bp::Network, "the Share chip shows the share's games");
 	h.shot("10-network");
-	h.press(P::L1, 30);
-	h.press(P::L1, 40);
+	h.press(P::Left, 10);
+	h.press(P::Left, 10);
+	h.press(P::Cross, 30);
+	h.press(P::Down, 30);
+	g_check.expect(bp::librarySource() == bp::Internal && bp::libraryChip() < 0, "back to the console's games, and Down out of the row");
 
 	// The settings: eleven pages (v1.0.0). The walk goes to a page and a row by their names.
 	const auto go = [&](const char* page, const char* row = nullptr) {
@@ -3021,9 +3160,10 @@ void shots(Harness& h)
 	h.press(P::Circle, 40);
 
 	// A game with a state from when it was closed: go on, or start over. (The shelf of the games
-	// last played, whose first is the one with such a state.)
-	h.press(P::Up, 30);
-	h.press(P::Up, 30);
+	// last played, whose first is the one with such a state: up to the filter row, and down to it.)
+	for (int i = 0; i < 6 && bp::libraryChip() < 0; i++)
+		h.press(P::Up, 30);
+	h.press(P::Down, 30);
 	for (int i = 0; i < 6; i++)
 		h.press(P::Left, 4);
 	h.wait(30);
@@ -3031,10 +3171,10 @@ void shots(Harness& h)
 	h.shot("16-resume-or-start-over");
 	h.press(P::Circle, 20);
 
-	// Its own options.
+	// Its own options: its page's third tab (R1 twice), Its settings.
 	h.press(P::Triangle, 20);
-	h.press(P::Right);
-	h.press(P::Right);
+	h.press(P::R1);
+	h.press(P::R1);
 	h.press(P::Cross, 40);
 	h.shot("17-game-options");
 	g_check.expect(bp::screen == bp::Screen::Settings && !bp::settingsGame().path.empty(), "a game's details open its own settings");
@@ -3086,9 +3226,8 @@ void shots(Harness& h)
 	h.press(P::Circle, 30);
 
 	// A game from the network: the loading screen with its progress.
-	h.press(P::R1, 30);
-	h.press(P::R1, 30);
-	h.press(P::Up, 20);
+	bp::showLibraryTab(bp::TabLibrary, bp::Network);
+	h.wait(30);
 	h.press(P::Cross, 2);
 	h.wait(100);
 	h.shot("20-loading");
@@ -3097,42 +3236,40 @@ void shots(Harness& h)
 	bp::openQuickMenu();
 	h.wait(40);
 	h.shot("21-quick-menu");
-	h.press(P::Down);
+	// (The tiles: Resume, Save state, ...; More's rows under them. bp::quickFocus goes to one by name.)
+	h.press(P::Right);
 	h.press(P::Cross, 60);
 	bp::openQuickMenu();
 	h.wait(30);
-	h.press(P::Down);
-	h.press(P::Down);
-	h.press(P::Down);
+	bp::quickFocus("slot");
+	h.wait(4);
 	h.press(P::Right);
 	h.press(P::Left);
 	h.shot("22-quick-menu-state-slot");
-	h.press(P::Down);
+	bp::quickFocus("disc");
+	h.wait(4);
 	h.press(P::Cross, 50);
 	h.shot("23-change-disc");
 	h.press(P::Circle, 30);
-	// "Record a GS dump", the row under Change disc: the backend records one and the game goes on.
-	h.press(P::Down);
+	// "Record a GS dump": the backend records one and the game goes on.
+	bp::quickFocus("gsdump");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.gsDumps == 1 && bp::screen == bp::Screen::None && !b.run.paused,
 		"Record a GS dump in the quick menu records one and resumes the game");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 4; i++) // to Change disc again
-		h.press(P::Down, 4);
 	// The game's patches and cheats, straight from the quick menu: its options open on that page,
-	// with the focus in its rows; leaving them is back in the quick menu. (Under Change disc: the
-	// GS dump's row, Game options, Patches and cheats.)
-	for (int i = 0; i < 3; i++)
-		h.press(P::Down, 4);
+	// with the focus in its rows; leaving them is back in the quick menu.
+	bp::quickFocus("patches");
 	h.wait(10);
 	h.press(P::Cross, 40);
 	h.shot("23b-patches-and-cheats-from-the-quick-menu");
 	g_check.expect(bp::screen == bp::Screen::Settings && b.gameOpen, "Patches and cheats in the quick menu opens the game's options");
 	h.press(P::Circle, 20);
 	h.press(P::Circle, 30);
-	g_check.expect(bp::screen == bp::Screen::Quick && !b.gameOpen, "and leaving them is back in the quick menu");
-	h.press(P::Down, 4);
+	g_check.expect(bp::screen == bp::Screen::Quick, "and leaving them is back in the quick menu");
+	bp::quickFocus("settings");
 	h.wait(10);
 	h.press(P::Cross, 40);
 	h.shot("24-settings-over-the-game");
@@ -3142,9 +3279,7 @@ void shots(Harness& h)
 	h.wait(30);
 	h.shot("25-message-and-toast");
 	h.press(P::Cross, 20);
-	// Settings, Fast forward, Restart game, Quit game.
-	for (int i = 0; i < 3; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("quit");
 	h.wait(20);
 	h.press(P::Cross, 20);
 	h.shot("26-quit-game");
@@ -3177,8 +3312,8 @@ void shots(Harness& h)
 	h.shot("28-start-failed");
 	h.press(P::Cross, 20);
 	b.startWillFail = false;
-	h.press(P::L1, 30);
-	h.press(P::L1, 40);
+	bp::showLibraryTab(bp::TabLibrary, bp::Internal);
+	h.wait(40);
 
 	// ---- the list's menu: a search typed on the keyboard, the order, favourites, hidden games
 	h.press(P::Square, 30);
@@ -3224,14 +3359,17 @@ void shots(Harness& h)
 	for (int i = 0; i < 9; i++)
 		h.press(P::TouchPad, 30);
 	h.wait(20);
-	// A favourite, from the details of the game that was found.
+	// A favourite, from the page of the game that was found: More (Square), its fifth row.
 	h.press(P::Triangle, 30);
-	h.press(P::L1, 30);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 4; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 30);
 	{
 		int favourites = 0;
 		for (const bp::GameInfo& g : b.list)
 			favourites += g.favourite ? 1 : 0;
-		g_check.expect(favourites == 1, "L1 in a game's details makes it a favourite");
+		g_check.expect(favourites == 1, "More > A favourite on a game's page makes it one");
 	}
 	h.shot("53-details-favourite");
 	h.press(P::Circle, 20);
@@ -3310,11 +3448,9 @@ void shots(Harness& h)
 		g_check.expect(b.getString(0, "PS5UI", "QuickView4").has_value(), "what is shown is kept as a fourth quick view");
 		h.press(P::Circle, 40);
 		g_check.expect(b.getInt(0, "PS5UI", "Sort").value_or(0) == 0, "Circle shows all games again");
-		// A collection: made from a game's details, and a shelf of its own.
+		// A collection: made from a game's page (More), and a shelf of its own.
 		h.press(P::Triangle, 30);
-		for (int i = 0; i < 3; i++)
-			h.press(P::Right, 4);
-		h.press(P::Cross, 20);
+		h.press(P::Square, 20);
 		h.press(P::Down, 4);
 		h.press(P::Down, 4);
 		h.press(P::Cross, 20);
@@ -3333,9 +3469,7 @@ void shots(Harness& h)
 		h.shot("55l-collection-shelf");
 		// Renamed, and given its own name back.
 		h.press(P::Triangle, 30);
-		for (int i = 0; i < 3; i++)
-			h.press(P::Right, 4);
-		h.press(P::Cross, 20);
+		h.press(P::Square, 20);
 		h.press(P::Down, 4);
 		h.press(P::Cross, 20);
 		h.shot("55m-rename");
@@ -3350,7 +3484,7 @@ void shots(Harness& h)
 				renamed += g.renamed ? 1 : 0;
 			g_check.expect(renamed == 1, "More > Rename gives the game another title");
 		}
-		h.press(P::Cross, 20); // More again: its own name is the fifth row now
+		h.press(P::Square, 20); // More again: its own name is the fifth row now
 		for (int i = 0; i < 4; i++)
 			h.press(P::Down, 4);
 		h.press(P::Cross, 20);
@@ -3371,7 +3505,10 @@ void shots(Harness& h)
 	}
 	// A game hidden, found among the hidden ones, and listed again.
 	h.press(P::Triangle, 30);
-	h.press(P::R1, 30);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 5; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 30);
 	h.shot("56-hide-question");
 	h.press(P::Left, 6);
 	h.press(P::Cross, 40);
@@ -3379,7 +3516,7 @@ void shots(Harness& h)
 		int hidden = 0;
 		for (const bp::GameInfo& g : b.list)
 			hidden += g.hidden ? 1 : 0;
-		g_check.expect(hidden == 1, "R1 in a game's details, answered yes, hides it");
+		g_check.expect(hidden == 1, "More > Hide it on a game's page, answered yes, hides it");
 	}
 	h.press(P::Square, 20);
 	for (int i = 0; i < 3; i++)
@@ -3390,12 +3527,15 @@ void shots(Harness& h)
 	h.press(P::Cross, 40);
 	h.shot("57-hidden-games");
 	h.press(P::Triangle, 30);
-	h.press(P::R1, 40);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 5; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 40);
 	{
 		int hidden = 0;
 		for (const bp::GameInfo& g : b.list)
 			hidden += g.hidden ? 1 : 0;
-		g_check.expect(hidden == 0, "R1 on a hidden game lists it again");
+		g_check.expect(hidden == 0, "More > List it again on a hidden game lists it again");
 	}
 	h.shot("57b-none-hidden");
 	h.press(P::Circle, 40);
@@ -3411,21 +3551,21 @@ void shots(Harness& h)
 	bp::openQuickMenu();
 	h.wait(40);
 	h.shot("58-quick-menu-more");
-	// (This game has a state saved by itself: "Load the auto-save" is the row after the slot's.)
-	for (int i = 0; i < 4; i++)
-		h.press(P::Down, 4);
+	// (This game has a state saved by itself: "Load the auto-save" is in More.)
+	bp::quickFocus("autosave");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.loadedSlot == -2 && !bp::active(), "Load the auto-save loads the state saved by itself, and the game goes on");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 5; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("undo");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.undone == 1 && !bp::active(), "Undo the last load is run, and the game goes on");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 6; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("achievements");
+	h.wait(4);
 	h.press(P::Cross, 20);
 	g_check.expect(b.overlay == 1 && bp::active(), "Achievements opens the emulator's list, and the game stays held");
 	// While that list is up the screens draw nothing and take no button.
@@ -3434,14 +3574,14 @@ void shots(Harness& h)
 	g_check.expect(b.overlay == 1, "the screens leave the controller to the list");
 	b.overlay = 0;
 	h.wait(20);
-	h.press(P::Down, 4);
+	bp::quickFocus("leaderboards");
+	h.wait(4);
 	h.press(P::Cross, 20);
 	g_check.expect(b.overlay == 2, "and Leaderboards its leaderboards");
 	b.overlay = 0;
 	h.wait(20);
 	// Out of the game again.
-	for (int i = 0; i < 8; i++)
-		h.press(P::Up, 4);
+	bp::quickFocus("quit");
 	h.wait(10);
 	h.press(P::Cross, 20);
 	h.press(P::Down);
@@ -3665,7 +3805,8 @@ void shots(Harness& h)
 	g_check.expect(!bp::careAsleep() && bp::screen == bp::Screen::Quick && b.run.paused,
 		"the quick menu's button ends the screen saver and leaves the menu up");
 	h.wait(100);
-	h.press(P::Up, 14); // (from Resume round to the last row: Quit game)
+	bp::quickFocus("quit");
+	h.wait(14);
 	h.press(P::Cross, 20);
 	h.press(P::Down);
 	h.press(P::Cross, 4);
@@ -3687,6 +3828,186 @@ void shots(Harness& h)
 	h.shot("40-settings-after-the-device-was-made-anew");
 	h.press(P::Down, 20);
 	h.shot("41-and-a-press-later");
+
+	// ---- a game's page, tab by tab, and the quick menu (the revamp's phase 4), reached directly
+	// (bp::goToGame, bp::quickFocus): what the walk above left open does not decide where they start.
+	{
+		const auto leaveAll = [&] {
+			for (int i = 0; i < 12 && (bp::dialogOpen() || bp::texturePacksOpen() || bp::screen == bp::Screen::Settings); i++)
+				h.press(P::Circle, 12);
+			if (b.run.valid)
+			{
+				b.run = bp::Running();
+				bp::gameStopped();
+				h.wait(30);
+			}
+		};
+		const auto game = [&](const char* serial) -> bp::GameInfo {
+			for (const bp::GameInfo& g : b.list)
+			{
+				if (g.serial == serial)
+					return g;
+			}
+			return b.list.front();
+		};
+		const auto page = [&](const char* serial) {
+			leaveAll();
+			bp::goToGame(game(serial), true);
+			h.wait(40);
+		};
+		const auto skinNamed = [](const char* name) {
+			for (int i = 0; i < bp::SkinCount; i++)
+			{
+				if (std::strcmp(bp::skins[i].name, name) == 0)
+					return i;
+			}
+			return 0;
+		};
+		const auto look = [&](int skin, int size, int text) {
+			b.setInt(0, "PS5UI", "Look", skin);
+			b.setInt(0, "PS5UI", "InterfaceSize", size);
+			b.setInt(0, "PS5UI", "TextSize", text);
+			bp::loadOptions();
+			h.wait(10);
+		};
+		look(0, 100, 0);
+		// A game with states, one made as it was closed among them: Resume, and every tab.
+		page("SLUS-29001");
+		h.shot("60-game-page-overview");
+		g_check.expect(bp::screen == bp::Screen::Library, "goToGame opens the game's page in the library");
+		h.press(P::R1, 30);
+		h.shot("60b-game-page-save-states");
+		h.press(P::Down, 30);
+		h.shot("60c-game-page-a-state-and-its-picture");
+		h.press(P::R1, 30);
+		h.shot("60d-game-page-its-settings");
+		h.press(P::R1, 30);
+		h.shot("60e-game-page-patches-and-cheats");
+		h.press(P::Down, 10);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings && b.gameOpen, "Patches and cheats > Cheats opens the game's own settings");
+		h.shot("60e2-game-page-cheats-opened");
+		h.press(P::Circle, 20);
+		h.press(P::Circle, 30);
+		g_check.expect(bp::screen == bp::Screen::Library, "and leaving them is back on the game's page");
+		h.press(P::R1, 30);
+		h.shot("60f-game-page-texture-packs");
+		h.press(P::Cross, 40);
+		g_check.expect(bp::texturePacksOpen(), "the Texture packs tab opens the texture pack manager");
+		h.press(P::Circle, 30);
+		h.press(P::Square, 30);
+		g_check.expect(bp::dialogOpen(), "Square on a game's page opens More");
+		h.shot("60g-game-page-more");
+		h.press(P::Circle, 20);
+		// More > A favourite (its fifth row for a game not renamed), and back.
+		const auto favourite = [&] {
+			for (const bp::GameInfo& g : b.list)
+			{
+				if (g.serial == "SLUS-29001")
+					return g.favourite;
+			}
+			return false;
+		};
+		const bool was = favourite();
+		h.press(P::Square, 30);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Down, 4);
+		h.press(P::Cross, 30);
+		g_check.expect(favourite() != was, "More > A favourite makes the game one");
+		h.shot("60h-game-page-a-favourite");
+		h.press(P::Square, 30);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Down, 4);
+		h.press(P::Cross, 30);
+		g_check.expect(favourite() == was, "and again not");
+		// Left of the tab's rows are the cover's buttons: Resume goes on from where it was closed.
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.wait(20);
+		h.shot("60i-game-page-overview-again");
+		// A game with no states: Play alone.
+		page("SLES-59003");
+		h.shot("61-game-page-no-save-states");
+		h.press(P::R1, 30);
+		h.shot("61b-game-page-no-save-states-tab");
+		// A long name, and a set of discs.
+		page("SLUS-29018");
+		h.shot("62-game-page-long-name");
+		page("SLUS-29008");
+		h.shot("63-game-page-disc-set");
+		// A light skin, the interface at 70 % and the largest text.
+		look(skinNamed("Clay"), 70, 2);
+		page("SLUS-29001");
+		h.shot("64-game-page-clay-70-largest");
+		h.press(P::R1, 30);
+		h.press(P::Down, 30);
+		h.shot("64b-game-page-clay-states");
+		h.press(P::R1, 30);
+		h.press(P::R1, 30);
+		h.shot("64c-game-page-clay-patches");
+		look(0, 100, 2);
+		page("SLUS-29018");
+		h.shot("64d-game-page-largest-text-long-name");
+		look(0, 100, 0);
+		leaveAll();
+		h.press(P::Circle, 30);
+
+		// The quick menu: nothing pinned; then pinned settings, changed in place.
+		const std::string pinsWere = b.getString(0, "PS5UI", "Pins").value_or("");
+		b.setString(0, "PS5UI", "Pins", "");
+		b.start(game("SLUS-29001"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(40);
+		g_check.expect(bp::screen == bp::Screen::Quick, "the quick menu is up over the game");
+		h.shot("65-quick-menu-nothing-pinned");
+		bp::quickFocus("load");
+		h.wait(20);
+		h.shot("65b-quick-menu-load-state");
+		bp::quickFocus("screenshot");
+		h.wait(4);
+		h.press(P::Cross, 30);
+		g_check.expect(b.screenshots == 1 && bp::screen == bp::Screen::Quick, "the Screenshot tile takes one, and the menu stays");
+		b.setString(0, "PS5UI", "Pins",
+			"EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar;EmuCore/GS.FrameGeneration;PS5UI.Look");
+		h.wait(20);
+		bp::quickFocus("resume");
+		h.wait(20);
+		h.shot("66-quick-menu-pinned");
+		const unsigned long long writes = b.writes;
+		h.press(P::Down, 10);
+		h.press(P::Down, 20);
+		h.press(P::Right, 20);
+		g_check.expect(b.writes > writes, "Right on a pinned setting writes it");
+		h.shot("66b-quick-menu-pinned-changed");
+		h.press(P::R1, 20);
+		h.press(P::Down, 10);
+		h.shot("66c-quick-menu-more");
+		h.press(P::Triangle, 30);
+		h.shot("67-quick-menu-editing-more");
+		h.press(P::Triangle, 30);
+		g_check.expect(bp::screen == bp::Screen::None && !b.run.paused, "Triangle ends the editing, and the game goes on");
+		leaveAll();
+		// A game of three discs.
+		b.start(game("SLUS-29008"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(30);
+		h.shot("68-quick-menu-a-set-of-discs");
+		// A light skin, the interface at 70 % and the largest text.
+		look(skinNamed("Clay"), 70, 2);
+		h.wait(20);
+		h.shot("69-quick-menu-clay-70-largest");
+		look(0, 100, 2);
+		h.shot("69b-quick-menu-largest-text");
+		look(0, 100, 0);
+		b.setString(0, "PS5UI", "Pins", pinsWere);
+		leaveAll();
+	}
 }
 
 // Every row of every settings page, changed in every way a controller can; then a long time of

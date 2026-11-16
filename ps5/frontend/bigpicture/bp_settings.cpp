@@ -1235,6 +1235,136 @@ void switchLayer()
 	toast(st.forGame ? "This game's own settings" : "The settings of all games", 2.f);
 }
 
+// ---- the pinned settings in the quick menu
+
+namespace
+{
+// The layer the values are read and written in, for as long as it lives: a pinned row's.
+struct Layered
+{
+	bool forGame, gameOpen;
+	explicit Layered(bool game) : forGame(st.forGame), gameOpen(st.gameOpen)
+	{
+		st.forGame = game;
+		st.gameOpen = game;
+	}
+	~Layered()
+	{
+		st.forGame = forGame;
+		st.gameOpen = gameOpen;
+	}
+	Layered(const Layered&) = delete;
+	Layered& operator=(const Layered&) = delete;
+};
+
+std::vector<Item> everyRow(const std::vector<Page>& pages)
+{
+	std::vector<Item> out;
+	for (Area& a : build(pages, true))
+	{
+		for (Section& s : a.sections)
+		{
+			for (Item& it : s.rows)
+			{
+				if (focusable(it.o))
+					out.push_back(std::move(it));
+			}
+		}
+	}
+	return out;
+}
+} // namespace
+
+std::vector<PinnedRow> pinnedRows(const GameInfo* game)
+{
+	const std::vector<std::string> ids = pins();
+	if (ids.empty())
+		return {};
+	const bool forGameWas = st.forGame, openWas = st.gameOpen;
+	const GameInfo gameWas = st.game;
+	const std::string titleWas = st.gameTitle;
+	std::vector<Item> own, shared;
+	if (game != nullptr)
+	{
+		st.forGame = st.gameOpen = true;
+		st.game = *game;
+		st.gameTitle = game->title;
+		std::vector<Page> pages;
+		pages.push_back(summaryPage());
+		for (Page& page : settingsPages(true))
+			pages.push_back(std::move(page));
+		own = everyRow(pages);
+	}
+	st.forGame = st.gameOpen = false;
+	shared = everyRow(settingsPages(false));
+	st.forGame = forGameWas;
+	st.gameOpen = openWas;
+	st.game = gameWas;
+	st.gameTitle = titleWas;
+	std::vector<PinnedRow> out;
+	for (const std::string& id : ids)
+	{
+		const auto find = [&id](const std::vector<Item>& rows) {
+			return std::find_if(rows.begin(), rows.end(), [&id](const Item& it) { return settingsIdOf(it.o) == id; });
+		};
+		if (const auto it = find(own); it != own.end())
+			out.push_back(PinnedRow{*it, true});
+		else if (const auto other = find(shared); other != shared.end())
+			out.push_back(PinnedRow{*other, false});
+	}
+	return out;
+}
+
+std::string pinnedValue(const PinnedRow& row)
+{
+	const Layered layered(row.forGame);
+	return valueText(row.item.o);
+}
+
+bool pinnedChanged(const PinnedRow& row)
+{
+	const Layered layered(row.forGame);
+	const Option& o = row.item.o;
+	if (!isSetting(o))
+		return false;
+	return row.forGame && layer(o) == Own ? hasOwn(o) : differsFromDefault(o);
+}
+
+bool pinnedUsable(const PinnedRow& row)
+{
+	const Layered layered(row.forGame);
+	return usable(row.item.o);
+}
+
+void pinnedChange(PinnedRow& row, int dir, int repeats)
+{
+	const Layered layered(row.forGame);
+	if (sided(row.item.o))
+		change(row.item.o, dir, repeats);
+}
+
+void pinnedActivate(PinnedRow& row)
+{
+	const Layered layered(row.forGame);
+	Option& o = row.item.o;
+	const int n = choiceCount(o);
+	if (n > 0 && o.kind != Option::Bool)
+	{
+		// (The settings would ask in a list, whose answer comes when this layer is gone: the next one.)
+		if (!usable(o))
+			return;
+		setChoice(o, (std::max(choiceNow(o), -1) + 1) % n);
+		noteChanged(o);
+		if (o.flags & Option::Front)
+			loadOptions();
+		return;
+	}
+	if (o.kind == Option::Bool || o.kind == Option::IntRange || o.kind == Option::FloatRange)
+		change(o, 1, 0);
+	else
+		activate(o);
+}
+
 // ---- drawing
 
 Palette palette()
@@ -1947,7 +2077,7 @@ void settingsScreen()
 	if (in.options)
 	{
 		leave();
-		topBar(dl, librarySource(), running.valid, Reach::None);
+		topBar(dl, libraryTab(), running.valid, Reach::None);
 		endScreen();
 		return;
 	}
@@ -1963,8 +2093,9 @@ void settingsScreen()
 			searchScreen(dl);
 			break;
 	}
-	// Over the library's tab, which stays lit: the Settings are not a tab.
-	topBar(dl, librarySource(), running.valid, Reach::None);
+	// Over the tab they were opened from, which stays lit: the settings are no tab (OPTIONS opens and
+	// closes them).
+	topBar(dl, libraryTab(), running.valid, Reach::None);
 	endScreen();
 }
 

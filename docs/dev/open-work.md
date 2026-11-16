@@ -28,6 +28,26 @@ item is done or something new is learned; delete what no longer applies.
   Clay, Gloss) on the new layout; how fast the home is drawn (what is changed is looked at again every
   half second: about 700 values). The README's other sections still name some settings by their old
   labels and old pages.
+- The interface revamp, phase 4A (bp_home.cpp; the top bar, the library's filter row and strip in
+  bp_library.cpp): checked on the PC only (crawl, shots). Not run on a console. To check there: Home
+  after the start-up, its Resume (the newest state: the one made at closing or a slot) and Game page;
+  "Right now" with a real texture pack download, a disc in the drive and a share that answers or not;
+  L1 / R1 through Home, Library and Disc, Options to the settings and back to the same tab, the
+  "Right now" card opening the texture pack manager during a download; the filter row's All (every place
+  at once) with USB drives and a share, and its Favourites / Never played / Collections chips; the
+  strip's save state count (Backend::states for the focused game, once per game); choosing a disc
+  for a running game (the filter row's places, L1 / R1); how fast Home is drawn with a few thousand
+  games (it sorts the played ones every frame).
+- The interface revamp, phase 4B (a game's page in bp_library.cpp, the quick menu in bp_quick.cpp):
+  checked on the PC only (crawl, shots). Not run on a console. To check there: how long a game's page
+  takes to open (it opens the game's own settings once to count them, its patches, cheats and memory
+  card; texture packs from the manager's list); the Overview's description, which now asks
+  PS5About (Wikipedia, [PS5] FetchAbout) for every game whose page is opened, not only the disc in
+  the drive; the quick menu's Screenshot tile (PS5Shots::Take while the game is paused under the
+  menu: is the picture the game's, and is the menu not in it); pinned settings changed in the quick
+  menu (written to the running game's own settings where a game can have one, as the Settings do;
+  Apply changes now for those the game takes at its start); how fast the quick menu is drawn with
+  several settings pinned (their rows are made once when it opens, from every page).
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.

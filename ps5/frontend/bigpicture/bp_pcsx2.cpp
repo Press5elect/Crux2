@@ -5705,6 +5705,13 @@ public:
 
 	bool imageBusy() override { return s_disc_copying.load(std::memory_order_acquire); }
 
+	bool screenshot() override
+	{
+		// (As the hotkey: the game's picture, at its internal resolution, on a thread of its own.)
+		PS5Shots::Take();
+		return true;
+	}
+
 	bp::GameAbout about(const bp::GameInfo& game) override
 	{
 		bp::GameAbout out;

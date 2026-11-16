@@ -8,6 +8,28 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Changed: the top bar's tabs are Home, Library and Disc (with a disc in a drive), L1 / R1; Options
+  opens the settings as before. Home is the first screen after the start-up: the game played last
+  with Resume (from its newest saved state) and its game page, what goes on right now (texture pack
+  downloads, opening the texture pack manager; a disc in a drive; the share, the console's and USB
+  drives' games) and the games played lately. The
+  library's places are a filter row under the bar (All, Console, USB, Share, then Favourites, Never
+  played and Collections; Up from the first row of games), with the number of games, the order and
+  the view at its right; the views that did not show the focused game's details have a strip with
+  them at the bottom. All ten views, the quick views, the list's menu and choosing a disc for a
+  running game are as before. Not yet run on a console.
+- Changed: a game's details are its page: the cover with Resume (from the state it was closed with,
+  or its newest) and Start from the beginning, a line of what is known of it, and tabs (L1 / R1):
+  Overview (where you left off, its own settings, memory card, patches and cheats, texture pack, its
+  file, what it is), Save states, Its settings, Patches and cheats, Texture packs. Square is More,
+  which now also has A favourite, Hide it, the next disc, Make an image of the disc and starting
+  over without the state it was closed with (they were L1, R1, Square and a button before); L2 / R2
+  show its other pictures. Not yet run on a console.
+- Changed: the quick menu laid out anew: how long the game was played this time; tiles for Resume,
+  Save state, Load state, Screenshot (new: the game's picture without the menu), Change disc and
+  Quit game; the settings pinned in the Settings, changed in place (the game's own value where a
+  game can have one); More with every other entry, chosen and ordered with Triangle as before. Not
+  yet run on a console.
 - Changed: the settings rebuilt: a home with a search bar, eight areas (Picture, Sound, Controls,
   Games and saves, Emulation, Network, Interface, System) that say what is set and how many settings
   are changed, the pinned settings and the ones changed lately; an area's page with its sections, one
