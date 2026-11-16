@@ -6492,7 +6492,7 @@ index 77a28df..eccb4d0 100644
  
  void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash, const GIFRegTEX0& TEX0,
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index f9aab2a..845b3de 100644
+index f9aab2a..1d90952 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -24,10 +24,15 @@
@@ -6574,7 +6574,7 @@ index f9aab2a..845b3de 100644
 +#ifdef __PROSPERO__
 +	// Crux2 ([EmuCore/GS] PS5SharedTargetMemory): render targets share VMA's blocks, which are then made large
 +	// (512 MiB) so that a block is not mapped and cleared again for each target.
-+	if (Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", false))
++	if (Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", true))
 +		ci.preferredLargeHeapBlockSize = 512ull * 1024 * 1024;
 +#endif
 +
@@ -7655,7 +7655,7 @@ index f9aab2a..845b3de 100644
 +	m_ps5_skip_barriers = skip;
 +	m_ps5_rt_no_compression = no_compression;
 +	m_ps5_rov_keep_pass = rov_keep;
-+	m_ps5_shared_target_memory = Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", false);
++	m_ps5_shared_target_memory = Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", true);
 +	m_ps5_fg_debug = Host::GetBoolSettingValue("EmuCore/GS", "PS5FrameGenDebug", false);
 +
 +	const char* when = at_create ? "" : " (this game)";

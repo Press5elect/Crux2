@@ -196,7 +196,8 @@ frame, about 8 ms. The GIF and vertex handlers are about 20%; the recorder threa
   format F xCOUNT from +offset; ...` (offsets from the program's base, in `symbols.txt`) and lists
   40 functions on the stack. Candidates: `GSRendererHW.cpp:8913` (the draw's copy),
   `GSTextureCache.cpp:6639`, `:6329`, `GSRendererHW.cpp:4386`, `:5127`, `:10879`.
-- Switches to compare on the console, both off: `[EmuCore/GS] PS5SharedTargetMemory` (no dedicated
+- The two switches, on by default since `6ce03c1`'s measurements (the owner's decision, 2026-11-16;
+  the change of defaults has not been built or tested yet): `[EmuCore/GS] PS5SharedTargetMemory` (no dedicated
   allocation, VMA blocks of 512 MiB) and `[PS5] StreamZero` (`RADV_PS5_STREAM_ZERO=1`, Mesa patch
   0021: non-temporal zeroing in place of memset and the flush).
 - To do after the caller is known: keep or round that caller's texture so the pool finds it. A

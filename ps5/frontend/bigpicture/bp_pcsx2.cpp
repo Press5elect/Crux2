@@ -4903,7 +4903,7 @@ public:
 			rows.push_back(Toggle("Streamed Memory Clearing",
 				"Clears newly allocated graphics memory with non-temporal writes instead of clearing and flushing it. Reduces the "
 				"time spent creating textures.",
-				"PS5", "StreamZero", false, A | bp::Option::Expert | bp::Option::Restart));
+				"PS5", "StreamZero", true, A | bp::Option::Expert | bp::Option::Restart));
 			rows.push_back(Range("Wait for the GPU: checking for",
 				"How long the driver keeps checking whether the GPU is done before it starts sleeping between checks.", "PS5", "GpuWaitSpinUs", 1500, 0, 5000, 250,
 				" us", A | bp::Option::Advanced | bp::Option::Restart));

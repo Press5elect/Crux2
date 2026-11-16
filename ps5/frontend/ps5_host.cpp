@@ -394,8 +394,8 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "ThreadPriorities", false);
 	b("PS5", "FastPipelines", true);
 	b("PS5", "ThreadedRecording", true);
-	b("PS5", "StreamZero", false); // the driver clears new graphics memory with streaming writes (experimental)
-	b(GS, "PS5SharedTargetMemory", false); // render targets from shared memory blocks (experimental)
+	b("PS5", "StreamZero", true); // the driver clears new graphics memory with streaming writes (on since the owner's console runs of 2026-11-16)
+	b(GS, "PS5SharedTargetMemory", true); // render targets from shared memory blocks (on since the owner's console runs of 2026-11-16)
 	b("PS5", "UpdateAtStart", true);
 	b("PS5", "FixesAtStart", true);
 	// The anti-aliasing row (one for FXAA, SMAA and SSAA): a settings file from before it says what was chosen in
@@ -2358,10 +2358,10 @@ int main(int argc, char* argv[])
 
 	// How the driver clears the graphics memory it hands out (Settings > Interface > PlayStation 5 > Streamed Memory
 	// Clearing): the driver reads RADV_PS5_STREAM_ZERO when it makes a buffer, so a change waits for the next start.
-	if (Host::GetBaseBoolSettingValue("PS5", "StreamZero", false))
+	if (Host::GetBaseBoolSettingValue("PS5", "StreamZero", true))
 	{
 		if (setenv("RADV_PS5_STREAM_ZERO", "1", 1) == 0)
-			ps5px_log("graphics driver: new graphics memory is cleared with streaming writes (StreamZero, experimental)");
+			ps5px_log("graphics driver: new graphics memory is cleared with streaming writes (StreamZero)");
 		else
 			ps5px_log("RADV_PS5_STREAM_ZERO could not be set: the driver clears memory as usual");
 	}
