@@ -14,6 +14,7 @@
 // with the console's own start-up.
 
 #include "bp_internal.h"
+#include "bp_settings_model.h"
 #include "bp_shown_text.h"
 
 #include <cctype>
@@ -331,8 +332,25 @@ struct LibraryState
 	char letter = 0;
 	double letterAt = -10;
 } lib;
-LibraryState otherTabs[SourceCount];
+// The place of "All" in the filter row: every place at once, the disc drive's left out.
+constexpr int AllSources = SourceCount;
+LibraryState otherTabs[SourceCount + 1];
 bool sourceChosen = false;
+// The top bar's tab the library screen is on: Home (the first after the start-up), the Library,
+// or the Disc (lib.source is then DiscDrive).
+int tab = TabHome;
+// The filter row under the top bar (the places, favourites, never played, the collections): the
+// chip in focus, -1 while the focus is in the games. Up from the games' first row goes to it.
+int chipFocus = -1;
+// Where the views draw: under the top bar and the filter row, above the focused game's strip and
+// the hint bar (made for each frame by the library screen).
+float bodyTop = 96, bodyBottom = 1008;
+
+// Whether a game is of the place shown (All: of any place but the disc drive).
+bool ofPlace(const Game& g)
+{
+	return lib.source == AllSources ? g.info.source != DiscDrive : g.info.source == lib.source;
+}
 // ---- what the list is narrowed to
 //
 // On every tab alike: a part of a title (typed on the keyboard), which games show at all, and
@@ -777,16 +795,26 @@ void switchSource(int source)
 	}
 }
 
-// The tab the library opens on: the one last open, if it is still there.
+// The place the library is kept on (options().source): the one last shown, if it is still there.
+int keptPlace()
+{
+	const int place = std::clamp(options().source, 0, static_cast<int>(AllSources));
+	return (place == DiscDrive || (place == Usb && !be->usbWanted())) ? Internal : place;
+}
+
+// The place the library opens on: the one last shown, if it is still there.
 void chooseSource()
 {
 	if (!sourceChosen)
 	{
 		sourceChosen = true;
-		lib.source = std::clamp(options().source, 0, static_cast<int>(Network));
+		lib.source = keptPlace();
 	}
 	if ((lib.source == Usb && !be->usbWanted()) || (lib.source == DiscDrive && !drive.present))
-		switchSource(Internal);
+		switchSource(keptPlace());
+	// (The Disc tab goes with the disc: the library is there again.)
+	if (tab == TabDisc && lib.source != DiscDrive)
+		tab = TabLibrary;
 }
 
 // The views: shelves by what the games are; every cover in a grid; a list with the focused game
@@ -844,7 +872,7 @@ size_t listsKey(bool selectDisc)
 bool listed(const Game& g, bool selectDisc)
 {
 	// (A disc is chosen for a running game from all there are: nothing is narrowed there.)
-	return g.info.source == lib.source && (!selectDisc || g.info.kind != GameInfo::Program) && !hiddenDisc(g, selectDisc) &&
+	return ofPlace(g) && (!selectDisc || g.info.kind != GameInfo::Program) && !hiddenDisc(g, selectDisc) &&
 		   (selectDisc || lib.source == DiscDrive || matches(g));
 }
 
@@ -1011,7 +1039,7 @@ void buildShelves(bool selectDisc)
 		recent.byTitle = false;
 		for (size_t i = 0; i < games.size(); i++)
 		{
-			if (games[i].info.source != lib.source || games[i].info.lastPlayed <= 0 || games[i].info.hidden)
+			if (!ofPlace(games[i]) || games[i].info.lastPlayed <= 0 || games[i].info.hidden)
 				continue;
 			// A set is there once, by the disc that stands for it.
 			size_t shown = i;
@@ -1189,17 +1217,17 @@ void emptyLibrary(ImDrawList* dl, bool selectDisc)
 	const bool busy = be->scanning() && lib.source != DiscDrive;
 	if (!selectDisc && lib.source != DiscDrive && narrowed() && !busy)
 	{
-		// The tab has games, or may have: none of them is one the list is narrowed to.
+		// The place has games, or may have: none of them is one the list is narrowed to.
 		title = "Nothing to show here";
 		if (nar.filtered() || !nar.collection.empty())
-			body = "No game on this tab is one of these:\n" + narrowText();
+			body = "No game here is one of these:\n" + narrowText();
 		else if (!nar.search.empty())
-			body = "No game on this tab has \"" + nar.search + "\" in its name" +
+			body = "No game here has \"" + nar.search + "\" in its name" +
 				   (nar.show == ShowFavourites ? " among the favourites." : nar.show == ShowHidden ? " among the hidden games." : ".");
 		else if (nar.show == ShowFavourites)
-			body = "No game on this tab is a favourite yet.\nTriangle on a game opens its details: L1 there makes it one.";
+			body = "No game here is a favourite yet.\nTriangle on a game opens its page: More (Square) there makes it one.";
 		else
-			body = "No game on this tab is hidden.\nTriangle on a game opens its details: R1 there hides it.";
+			body = "No game here is hidden.\nTriangle on a game opens its page: More (Square) there hides it.";
 		foot = "Circle shows all games again; Square opens the list's menu.";
 	}
 	else if (lib.source == DiscDrive)
@@ -1274,32 +1302,53 @@ void emptyLibrary(ImDrawList* dl, bool selectDisc)
 	text(dl, regular(), 24, x + 220, y + h - 64, col::faint, foot.c_str());
 }
 
-// ---- the details panel: the game, what is known of it, and what can be done with it before it
-// starts.
+// ---- a game's page: the game, what is known of it, and what can be done with it before it starts
+// (the details of earlier versions, laid out anew in the interface's revamp, phase 4).
+//
+// The cover on the left with the ways to start the game under it (Resume when it has a state to go
+// on from, Start from the beginning); beside it its name, a line of what is known of it, and tabs
+// (L1 / R1): Overview (cards of where it was left, its own settings, its memory card, its patches and
+// cheats, its texture pack, its file; and what it is), Save states, Its settings, Patches and cheats,
+// Texture packs. Left and right go between the cover's buttons and the tab's rows; L2 / R2 put the
+// game's other pictures in the cover's place; Square is More (what is done with a game less often:
+// the start with the console's own start-up, a favourite, hidden, renamed, collections, its
+// pictures, its next disc, an image of a disc); Circle goes back.
 
-enum DetailsPage { PageActions, PageStates };
-enum { ActionPlay, ActionState, ActionOptions, ActionImage, ActionMore };
+enum GameTab { GameOverview, GameStates, GameOwn, GamePatches, GameTextures };
+const char* const gameTabNames[] = {"Overview", "Save states", "Its settings", "Patches and cheats", "Texture packs"};
 
-// The details' buttons for a game: a disc in a drive also has its image to make.
-std::vector<int> actionsOf(const Game& g)
+// What the page says of the game that has to be looked up (its own settings, its patches, its card,
+// its texture pack): when it opens, and again when it is back from another screen.
+struct GameFacts
 {
-	if (g.info.source == DiscDrive)
-		return {ActionPlay, ActionState, ActionOptions, ActionImage, ActionMore};
-	return {ActionPlay, ActionState, ActionOptions, ActionMore};
-}
+	bool own = false;                  // the game can have settings of its own (a serial or a CRC)
+	std::vector<std::string> ownRows;  // the settings it has values of its own for, by their labels
+	std::vector<std::string> patchesOn, cheatsOn;
+	int patchesKnown = 0, cheatsKnown = 0;
+	bool cheatsEnabled = false;
+	std::string card, cardNote;        // the card in slot 1, and what is said of the game's own card
+	bool pack = false, packMeasured = false;
+	uint64_t packBytes = 0;
+	std::string packPlace;
+	int packs = 0;
+};
 
 struct DetailsState
 {
-	int page = PageActions;
-	int action = 0;
-	int row = 0; // in the page's list
+	int tab = GameOverview;
+	int side = 0;   // 0 the buttons under the cover, 1 the tab's rows
+	int button = 0;
+	int row = 0;    // in the tab's rows
 	float scroll = 0;
+	float tabAt = 0; // where the tab's line is, on its way to the tab
 	std::vector<StateInfo> states;
 	std::string path; // the game they are of
 	// What stands in the cover's place: 0 the cover, 1 the game's title screen, 2 a picture of it
-	// being played (up and down go through those it has).
+	// being played (L2 and R2 go through those it has).
 	int picture = 0;
-	bool hasPicture[3] = {true, false, false}; // as the panel last found them
+	bool hasPicture[3] = {true, false, false}; // as the page last found them
+	GameFacts facts;
+	int drawnAt = -10; // the frame the page was last drawn: older, the facts are looked up again
 } det;
 
 Game* gameByPath(const std::string& path)
@@ -1310,6 +1359,176 @@ Game* gameByPath(const std::string& path)
 			return &g;
 	}
 	return nullptr;
+}
+
+// The tabs a game's page has: a game whose CRC is not known has no settings, states or patches of its
+// own (the emulator keeps them by it); Texture packs is there where the console has the manager.
+std::vector<int> tabsOf(const Game& g)
+{
+	std::vector<int> tabs = {GameOverview};
+	if (g.info.crc != 0)
+	{
+		tabs.push_back(GameStates);
+		tabs.push_back(GameOwn);
+		tabs.push_back(GamePatches);
+	}
+	if (be->texturePackShelf() != nullptr && !g.info.serial.empty() && g.info.kind == GameInfo::PS2)
+		tabs.push_back(GameTextures);
+	return tabs;
+}
+
+// The newest state it has (the one made when it was closed, a slot's, the one made by itself), not a
+// slot's earlier one; false when it has none.
+bool newestOf(const std::vector<StateInfo>& states, StateInfo& out)
+{
+	bool found = false;
+	for (const StateInfo& s : states)
+	{
+		if (!s.backup && (!found || s.when > out.when))
+		{
+			out = s;
+			found = true;
+		}
+	}
+	return found;
+}
+
+// The buttons under the cover: Resume (a state to go on from: the one it was closed with, else the
+// newest) and Start from the beginning; Play alone for a game with no state. A disc being chosen for
+// the running game: Insert disc.
+enum { ButtonResume, ButtonStart, ButtonInsert };
+std::vector<int> buttonsOf(const Game& g, bool selectDisc)
+{
+	if (selectDisc)
+		return {ButtonInsert};
+	StateInfo newest;
+	if (resumeState(g) || newestOf(det.states, newest))
+		return {ButtonResume, ButtonStart};
+	return {ButtonStart};
+}
+
+// The rows of a tab that the focus can be on.
+int rowsOf(int tab)
+{
+	switch (tab)
+	{
+		case GameStates:
+			return static_cast<int>(det.states.size());
+		case GameOwn:
+		case GameTextures:
+			return 1;
+		case GamePatches:
+			return 2;
+		default:
+			return 0;
+	}
+}
+
+// Whether the game has a value of its own for an option (the open game's, Backend::openGame).
+bool ownValue(const Option& o)
+{
+	const char* const s = o.section.c_str();
+	const char* const k = o.key.c_str();
+	switch (o.kind)
+	{
+		case Option::Bool:
+			return be->getBool(Own, s, k).has_value();
+		case Option::IntList:
+		case Option::IntRange:
+			return be->getInt(Own, s, k).has_value();
+		case Option::FloatList:
+		case Option::FloatRange:
+			return be->getFloat(Own, s, k).has_value();
+		case Option::StringList:
+			return be->getString(Own, s, k).has_value();
+		case Option::Combo:
+			for (const Option::Part& part : o.parts)
+			{
+				if (part.isInt ? be->getInt(Own, part.section.c_str(), part.key.c_str()).has_value() :
+								 be->getBool(Own, part.section.c_str(), part.key.c_str()).has_value())
+					return true;
+			}
+			return false;
+		default:
+			return false;
+	}
+}
+
+void lookUp(const Game& g, bool selectDisc)
+{
+	det.facts = GameFacts();
+	GameFacts& f = det.facts;
+	if (g.info.crc != 0)
+		det.states = be->states(g.info.serial, g.info.crc, true);
+	if (selectDisc)
+		return;
+	// (A game's own settings are read with them open, and closed again at once.)
+	if (g.info.crc != 0 && !be->running().valid && be->openGame(g.info))
+	{
+		f.own = true;
+		for (const Page& page : settingsPages(true))
+		{
+			if (page.name == "Patches" || page.name == "Cheats")
+				continue;
+			for (const Option& o : page.rows)
+			{
+				if ((o.flags & (Option::OneGame | Option::Front | Option::AllGames)) || o.label.empty() || !ownValue(o))
+					continue;
+				if (std::find(f.ownRows.begin(), f.ownRows.end(), o.label) == f.ownRows.end())
+					f.ownRows.push_back(o.label);
+			}
+		}
+		for (int cheats = 0; cheats < 2; cheats++)
+		{
+			const Page page = be->patchesPage(cheats != 0);
+			for (const Option& o : page.rows)
+			{
+				if (o.kind != Option::Bool || !(o.flags & Option::OneGame))
+					continue;
+				(cheats ? f.cheatsKnown : f.patchesKnown)++;
+				if (be->getBool(Own, o.section.c_str(), o.key.c_str()).value_or(false))
+					(cheats ? f.cheatsOn : f.patchesOn).push_back(o.label);
+			}
+		}
+		f.cheatsEnabled = be->getBool(Own, "EmuCore", "EnableCheats").value_or(be->getBool(Shared, "EmuCore", "EnableCheats").value_or(false));
+		const Page cards = be->memoryCardsPage(Own);
+		for (const Option& o : cards.rows)
+		{
+			if (o.kind == Option::Info && o.label == "This game's card" && o.info)
+				f.cardNote = o.info();
+			if (o.kind == Option::StringList && o.key == "Slot1_Filename" && f.card.empty())
+			{
+				const std::string now = be->getString(Own, "MemoryCards", "Slot1_Filename")
+											.value_or(be->getString(Shared, "MemoryCards", "Slot1_Filename").value_or(o.defString));
+				for (size_t i = 0; i < o.strings.size() && i < o.names.size(); i++)
+				{
+					if (o.strings[i] == now)
+						f.card = o.names[i];
+				}
+				if (f.card.empty())
+					f.card = now.empty() ? std::string("No card") : cardTitle(now);
+			}
+		}
+		be->closeGame();
+	}
+	if (TexturePackShelf* shelf = be->texturePackShelf(); shelf != nullptr && !g.info.serial.empty())
+	{
+		const std::vector<PackPlace> places = shelf->packPlaces();
+		for (const InstalledPack& pack : shelf->installedPacks())
+		{
+			if (pack.serial != g.info.serial || pack.state != InstalledPack::Whole)
+				continue;
+			f.packs++;
+			// (The one the game reads, else the first found.)
+			if (!f.pack || pack.read)
+			{
+				f.pack = true;
+				f.packMeasured = pack.measured;
+				f.packBytes = pack.bytes;
+				f.packPlace = (pack.place >= 0 && pack.place < static_cast<int>(places.size())) ? places[static_cast<size_t>(pack.place)].name : std::string();
+			}
+		}
+	}
 }
 
 // The collections a game is in, to put it into one or take it out: the list comes back after
@@ -1359,49 +1578,6 @@ void collectionsOf(const std::string& path)
 	});
 }
 
-// Details > More: what is done with a game less often.
-void moreMenu(const Game& g)
-{
-	const GameInfo info = g.info;
-	const std::string title = g.title;
-	const bool renamed = info.renamed;
-	std::vector<std::string> names = {ICON_FA_POWER_OFF "   Start with...", ICON_FA_PEN "   Rename", ICON_FA_LAYER_GROUP "   Collections",
-		ICON_FA_IMAGES "   Fetch its pictures"};
-	if (renamed)
-		names.push_back(ICON_FA_ROTATE_LEFT "   Its own name again");
-	pick(title, std::move(names), -1, [info, title](int choice) {
-		switch (choice)
-		{
-			case 0:
-				pick("Start " + title + " with", {"The game straight away (fast boot)", "The console's own start-up first (full boot)"}, -1,
-					[info](int boot) {
-						lib.details = false;
-						launchGame(info, INT_MIN, boot == 0 ? 1 : 2);
-					});
-				break;
-			case 1:
-				editText("Its title in the lists", title, false, [info](const std::string& typed) {
-					const std::string name = keptName(typed);
-					if (name.empty())
-						return;
-					be->setTitle(info, name);
-					toast("It is listed as \"" + name + "\" now. More > Its own name again undoes that.", 5.f);
-				}, 80);
-				break;
-			case 2:
-				collectionsOf(info.path);
-				break;
-			case 3:
-				be->fetchPictures(&info, true);
-				break;
-			case 4:
-				be->setTitle(info, std::string());
-				toast("It has its own name again.", 3.f);
-				break;
-		}
-	});
-}
-
 void openDetails(const Game& g)
 {
 	lib.details = true;
@@ -1411,6 +1587,155 @@ void openDetails(const Game& g)
 		det.states = be->states(g.info.serial, g.info.crc, true);
 }
 
+// The set's next disc: it stands for the set from here, and the page is its own.
+void nextDisc(Game& g)
+{
+	if (!setsGrouped || g.setSize < 2)
+		return;
+	const std::vector<size_t>& discs = discSets[g.set];
+	size_t at = 0;
+	for (size_t i = 0; i < discs.size(); i++)
+	{
+		if (&games[discs[i]] == &g)
+			at = i;
+	}
+	Game& next = games[discs[(at + 1) % discs.size()]];
+	frontChoice[next.set] = next.info.path;
+	setsDirty = true;
+	lib.flatPath = next.info.path;
+	const int tab = det.tab;
+	openDetails(next);
+	det.tab = tab;
+}
+
+void hideOrList(Game& g)
+{
+	const GameInfo info = g.info;
+	if (info.hidden)
+	{
+		g.info.hidden = false;
+		libraryGeneration++;
+		be->setHidden(info, false);
+		lib.details = false;
+		toast("It is listed again.", 3.f);
+		return;
+	}
+	confirm("Hide " + g.title + "?",
+		"It is not listed any more; nothing of it is deleted.\nTo see it again: Square in the library, Show, Hidden games; More > List it again "
+		"on its page brings it back.",
+		[info](bool yes) {
+			if (!yes)
+				return;
+			be->setHidden(info, true);
+			lib.details = false;
+			toast("Hidden. Square > Show > Hidden games has it.", 5.f);
+		},
+		"Hide it", "Keep it");
+}
+
+// More (Square on a game's page): what is done with a game less often.
+void moreMenu(const Game& g)
+{
+	const GameInfo info = g.info;
+	const std::string title = g.title;
+	const bool renamed = info.renamed;
+	// (The first five are where they always were; what was on the page's buttons and L1 / R1 before
+	// comes after them.)
+	enum { MoreStartWith, MoreRename, MoreCollections, MorePictures, MoreOwnName, MoreFavourite, MoreHide, MoreNextDisc, MoreImage, MoreFresh };
+	std::vector<std::string> names = {ICON_FA_POWER_OFF "   Start with...", ICON_FA_PEN "   Rename", ICON_FA_LAYER_GROUP "   Collections",
+		ICON_FA_IMAGES "   Fetch its pictures"};
+	std::vector<int> ids = {MoreStartWith, MoreRename, MoreCollections, MorePictures};
+	const auto add = [&](int id, std::string name) {
+		ids.push_back(id);
+		names.push_back(std::move(name));
+	};
+	if (renamed)
+		add(MoreOwnName, ICON_FA_ROTATE_LEFT "   Its own name again");
+	add(MoreFavourite, info.favourite ? ICON_FA_STAR "   Not a favourite any more" : ICON_FA_STAR "   A favourite");
+	add(MoreHide, info.hidden ? ICON_FA_EYE "   List it again" : ICON_FA_EYE_SLASH "   Hide it");
+	if (setsGrouped && g.setSize > 1)
+		add(MoreNextDisc, ICON_FA_COMPACT_DISC "   The next disc (this is disc " + std::to_string(g.discOrder) + " of " + std::to_string(g.setSize) + ")");
+	if (info.source == DiscDrive)
+		add(MoreImage, be->imageBusy() ? ICON_FA_FLOPPY_DISK "   Make an image (one is being made)" : ICON_FA_FLOPPY_DISK "   Make an image of the disc");
+	if (resumeState(g))
+		add(MoreFresh, ICON_FA_TRASH "   Delete the state it was closed with, and start from the beginning");
+	pick(title, std::move(names), -1, [info, title, ids](int choice) {
+		if (choice < 0 || choice >= static_cast<int>(ids.size()))
+			return;
+		switch (ids[static_cast<size_t>(choice)])
+		{
+			case MoreStartWith:
+				pick("Start " + title + " with", {"The game straight away (fast boot)", "The console's own start-up first (full boot)"}, -1,
+					[info](int boot) {
+						lib.details = false;
+						launchGame(info, INT_MIN, boot == 0 ? 1 : 2);
+					});
+				break;
+			case MoreRename:
+				editText("Its title in the lists", title, false, [info](const std::string& typed) {
+					const std::string name = keptName(typed);
+					if (name.empty())
+						return;
+					be->setTitle(info, name);
+					toast("It is listed as \"" + name + "\" now. More > Its own name again undoes that.", 5.f);
+				}, 80);
+				break;
+			case MoreCollections:
+				collectionsOf(info.path);
+				break;
+			case MorePictures:
+				be->fetchPictures(&info, true);
+				break;
+			case MoreOwnName:
+				be->setTitle(info, std::string());
+				toast("It has its own name again.", 3.f);
+				break;
+			case MoreFavourite:
+				if (Game* game = gameByPath(info.path))
+				{
+					// A favourite, or not one any more: at once.
+					game->info.favourite = !game->info.favourite;
+					be->setFavourite(game->info, game->info.favourite);
+					toast(game->info.favourite ? "A favourite now: it is on the Favourites shelf." : "Not a favourite any more.", 3.f);
+				}
+				break;
+			case MoreHide:
+				if (Game* game = gameByPath(info.path))
+					hideOrList(*game);
+				break;
+			case MoreNextDisc:
+				if (Game* game = gameByPath(info.path))
+					nextDisc(*game);
+				break;
+			case MoreImage:
+				be->makeImage(info);
+				break;
+			case MoreFresh:
+				if (Game* game = gameByPath(info.path))
+				{
+					if (const std::optional<StateInfo> state = resumeState(*game))
+					{
+						const StateInfo saved = *state;
+						confirm("Delete the state it was closed with?", "Saved " + formatWhen(saved.when) + ". It cannot be brought back; the game starts from its beginning.",
+							[info, saved](bool yes) {
+								if (!yes)
+									return;
+								if (!be->deleteState(saved))
+								{
+									toast("That state could not be deleted.");
+									return;
+								}
+								lib.details = false;
+								launchGame(info, INT_MIN, 0);
+							},
+							"Delete and start", "Keep it");
+					}
+				}
+				break;
+		}
+	});
+}
+
 std::string stateName(const StateInfo& state)
 {
 	if (state.slot == -2)
@@ -1418,6 +1743,14 @@ std::string stateName(const StateInfo& state)
 	if (state.slot < 0)
 		return state.backup ? "When it was closed the time before" : "When the game was last closed";
 	return "Slot " + std::to_string(state.slot) + (state.backup ? "  (the one before)" : "");
+}
+
+void startFromState(const Game& g, const StateInfo& state)
+{
+	lib.details = false;
+	setLoadingGame(g.info);
+	be->startStateFile(g.info, state.path);
+	setScreen(Screen::Loading);
 }
 
 void detailsInput(Game& g, bool selectDisc)
@@ -1433,408 +1766,582 @@ void detailsInput(Game& g, bool selectDisc)
 		}
 		return;
 	}
-	switch (det.page)
+	const std::vector<int> tabs = tabsOf(g);
+	int at = static_cast<int>(std::find(tabs.begin(), tabs.end(), det.tab) - tabs.begin());
+	if (at >= static_cast<int>(tabs.size()))
 	{
-		case PageActions:
-			if (in.up || in.down)
-			{
-				// The next of the pictures the game has, round and round.
-				for (int step = 1; step <= 3; step++)
-				{
-					const int next = (det.picture + (in.down ? step : 3 - step)) % 3;
-					if (det.hasPicture[next])
-					{
-						det.picture = next;
-						break;
-					}
-				}
-			}
-			if (in.left && det.action > 0)
-				det.action--;
-			if (in.right && det.action < static_cast<int>(actionsOf(g).size()) - 1)
-				det.action++;
-			if (in.square && setsGrouped && g.setSize > 1)
-			{
-				// The set's next disc: it stands for the set from here, and the panel is its own.
-				const std::vector<size_t>& discs = discSets[g.set];
-				size_t at = 0;
-				for (size_t i = 0; i < discs.size(); i++)
-				{
-					if (&games[discs[i]] == &g)
-						at = i;
-				}
-				Game& next = games[discs[(at + 1) % discs.size()]];
-				frontChoice[next.set] = next.info.path;
-				setsDirty = true;
-				lib.flatPath = next.info.path;
-				const int action = det.action;
-				openDetails(next);
-				det.action = action;
-				return;
-			}
-			if (in.l1)
-			{
-				// A favourite, or not one any more: at once.
-				g.info.favourite = !g.info.favourite;
-				be->setFavourite(g.info, g.info.favourite);
-				toast(g.info.favourite ? "A favourite now: it is on the Favourites shelf." : "Not a favourite any more.", 3.f);
-			}
-			if (in.r1)
-			{
-				const GameInfo info = g.info;
-				if (info.hidden)
-				{
-					g.info.hidden = false;
-					be->setHidden(info, false);
-					lib.details = false;
-					toast("It is listed again.", 3.f);
-				}
-				else
-				{
-					confirm("Hide " + g.title + "?",
-						"It is not listed any more; nothing of it is deleted.\nTo see it again: Square in the library, Show, Hidden games; R1 in its "
-						"details brings it back.",
-						[info](bool yes) {
-							if (!yes)
-								return;
-							be->setHidden(info, true);
-							lib.details = false;
-							toast("Hidden. Square > Show > Hidden games has it.", 5.f);
-						},
-						"Hide it", "Keep it");
-				}
-				return;
-			}
-			if (in.back || in.triangle)
-				lib.details = false;
-			else if (in.accept)
-			{
-				det.row = 0;
-				det.scroll = 0;
-				const std::vector<int> actions = actionsOf(g);
-				switch (actions[static_cast<size_t>(std::clamp(det.action, 0, static_cast<int>(actions.size()) - 1))])
-				{
-					case ActionPlay:
-						lib.details = false;
-						launch(g, false);
-						break;
-					case ActionState:
-						if (!det.states.empty())
-							det.page = PageStates;
-						break;
-					case ActionOptions:
-						openSettings(&g.info, Screen::Library);
-						break;
-					case ActionImage:
-						be->makeImage(g.info);
-						break;
-					case ActionMore:
-						moreMenu(g);
-						break;
-				}
-			}
-			break;
-
-		case PageStates:
+		at = 0;
+		det.tab = GameOverview;
+	}
+	if (in.l1 || in.r1)
+	{
+		// The next tab, not round: the tabs are a row with two ends.
+		const int next = std::clamp(at + (in.r1 ? 1 : -1), 0, static_cast<int>(tabs.size()) - 1);
+		if (next != at)
 		{
-			const int n = static_cast<int>(det.states.size());
-			if (in.up && det.row > 0)
-				det.row--;
-			if (in.down && det.row < n - 1)
-				det.row++;
-			if (in.back)
-				det.page = PageActions;
-			else if (in.accept && n > 0)
-			{
-				const StateInfo state = det.states[static_cast<size_t>(std::clamp(det.row, 0, n - 1))];
-				lib.details = false;
-				setLoadingGame(g.info);
-				be->startStateFile(g.info, state.path);
-				setScreen(Screen::Loading);
-			}
-			else if (in.square && n > 0)
-			{
-				const StateInfo state = det.states[static_cast<size_t>(std::clamp(det.row, 0, n - 1))];
-				const GameInfo info = g.info;
-				confirm("Delete this state?", stateName(state) + ", saved " + formatWhen(state.when) + ".\nIt cannot be brought back.",
-					[state, info](bool yes) {
-						if (!yes)
-							return;
-						if (!be->deleteState(state))
-							toast("That state could not be deleted.");
-						det.states = be->states(info.serial, info.crc, true);
-						if (det.states.empty())
-							det.page = PageActions;
-					},
-					"Delete", "Keep");
-			}
-			break;
+			det.tab = tabs[static_cast<size_t>(next)];
+			det.row = 0;
+			det.scroll = 0;
+			det.side = rowsOf(det.tab) > 0 ? 1 : 0;
 		}
+	}
+	if (in.l2 || in.r2)
+	{
+		// The next of the pictures the game has, round and round.
+		for (int step = 1; step <= 3; step++)
+		{
+			const int next = (det.picture + (in.r2 ? step : 3 - step)) % 3;
+			if (det.hasPicture[next])
+			{
+				det.picture = next;
+				break;
+			}
+		}
+	}
+	const std::vector<int> buttons = buttonsOf(g, false);
+	const int rows = rowsOf(det.tab);
+	det.button = std::clamp(det.button, 0, static_cast<int>(buttons.size()) - 1);
+	if (rows == 0)
+		det.side = 0;
+	det.row = std::clamp(det.row, 0, std::max(0, rows - 1));
+	if (det.side == 0)
+	{
+		if (in.up && det.button > 0)
+			det.button--;
+		if (in.down && det.button < static_cast<int>(buttons.size()) - 1)
+			det.button++;
+		if (in.right && rows > 0)
+			det.side = 1;
+	}
+	else
+	{
+		if (in.up && det.row > 0)
+			det.row--;
+		if (in.down && det.row < rows - 1)
+			det.row++;
+		if (in.left)
+			det.side = 0;
+	}
+	if (in.square)
+	{
+		moreMenu(g);
+		return;
+	}
+	const bool onStates = (det.tab == GameStates && det.side == 1 && !det.states.empty());
+	if (in.triangle && onStates)
+	{
+		const StateInfo state = det.states[static_cast<size_t>(det.row)];
+		const GameInfo info = g.info;
+		confirm("Delete this state?", stateName(state) + ", saved " + formatWhen(state.when) + ".\nIt cannot be brought back.",
+			[state, info](bool yes) {
+				if (!yes)
+					return;
+				if (!be->deleteState(state))
+					toast("That state could not be deleted.");
+				det.states = be->states(info.serial, info.crc, true);
+				det.row = std::clamp(det.row, 0, std::max(0, static_cast<int>(det.states.size()) - 1));
+				if (det.states.empty())
+					det.side = 0;
+			},
+			"Delete", "Keep");
+		return;
+	}
+	if (in.back || in.triangle)
+	{
+		lib.details = false;
+		return;
+	}
+	if (!in.accept)
+		return;
+	if (det.side == 0)
+	{
+		switch (buttons[static_cast<size_t>(det.button)])
+		{
+			case ButtonResume:
+				if (resumeState(g))
+				{
+					lib.details = false;
+					launchGame(g.info, -1, 0);
+				}
+				else if (StateInfo newest; newestOf(det.states, newest))
+				{
+					startFromState(g, newest);
+				}
+				break;
+			default:
+				lib.details = false;
+				launchGame(g.info, INT_MIN, 0);
+				break;
+		}
+		return;
+	}
+	switch (det.tab)
+	{
+		case GameStates:
+			if (!det.states.empty())
+				startFromState(g, det.states[static_cast<size_t>(det.row)]);
+			break;
+		case GameOwn:
+			openSettings(&g.info, Screen::Library);
+			break;
+		case GamePatches:
+			openSettings(&g.info, Screen::Library, det.row == 0 ? "Patches" : "Cheats");
+			break;
+		case GameTextures:
+			openTexturePacks(be->texturePackShelf(), g.info.serial);
+			break;
+		default:
+			break;
 	}
 }
 
-// A row of the facts: what it is on the left, the fact on the right of it.
-float fact(ImDrawList* dl, float x, float y, float w, float t, const char* label, const std::string& value)
+// One of the overview's cards: what it is of, small and spaced, then the fact, then a line under it.
+void factCard(ImDrawList* dl, const settings::Palette& p, float x, float y, float w, float h, float t, const char* what, const std::string& fact,
+	const std::string& note)
 {
-	if (value.empty())
-		return y;
-	text(dl, regular(), 24, x, y, alpha(col::faint, t), label);
-	textIn(dl, regular(), 24, x + 230, y, alpha(col::text, t), value, w - 230, true);
-	return y + 42;
+	settings::cardShape(dl, x, y, w, h, p.card, 16, t);
+	text(dl, bold(), 17, x + 28, y + 26, alpha(p.secondary, t), what);
+	textIn(dl, bold(), 27, x + 28, y + 60, alpha(p.text, t), fact, w - 56, false);
+	textIn(dl, regular(), 20, x + 28, y + h - 48, alpha(p.secondary, t), note, w - 56, false);
+}
+
+// A focusable row of a tab: a pill with its name and, on the right, what it opens.
+void tabRow(ImDrawList* dl, const settings::Palette& p, float x, float y, float w, float h, float t, bool on, const char* icon,
+	const std::string& name, const std::string& right)
+{
+	settings::cardShape(dl, x, y, w, h, on ? p.raised : p.card, 14, t);
+	if (on)
+		settings::focusRing(dl, x, y, w, h, 14);
+	text(dl, regular(), 24, x + 26, y + h / 2 - 14, alpha(on ? p.accent : p.secondary, t), icon);
+	float rw = 0;
+	if (!right.empty())
+	{
+		const std::string shown = right + "   " ICON_FA_CHEVRON_RIGHT;
+		rw = std::min(textSize(regular(), 21, shown.c_str()).x, w * 0.45f);
+		textIn(dl, regular(), 21, x + w - 26 - rw, y + h / 2 - 12, alpha(p.secondary, t), shown, w * 0.45f, false);
+	}
+	textIn(dl, bold(), 24, x + 72, y + h / 2 - 14, alpha(p.text, t), name, w - 72 - 40 - rw, on);
+}
+
+std::string joinNames(const std::vector<std::string>& names, size_t most)
+{
+	std::string out;
+	for (size_t i = 0; i < names.size() && i < most; i++)
+		out += (out.empty() ? "" : ", ") + names[i];
+	if (names.size() > most)
+		out += ", and " + std::to_string(names.size() - most) + " more";
+	return out;
 }
 
 void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 {
-	dl->AddRectFilled(V(0, 96), V(W, H - 72), col::rgba(0, 0, 0, static_cast<int>(150 * t)));
-	const float w = 1440, h = 760;
-	const float x = (W - w) / 2, y = 96 + (H - 72 - 96 - h) / 2 + (1 - t) * 40;
-	glow(dl, x, y, w, h, 24, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
-	rect(dl, x, y, w, h, alpha(col::panel, t), 24);
-
-	// The cover; on the states page, the picture the focused state was saved with.
-	const float cw = 400, ch = 568;
-	bool pictured = false;
-	if (!selectDisc && det.page == PageStates && !det.states.empty())
+	const settings::Palette p = settings::palette();
+	// (Back from another screen, or opened: what has to be looked up, again.)
+	if (det.drawnAt < frameNow - 2 || det.path != g.info.path)
 	{
+		det.path = g.info.path;
+		lookUp(g, selectDisc);
+	}
+	det.drawnAt = frameNow;
+	const GameFacts& f = det.facts;
+	const float top = 96, bottom = H - 72;
+	dl->AddRectFilled(V(0, top), V(W, bottom), alpha(p.ground, t));
+	const float oy = (motion() == MotionFull) ? (1 - t) * 40 : 0.f;
+	const float x0 = 72, y0 = 124 + oy;
+	const float limit = bottom - 24 + oy;
+
+	// ---- the cover, and the ways to start the game under it
+	const float cw = 400, ch = std::min(568.f, limit - y0 - 200);
+	const std::vector<int> tabs = selectDisc ? std::vector<int>{GameOverview} : tabsOf(g);
+	if (std::find(tabs.begin(), tabs.end(), det.tab) == tabs.end())
+		det.tab = GameOverview;
+	const bool stateShown = !selectDisc && det.tab == GameStates && det.side == 1 && !det.states.empty();
+	if (stateShown)
+	{
+		// The picture the focused state was saved with.
 		const StateInfo& state = det.states[static_cast<size_t>(std::clamp(det.row, 0, static_cast<int>(det.states.size()) - 1))];
 		const Texture picture = be->statePicture(state);
-		rect(dl, x + 48, y + 48, cw, ch, alpha(col::card, t), 16);
+		settings::cardShape(dl, x0, y0, cw, ch, p.card, 16, t);
 		if (picture.valid())
-		{
-			imageFit(dl, picture, x + 48, y + 48, cw, ch, 8, alpha(col::white, t));
-			pictured = true;
-		}
+			imageFit(dl, picture, x0, y0, cw, ch, 8, alpha(col::white, t));
 		else
 		{
 			const char* none = "No picture in this state";
 			const ImVec2 ns = textSize(regular(), 22, none);
-			text(dl, regular(), 22, x + 48 + (cw - ns.x) / 2, y + 48 + (ch - ns.y) / 2, alpha(col::faint, t), none);
-			pictured = true;
+			text(dl, regular(), 22, x0 + (cw - ns.x) / 2, y0 + (ch - ns.y) / 2, alpha(p.faint, t), none);
 		}
 	}
-	if (!pictured)
+	else
 	{
-		// The cover; or, with up and down, one of the game's other pictures in its place.
+		// The cover; or, with L2 and R2, one of the game's other pictures in its place.
 		const Texture shots[3] = {Texture(), selectDisc ? Texture() : be->picture(g.info, 0), selectDisc ? Texture() : be->picture(g.info, 1)};
 		det.hasPicture[1] = shots[1].valid();
 		det.hasPicture[2] = shots[2].valid();
 		if (!det.hasPicture[det.picture])
 			det.picture = 0;
 		if (det.picture == 0)
-		{
-			drawCover(dl, g, x + 48, y + 48, cw, ch, 16, 1);
-		}
+			drawCover(dl, g, x0, y0, cw, ch, 16, 1);
 		else
 		{
-			rect(dl, x + 48, y + 48, cw, ch, alpha(col::card, t), 16);
-			imageFit(dl, shots[det.picture], x + 48, y + 48, cw, ch, 8, alpha(col::white, t));
+			settings::cardShape(dl, x0, y0, cw, ch, p.card, 16, t);
+			imageFit(dl, shots[det.picture], x0, y0, cw, ch, 8, alpha(col::white, t));
 			const char* const what = (det.picture == 1) ? "Its title screen" : "In play";
 			const ImVec2 ws = textSize(bold(), 18, what);
-			rect(dl, x + 60, y + 60, ws.x + 24, 32, alpha(col::bar, 0.92f * t), 16);
-			text(dl, bold(), 18, x + 72, y + 76 - ws.y / 2, alpha(col::text, t), what);
+			rect(dl, x0 + 12, y0 + 12, ws.x + 24, 32, alpha(col::bar, 0.92f * t), 16);
+			text(dl, bold(), 18, x0 + 24, y0 + 28 - ws.y / 2, alpha(col::text, t), what);
 		}
 		if (det.hasPicture[1] || det.hasPicture[2])
 		{
-			// Which of them is shown: a dot for each.
-			int count = 0, at = 0;
+			// Which of them is shown: a dot for each, on the cover's foot.
+			int count = 0, shown = 0;
 			for (int i = 0; i < 3; i++)
 			{
 				if (!det.hasPicture[i])
 					continue;
 				if (i == det.picture)
-					at = count;
+					shown = count;
 				count++;
 			}
-			const float gap = 18, dx = x + 48 + cw - 20 - (count - 1) * gap;
+			const float gap = 18, dx = x0 + cw / 2 - (count - 1) * gap / 2;
+			rect(dl, dx - 20, y0 + ch - 34, (count - 1) * gap + 40, 24, alpha(col::bar, 0.8f * t), 12);
 			for (int i = 0; i < count; i++)
-				dl->AddCircleFilled(V(dx + i * gap, y + 48 + ch + 34), (i == at ? 5.5f : 4.f) * S, alpha(i == at ? col::text : col::faint, t));
+				dl->AddCircleFilled(V(dx + i * gap, y0 + ch - 22), (i == shown ? 5.5f : 4.f) * S, alpha(i == shown ? col::text : col::faint, t));
 		}
 	}
-	textIn(dl, regular(), 20, x + 48, y + 48 + ch + 22, alpha(col::faint, t), g.info.fileName, cw - 90, true);
+	{
+		const std::vector<int> buttons = buttonsOf(g, selectDisc);
+		det.button = std::clamp(det.button, 0, static_cast<int>(buttons.size()) - 1);
+		float by = y0 + ch + 24;
+		for (size_t i = 0; i < buttons.size(); i++)
+		{
+			const bool primary = (i == 0);
+			const bool on = (det.side == 0 || selectDisc) && static_cast<int>(i) == det.button;
+			const float bh = primary ? 76 : 68;
+			const char* label = buttons[i] == ButtonInsert ? ICON_FA_COMPACT_DISC "   Insert disc" :
+								buttons[i] == ButtonResume ? ICON_FA_PLAY "   Resume" :
+								buttons.size() == 1        ? ICON_FA_PLAY "   Play" :
+															 "Start from the beginning";
+			rect(dl, x0, by, cw, bh, alpha(primary ? p.accent : p.raised, t), bh / 2);
+			if (on)
+				settings::focusRing(dl, x0, by, cw, bh, bh / 2);
+			const float size = primary ? 27 : 24;
+			const std::string shown = fit(bold(), size, label, cw - 40);
+			const ImVec2 ls = textSize(bold(), size, shown.c_str());
+			text(dl, bold(), size, x0 + (cw - ls.x) / 2, by + bh / 2 - ls.y / 2, alpha(primary ? p.onAccent : p.text, t), shown.c_str());
+			by += bh + 16;
+		}
+	}
 
-	const float tx = x + 48 + cw + 56, tw = w - (48 + cw + 56) - 56;
+	// ---- its name, and what is known of it
+	const float tx = x0 + cw + 56, tw = W - 72 - tx;
 	{
 		// The title, with a star before it when the game is a favourite.
 		float titleX = tx;
 		if (g.info.favourite && !selectDisc)
 		{
-			text(dl, regular(), 38, tx, y + 54, alpha(col::warm, t), ICON_FA_STAR);
-			titleX += 56;
+			text(dl, regular(), 40, tx, y0 + 8, alpha(col::warm, t), ICON_FA_STAR);
+			titleX += 58;
 		}
-		textIn(dl, bold(), 48, titleX, y + 48, alpha(col::text, t), g.title, tw - (titleX - tx), true);
+		textIn(dl, bold(), 52, titleX, y0, alpha(p.text, t), g.title, tw - (titleX - tx), true);
 	}
-	std::string meta = kindText(g.info);
-	const std::string more = metaText(g);
-	if (!more.empty())
-		meta += "   \xc2\xb7   " + more;
-	textIn(dl, bold(), 24, tx, y + 118, alpha(kindColour(g), t), meta, tw, true);
-
-	const float top = y + 176, bottom = y + h - 48;
-	if (selectDisc || det.page == PageActions)
 	{
-		// What is known of the game.
-		float fy = top + 6;
-		if (g.info.compatibility >= 1 && g.info.compatibility <= 6)
-		{
-			text(dl, regular(), 24, tx, fy, alpha(col::faint, t), "Known to run");
-			float sx = tx + 230;
-			for (int star = 1; star <= 5; star++)
-			{
-				text(dl, regular(), 22, sx, fy + 1, alpha(star < g.info.compatibility ? col::warm : alpha(col::text, 40 / 255.f), t), ICON_FA_STAR);
-				sx += 32;
-			}
-			text(dl, regular(), 24, sx + 12, fy, alpha(col::text, t), compatibilityWords[g.info.compatibility]);
-			fy += 42;
-		}
-		fy = fact(dl, tx, fy, tw, t, "Last played", g.info.lastPlayed > 0 ? formatWhen(g.info.lastPlayed) : std::string("Not yet"));
-		fy = fact(dl, tx, fy, tw, t, "Time played", formatPlayed(g.info.playedSeconds));
-		fy = fact(dl, tx, fy, tw, t, "Serial", g.info.serial);
-		char crc[16] = "";
-		if (g.info.crc != 0)
-			std::snprintf(crc, sizeof(crc), "%08X", g.info.crc);
-		fy = fact(dl, tx, fy, tw, t, "CRC", crc);
-		fy = fact(dl, tx, fy, tw, t, "Size", g.info.size != 0 ? formatSize(g.info.size) : std::string());
-		{
-			std::string folder = g.info.path;
-			const size_t slash = folder.rfind('/');
-			if (slash != std::string::npos)
-				folder.resize(slash + 1);
-			fy = fact(dl, tx, fy, tw, t, "Folder", folder);
-		}
-		if (!det.states.empty() && !selectDisc)
-		{
-			const std::string count = std::to_string(det.states.size()) + (det.states.size() == 1 ? " state" : " states");
-			fy = fact(dl, tx, fy, tw, t, "Saved states", count);
-		}
-
-		// The actions, side by side.
-		struct Action
-		{
-			const char* label;
-			bool enabled;
+		std::string meta;
+		const auto add = [&](const std::string& part) {
+			if (!part.empty())
+				meta += (meta.empty() ? "" : "  \xc2\xb7  ") + part;
 		};
-		std::vector<Action> actions;
-		if (selectDisc)
-			actions = {{ICON_FA_COMPACT_DISC "   Insert disc", true}};
-		else
+		if (g.info.kind != GameInfo::PS2)
+			add(kindText(g.info));
+		add(g.info.region);
+		add(g.info.serial);
+		if (g.info.compatibility >= 1 && g.info.compatibility <= 6)
+			add(compatibilityWords[g.info.compatibility]);
+		if (g.info.playedSeconds > 0)
+			add("Played " + formatPlayed(g.info.playedSeconds));
+		add(g.info.lastPlayed > 0 ? "Last played " + formatWhen(g.info.lastPlayed) : std::string("Not played yet"));
+		if (setsGrouped && g.setSize > 1)
+			add("Disc " + std::to_string(g.discOrder) + " of " + std::to_string(g.setSize));
+		textIn(dl, regular(), 22, tx, y0 + 76, alpha(p.secondary, t), meta, tw, false);
+	}
+
+	// ---- the tabs
+	const float tabY = y0 + 128, tabH = 58;
+	if (!selectDisc)
+	{
+		float x = tx;
+		x += glyph(dl, Glyph::L1, x, tabY + tabH / 2 - 2, 30) + 10;
+		float onX = x, onW = 0;
+		for (size_t i = 0; i < tabs.size(); i++)
 		{
-			for (const int id : actionsOf(g))
-			{
-				switch (id)
-				{
-					case ActionPlay:
-						actions.push_back({ICON_FA_PLAY "   Play", true});
-						break;
-					case ActionState:
-						actions.push_back({ICON_FA_CLOCK_ROTATE_LEFT "   Load state", !det.states.empty()});
-						break;
-					case ActionOptions:
-						actions.push_back({ICON_FA_SLIDERS "   Options", true});
-						break;
-					case ActionImage:
-						actions.push_back({ICON_FA_FLOPPY_DISK "   Image", !be->imageBusy()});
-						break;
-					default:
-						actions.push_back({ICON_FA_ELLIPSIS "   More", true});
-				}
-			}
-		}
-		float bx = tx;
-		const float by = bottom - 68;
-		if (!selectDisc && setsGrouped && g.setSize > 1)
-		{
-			// The set's discs: the one this panel is for, and Square for the next.
-			float px = tx;
-			const float py = by - 64;
-			for (size_t disc : discSets[g.set])
-			{
-				const bool current = (&games[disc] == &g);
-				const std::string label = "Disc " + std::to_string(games[disc].discOrder);
-				const ImVec2 ls = textSize(bold(), 20, label.c_str());
-				const float pw = ls.x + 36;
-				rect(dl, px, py, pw, 40, alpha(current ? col::text : col::panelHi, t), 20);
-				text(dl, bold(), 20, px + 18, py + 20 - ls.y / 2, alpha(current ? col::panel : col::dim, t), label.c_str());
-				px += pw + 10;
-			}
-			px += 14;
-			px += glyph(dl, Glyph::Square, px, py + 20, 28) + 10;
-			text(dl, regular(), 20, px, py + 8, alpha(col::faint, t), "Next disc");
-		}
-		// (Five buttons are made smaller to stay in the panel.)
-		float size = 26, pad = 52, gap = 16;
-		for (int pass = 0; pass < 3; pass++)
-		{
-			float total = 0;
-			for (const Action& action : actions)
-				total += textSize(bold(), size, action.label).x + pad + gap;
-			if (total - gap <= tw)
-				break;
-			size -= 2;
-			pad -= 8;
-			gap -= 3;
-		}
-		for (int i = 0; i < static_cast<int>(actions.size()); i++)
-		{
-			const bool on = selectDisc || i == det.action;
-			const ImVec2 ls = textSize(bold(), size, actions[static_cast<size_t>(i)].label);
-			const float bw = ls.x + pad;
+			const char* name = gameTabNames[tabs[i]];
+			const float w = textSize(bold(), 23, name).x + 44;
+			const bool on = (tabs[i] == det.tab);
 			if (on)
-				glow(dl, bx, by, bw, 64, 32, alpha(col::accent, 0.7f * t), 12);
-			rect(dl, bx, by, bw, 64, alpha(on ? col::accent : col::panelHi, t), 32);
-			text(dl, bold(), size, bx + pad / 2, by + 32 - ls.y / 2,
-				alpha(!actions[static_cast<size_t>(i)].enabled ? col::faint : on ? col::text : col::dim, t), actions[static_cast<size_t>(i)].label);
-			bx += bw + gap;
+			{
+				onX = x;
+				onW = w;
+			}
+			const ImVec2 ns = textSize(bold(), 23, name);
+			text(dl, bold(), 23, x + 22, tabY + tabH / 2 - ns.y / 2 - 2, alpha(on ? p.text : p.secondary, t), name);
+			x += w;
 		}
-		if (!selectDisc)
+		glyph(dl, Glyph::R1, x + 10, tabY + tabH / 2 - 2, 30);
+		rect(dl, tx, tabY + tabH, tw, 1, alpha(p.line, t));
+		det.tabAt = (motion() != MotionFull || det.tabAt <= 0) ? onX : approach(det.tabAt, onX, 22);
+		rect(dl, det.tabAt, tabY + tabH - 3, onW, 4, alpha(p.accent, t), 2);
+	}
+	const float cy = tabY + tabH + 28;
+	const float rowH = 72;
+
+	switch (selectDisc ? static_cast<int>(GameOverview) : det.tab)
+	{
+		case GameOverview:
+		default:
 		{
-			// L1 and R1 here: a favourite, and out of the list. Said under the cover.
-			float hx = x + 48;
-			const float hy = y + 48 + 568 + 74;
-			hx += glyph(dl, Glyph::L1, hx, hy, 26) + 8;
-			hx += text(dl, regular(), 20, hx, hy - 11, alpha(col::faint, t), g.info.favourite ? "Not a favourite" : "Favourite").x + 22;
-			hx += glyph(dl, Glyph::R1, hx, hy, 26) + 8;
-			text(dl, regular(), 20, hx, hy - 11, alpha(col::faint, t), g.info.hidden ? "List it again" : "Hide");
+			// The cards: what is known of the game, three to a row.
+			struct Card
+			{
+				const char* what;
+				std::string fact, note;
+			};
+			std::vector<Card> cards;
+			{
+				Card c{"WHERE YOU LEFT OFF", "", ""};
+				StateInfo newest;
+				const size_t count = static_cast<size_t>(std::count_if(det.states.begin(), det.states.end(), [](const StateInfo& s) { return !s.backup; }));
+				if (const std::optional<StateInfo> closed = resumeState(g))
+					c.fact = "Closed " + formatWhen(closed->when);
+				else if (newestOf(det.states, newest))
+					c.fact = "Saved " + formatWhen(newest.when);
+				else
+					c.fact = g.info.lastPlayed > 0 ? "Played " + formatWhen(g.info.lastPlayed) : std::string("Not played yet");
+				c.note = count == 0 ? std::string("No save states yet") : count == 1 ? std::string("1 save state") : std::to_string(count) + " save states";
+				cards.push_back(std::move(c));
+			}
+			if (f.own)
+			{
+				const size_t n = f.ownRows.size();
+				cards.push_back({"ITS OWN SETTINGS", n == 0 ? std::string("None") : n == 1 ? std::string("1 differs from global") : std::to_string(n) + " differ from global",
+					n == 0 ? std::string("It uses the global settings") : joinNames(f.ownRows, 1)});
+				if (!f.card.empty() || !f.cardNote.empty())
+				{
+					if (!f.cardNote.empty())
+						cards.push_back({"MEMORY CARD", "Its own card", f.cardNote});
+					else
+						cards.push_back({"MEMORY CARD", f.card, "In slot 1"});
+				}
+				const size_t on = f.patchesOn.size() + (f.cheatsEnabled ? f.cheatsOn.size() : 0);
+				std::vector<std::string> named = f.patchesOn;
+				if (f.cheatsEnabled)
+					named.insert(named.end(), f.cheatsOn.begin(), f.cheatsOn.end());
+				cards.push_back({"PATCHES AND CHEATS", on == 0 ? std::string("None on") : std::to_string(on) + " on",
+					on > 0 ? joinNames(named, 2) :
+					(f.patchesKnown + f.cheatsKnown) > 0 ? std::to_string(f.patchesKnown + f.cheatsKnown) + " known for it" :
+														  std::string("None known for it")});
+			}
+			if (std::find(tabs.begin(), tabs.end(), static_cast<int>(GameTextures)) != tabs.end())
+			{
+				if (f.pack)
+					cards.push_back({"TEXTURE PACK", f.packMeasured ? "Installed  \xc2\xb7  " + formatSize(f.packBytes) : std::string("Installed"),
+						f.packPlace.empty() ? std::string() : "On " + f.packPlace});
+				else
+					cards.push_back({"TEXTURE PACK", "None installed", "The Texture packs tab finds one"});
+			}
+			if (cards.size() < 6)
+				cards.push_back({"ITS FILE", g.info.size != 0 ? formatSize(g.info.size) : std::string("Not known"), g.info.fileName});
+			const float gap = 24, cardW = (tw - 2 * gap) / 3, cardH = 150;
+			for (size_t i = 0; i < cards.size(); i++)
+			{
+				const float x = tx + static_cast<float>(i % 3) * (cardW + gap), y = cy + static_cast<float>(i / 3) * (cardH + gap);
+				factCard(dl, p, x, y, cardW, cardH, t, cards[i].what, cards[i].fact, cards[i].note);
+			}
+			// What the game is, as the Disc tab says it: from an encyclopedia.
+			float dy = cy + static_cast<float>((cards.size() + 2) / 3) * (cardH + gap) + 6;
+			const GameAbout about = selectDisc ? GameAbout() : be->about(g.info);
+			dl->PushClipRect(V(tx, dy - 4), V(tx + tw, limit - 34), true);
+			std::string who;
+			for (const std::string* part : {&about.released, &about.genre, &about.developer})
+			{
+				if (!part->empty())
+					who += (who.empty() ? "" : "  \xc2\xb7  ") + *part;
+			}
+			if (!who.empty())
+				dy += textIn(dl, bold(), 21, tx, dy, alpha(p.secondary, t), who, std::min(tw, 1140.f), false).y + 12;
+			if (about.found && !about.summary.empty())
+			{
+				dy += text(dl, regular(), 22, tx, dy, alpha(p.text, t), about.summary.c_str(), std::min(tw, 1140.f)).y + 10;
+				if (!about.source.empty())
+					text(dl, regular(), 18, tx, dy, alpha(p.faint, t), ("From " + about.source).c_str(), std::min(tw, 1140.f));
+			}
+			else if (about.looking)
+				text(dl, regular(), 22, tx, dy, alpha(p.faint, t), "Looking up what it is...");
+			dl->PopClipRect();
+			{
+				// The file it is: where, and its CRC.
+				char crc[16] = "";
+				if (g.info.crc != 0)
+					std::snprintf(crc, sizeof(crc), "%08X", g.info.crc);
+				std::string folder = g.info.path;
+				if (const size_t slash = folder.rfind('/'); slash != std::string::npos)
+					folder.resize(slash + 1);
+				const std::string line = (crc[0] != '\0' ? std::string("CRC ") + crc + "  \xc2\xb7  " : std::string()) + folder;
+				const float ly = std::max(dy + 40, limit - 26);
+				if (ly + 26 <= limit + 2)
+					textIn(dl, regular(), 19, tx, ly, alpha(p.faint, t), line, tw, false);
+			}
+			break;
 		}
-		const int focusedAction = actionsOf(g)[static_cast<size_t>(std::clamp(det.action, 0, static_cast<int>(actionsOf(g).size()) - 1))];
-		if (!selectDisc && focusedAction == ActionImage)
+		case GameStates:
 		{
-			text(dl, regular(), 20, tx, by - 34, alpha(col::faint, t),
-				be->imageBusy() ? "An image is being made: its progress is at the bottom of the library." :
-								  "An ISO, a CHD or a CSO of this disc, to play from without the drive: asks which, and where it goes.");
+			const int n = static_cast<int>(det.states.size());
+			if (n == 0)
+			{
+				text(dl, regular(), 24, tx, cy + 6, alpha(p.secondary, t), "No save states for this game yet: save one from the quick menu while playing.", tw);
+				break;
+			}
+			const float listTop = cy, viewH = limit - listTop;
+			det.row = std::clamp(det.row, 0, n - 1);
+			const float visible = viewH / rowH;
+			const float target = std::clamp(static_cast<float>(det.row) - (visible - 1) / 2, 0.f, std::max(0.f, static_cast<float>(n) - visible));
+			det.scroll = motion() == MotionOff ? target : approach(det.scroll, target, 18);
+			dl->PushClipRect(V(tx - 12, listTop - 8), V(tx + tw + 12, limit), true);
+			for (int i = 0; i < n; i++)
+			{
+				const float ry = listTop + (static_cast<float>(i) - det.scroll) * rowH;
+				if (ry > limit || ry + rowH < listTop - rowH)
+					continue;
+				const bool on = det.side == 1 && i == det.row;
+				const StateInfo& state = det.states[static_cast<size_t>(i)];
+				rect(dl, tx, ry, tw, rowH - 10, alpha(on ? p.raised : p.card, t), 14);
+				if (on)
+					settings::focusRing(dl, tx, ry, tw, rowH - 10, 14);
+				const std::string when = formatWhen(state.when);
+				const ImVec2 ws = textSize(regular(), 22, when.c_str());
+				text(dl, regular(), 22, tx + tw - 26 - ws.x, ry + (rowH - 10) / 2 - ws.y / 2, alpha(on ? p.text : p.secondary, t), when.c_str());
+				textIn(dl, bold(), 24, tx + 26, ry + (rowH - 10) / 2 - 15, alpha(state.backup ? p.secondary : p.text, t), stateName(state), tw - 80 - ws.x, on);
+			}
+			dl->PopClipRect();
+			break;
 		}
-		if (!selectDisc && focusedAction == ActionState && det.states.empty() && !(setsGrouped && g.setSize > 1))
+		case GameOwn:
 		{
-			text(dl, regular(), 20, tx, by - 34, alpha(col::faint, t),
-				"No saved state for this game yet: save one from the quick menu while playing.");
+			const size_t n = f.ownRows.size();
+			tabRow(dl, p, tx, cy, tw, rowH - 8, t, det.side == 1, ICON_FA_SLIDERS, "Open this game's settings",
+				n == 0 ? std::string("It uses the global settings") : n == 1 ? std::string("1 of its own") : std::to_string(n) + " of its own");
+			float y = cy + rowH + 20;
+			if (n == 0)
+			{
+				text(dl, regular(), 22, tx, y, alpha(p.secondary, t),
+					"Every setting changed there is this game's alone; the others stay as the global settings have them.", tw);
+				break;
+			}
+			text(dl, bold(), 17, tx, y, alpha(p.secondary, t), "WHAT IT HAS OF ITS OWN");
+			y += 40;
+			// In two columns, as many as there is room for.
+			const float colW = (tw - 24) / 2;
+			const int perColumn = std::max(1, static_cast<int>((limit - y) / 40));
+			for (size_t i = 0; i < n; i++)
+			{
+				const int column = static_cast<int>(i) / perColumn;
+				if (column > 1)
+				{
+					text(dl, regular(), 21, tx + colW + 24, y + static_cast<float>(perColumn - 1) * 40, alpha(p.faint, t),
+						("and " + std::to_string(n - i) + " more").c_str());
+					break;
+				}
+				const float x = tx + static_cast<float>(column) * (colW + 24), ry = y + static_cast<float>(static_cast<int>(i) % perColumn) * 40;
+				if (column == 1 && static_cast<int>(i) % perColumn == perColumn - 1 && i + 1 < n)
+				{
+					text(dl, regular(), 21, x, ry, alpha(p.faint, t), ("and " + std::to_string(n - i) + " more").c_str());
+					break;
+				}
+				dl->AddCircleFilled(V(x + 6, ry + 13), 4 * S, alpha(p.accent, t));
+				textIn(dl, regular(), 22, x + 24, ry, alpha(p.text, t), f.ownRows[i], colW - 24, false);
+			}
+			break;
 		}
+		case GamePatches:
+		{
+			const std::string patches = f.patchesKnown == 0 ? std::string("None known") : std::to_string(f.patchesOn.size()) + " of " + std::to_string(f.patchesKnown) + " on";
+			const std::string cheats = !f.cheatsEnabled ? std::string("Cheats are off") :
+									   f.cheatsKnown == 0 ? std::string("None known") :
+															std::to_string(f.cheatsOn.size()) + " of " + std::to_string(f.cheatsKnown) + " on";
+			tabRow(dl, p, tx, cy, tw, rowH - 8, t, det.side == 1 && det.row == 0, ICON_FA_BOLT, "Patches", patches);
+			tabRow(dl, p, tx, cy + rowH, tw, rowH - 8, t, det.side == 1 && det.row == 1, ICON_FA_PUZZLE_PIECE, "Cheats", cheats);
+			float y = cy + 2 * rowH + 20;
+			std::vector<std::string> named = f.patchesOn;
+			if (f.cheatsEnabled)
+				named.insert(named.end(), f.cheatsOn.begin(), f.cheatsOn.end());
+			if (named.empty())
+			{
+				text(dl, regular(), 22, tx, y, alpha(p.secondary, t), "Nothing is on: the game runs as it is. Patches fix or widen a game; cheats change it.", tw);
+				break;
+			}
+			text(dl, bold(), 17, tx, y, alpha(p.secondary, t), "ON NOW");
+			y += 40;
+			for (size_t i = 0; i < named.size() && y + 32 <= limit; i++)
+			{
+				if (y + 72 > limit && i + 1 < named.size())
+				{
+					text(dl, regular(), 21, tx, y, alpha(p.faint, t), ("and " + std::to_string(named.size() - i) + " more").c_str());
+					break;
+				}
+				dl->AddCircleFilled(V(tx + 6, y + 13), 4 * S, alpha(p.accent, t));
+				textIn(dl, regular(), 22, tx + 24, y, alpha(p.text, t), named[i], tw - 24, false);
+				y += 40;
+			}
+			break;
+		}
+		case GameTextures:
+		{
+			tabRow(dl, p, tx, cy, tw, rowH - 8, t, det.side == 1, ICON_FA_IMAGES, "Open the texture pack manager", "On this game");
+			const float y = cy + rowH + 20;
+			std::string what;
+			if (f.pack)
+			{
+				what = "A texture pack for it is installed" + (f.packPlace.empty() ? std::string() : " on " + f.packPlace) +
+					   (f.packMeasured ? ", " + formatSize(f.packBytes) : std::string()) + "." +
+					   (f.packs > 1 ? " There are " + std::to_string(f.packs) + " copies of it in all." : std::string());
+			}
+			else
+				what = "No texture pack for it is installed. The manager finds the ones the collection has for it, and downloads one.";
+			text(dl, regular(), 22, tx, y, alpha(p.secondary, t), what.c_str(), tw);
+			break;
+		}
+	}
+}
+
+// The hint bar while a game's page is open (the library screen draws it).
+void detailsHints(ImDrawList* dl, const Game& g, bool selectDisc)
+{
+	if (selectDisc)
+	{
+		hintBar(dl, {{Glyph::Cross, "Insert"}, {Glyph::Circle, "Back"}});
 		return;
 	}
-
-	// The states page: its name, then its rows.
-	text(dl, bold(), 30, tx, top, alpha(col::text, t), ICON_FA_CLOCK_ROTATE_LEFT "   Start from a saved state");
-	const float listTop = top + 58, rowH = 58;
-	const float viewH = bottom - listTop;
-	const int rows = static_cast<int>(det.states.size());
-	det.row = std::clamp(det.row, 0, std::max(0, rows - 1));
-	const float visible = viewH / rowH;
-	const float target = std::clamp(static_cast<float>(det.row) - (visible - 1) / 2, 0.f, std::max(0.f, static_cast<float>(rows) - visible));
-	det.scroll = approach(det.scroll, target, 18);
-	dl->PushClipRect(V(tx - 16, listTop), V(tx + tw + 16, bottom), true);
-	for (int i = 0; i < rows; i++)
+	std::vector<Hint> hints;
+	if (tabsOf(g).size() > 1)
+		hints.push_back({Glyph::L1R1, "Tabs"});
+	if (det.hasPicture[1] || det.hasPicture[2])
+		hints.push_back({Glyph::L2R2, "Pictures"});
+	hints.push_back({Glyph::Square, "More"});
+	const bool rows = det.side == 1 && rowsOf(det.tab) > 0;
+	if (rows && det.tab == GameStates)
+		hints.push_back({Glyph::Triangle, "Delete"});
+	const char* cross = "Play";
+	if (rows)
+		cross = det.tab == GameStates ? "Start from it" : "Open";
+	else
 	{
-		const float ry = listTop + (i - det.scroll) * rowH;
-		if (ry > bottom || ry + rowH < listTop - rowH)
-			continue;
-		const bool on = (i == det.row);
-		if (on)
-			rect(dl, tx - 12, ry + 2, tw + 24, rowH - 6, col::accent, 12);
-		const StateInfo& state = det.states[static_cast<size_t>(i)];
-		text(dl, bold(), 26, tx + 8, ry + 14, on ? col::text : col::dim, stateName(state).c_str());
-		const std::string when = formatWhen(state.when);
-		const ImVec2 ws = textSize(regular(), 24, when.c_str());
-		text(dl, regular(), 24, tx + tw - 16 - ws.x, ry + 16, on ? col::text : col::faint, when.c_str());
+		const std::vector<int> buttons = buttonsOf(g, false);
+		if (buttons[static_cast<size_t>(std::clamp(det.button, 0, static_cast<int>(buttons.size()) - 1))] == ButtonResume)
+			cross = "Resume";
+		else if (buttons.size() > 1)
+			cross = "Start";
 	}
-	dl->PopClipRect();
+	hints.push_back({Glyph::Cross, cross});
+	hints.push_back({Glyph::Circle, "Back"});
+	hintBar(dl, hints);
 }
 
 // ---- the shelves view: the focused game's art behind its title, shelves below
@@ -1892,7 +2399,7 @@ void drawShelves(ImDrawList* dl, Game* focused, bool selectDisc)
 	const float shelfH = cardH + 92;
 	const float shelvesTop = heroTop + heroH + 10;
 	lib.shelfAnim = approach(lib.shelfAnim, static_cast<float>(lib.shelf), 12);
-	dl->PushClipRect(V(0, shelvesTop - 30), V(W, H - 72), true);
+	dl->PushClipRect(V(0, shelvesTop - 30), V(W, bodyBottom), true);
 	for (int si = 0; si < static_cast<int>(lib.shelves.size()); si++)
 	{
 		Shelf& sh = lib.shelves[static_cast<size_t>(si)];
@@ -2295,35 +2802,15 @@ void drawDiscBay(ImDrawList* dl, Game* focused)
 
 // ---- the grid view: every game's cover, eight to a row
 
-// The focused game, named above the grid and the bookcase, and how many games there are.
-void gameHeader(ImDrawList* dl, const Game* focused, float top)
-{
-	if (focused != nullptr)
-	{
-		textIn(dl, bold(), 44, 96, top + 34, col::text, focused->title, W - 96 - 520, true);
-		const std::string badge = kindText(focused->info);
-		const std::string meta = metaText(*focused);
-		const ImU32 tint = kindColour(*focused);
-		const ImVec2 bs = textSize(bold(), 20, badge.c_str());
-		rect(dl, 96, top + 96, bs.x + 24, 32, alpha(tint, 0.25f), 8);
-		text(dl, bold(), 20, 108, top + 112 - bs.y / 2, tint, badge.c_str());
-		text(dl, regular(), 24, 96 + bs.x + 44, top + 98, col::dim, meta.c_str());
-	}
-	const std::string count = std::to_string(lib.flat.size()) + (lib.flat.size() == 1 ? " game" : " games");
-	const ImVec2 cs = textSize(regular(), 24, count.c_str());
-	text(dl, regular(), 24, W - 96 - cs.x, top + 98, col::faint, count.c_str());
-}
-
+// (The focused game is named in the strip under the grid, and the number of games in the filter
+// row over it.)
 void drawGrid(ImDrawList* dl, Game* focused)
 {
-	const float top = 96;
-	gameHeader(dl, focused, top);
-
 	const float gap = 24;
 	const float cardW = (W - 192 - gap * (GridColumns - 1)) / GridColumns;
 	const float cardH = std::round(cardW * CARD_SHAPE);
-	const float gridTop = top + 160;
-	const float viewH = H - 72 - gridTop;
+	const float gridTop = bodyTop + 24;
+	const float viewH = bodyBottom - gridTop;
 	const int rows = (static_cast<int>(lib.flat.size()) + GridColumns - 1) / GridColumns;
 	const int focusRow = lib.flatFocus / GridColumns;
 	const float rowH = cardH + gap;
@@ -2337,7 +2824,7 @@ void drawGrid(ImDrawList* dl, Game* focused)
 		lib.ringColumn = jump ? column : approach(lib.ringColumn, column, 20);
 		lib.ringRow = jump ? row : approach(lib.ringRow, row, 20);
 	}
-	dl->PushClipRect(V(0, gridTop - 20), V(W, H - 72), true);
+	dl->PushClipRect(V(0, gridTop - 20), V(W, bodyBottom), true);
 	for (int i = 0; i < static_cast<int>(lib.flat.size()); i++)
 	{
 		const int row = i / GridColumns, column = i % GridColumns;
@@ -2364,10 +2851,10 @@ void drawGrid(ImDrawList* dl, Game* focused)
 
 void drawList(ImDrawList* dl, Game* focused, bool selectDisc)
 {
-	const float top = 96 + 40;
+	const float top = bodyTop + 12;
 	const float listX = 96, listW = W * 0.56f - 96;
 	const float rowH = 76;
-	const float viewH = H - 72 - top - 24;
+	const float viewH = bodyBottom - top - 24;
 	const float visibleRows = viewH / rowH;
 	const float target =
 		std::clamp(static_cast<float>(lib.flatFocus) - (visibleRows - 1) / 2, 0.f, std::max(0.f, static_cast<float>(lib.flat.size()) - visibleRows));
@@ -2438,7 +2925,7 @@ void drawList(ImDrawList* dl, Game* focused, bool selectDisc)
 	// The Play button.
 	const char* play = selectDisc ? ICON_FA_COMPACT_DISC "   Insert disc" : ICON_FA_PLAY "   Play";
 	const ImVec2 ps = textSize(bold(), 28, play);
-	const float bw = ps.x + 90, by = H - 72 - 110;
+	const float bw = ps.x + 90, by = bodyBottom - 110;
 	rect(dl, px, by, bw, 62, col::accent, 31);
 	glyph(dl, Glyph::Cross, px + 16, by + 31, 32);
 	text(dl, bold(), 28, px + 62, by + 31 - ps.y / 2, col::text, play);
@@ -2483,8 +2970,8 @@ void drawFlow(ImDrawList* dl, Game* focused)
 	const int n = static_cast<int>(lib.flat.size());
 	const float focus = static_cast<float>(lib.flatFocus);
 	lib.flowAt = (lib.flowAt < 0 || motion() == MotionOff) ? focus : approach(lib.flowAt, focus, 11);
-	const float mid = W / 2, cy = 96 + 58 + 270;
-	const float ch = 540, cw = std::round(ch / CARD_SHAPE);
+	const float ch = std::min(540.f, bodyBottom - bodyTop - 110), cw = std::round(ch / CARD_SHAPE);
+	const float mid = W / 2, cy = bodyTop + 24 + ch / 2;
 	// A cover turned aside is narrower and a little smaller; the first of them stands clear of
 	// the one that faces, the others overlap behind it.
 	const float sideW = cw * 0.44f, first = cw * 0.5f + 92 + sideW * 0.5f, spacing = 132;
@@ -2529,25 +3016,10 @@ void drawFlow(ImDrawList* dl, Game* focused)
 			dl->AddQuad(tl - V(3, 3), tr + V(3, -3), br + V(3, 3), bl + V(-3, 3), alpha(col::text, 1 - a), 4 * S);
 	}
 
-	// What faces, said under it.
-	if (focused != nullptr)
-	{
-		const float ty = cy + ch / 2 + 36;
-		const std::string title = fit(bold(), 46, focused->title, W * 0.72f);
-		const ImVec2 ts = textSize(bold(), 46, title.c_str());
-		text(dl, bold(), 46, mid - ts.x / 2, ty, col::text, title.c_str());
-		std::string meta = kindText(focused->info);
-		const std::string more = metaText(*focused);
-		if (!more.empty())
-			meta += "   \xc2\xb7   " + more;
-		meta = fit(regular(), 24, meta, W * 0.72f);
-		const ImVec2 ms = textSize(regular(), 24, meta.c_str());
-		text(dl, regular(), 24, mid - ms.x / 2, ty + 64, col::dim, meta.c_str());
-	}
-	// Where in the row this is: a line, and a mark on it.
+	// (What faces is said in the strip under it.) Where in the row this is: a line, and a mark on it.
 	if (n > 1)
 	{
-		const float lw = W * 0.36f, lx = mid - lw / 2, ly = H - 72 - 44;
+		const float lw = W * 0.36f, lx = mid - lw / 2, ly = bodyBottom - 34;
 		rect(dl, lx, ly, lw, 4, alpha(col::text, 30 / 255.f), 2);
 		const float at = lib.flowAt / static_cast<float>(n - 1);
 		rect(dl, lx + (lw - 56) * std::clamp(at, 0.f, 1.f), ly - 2, 56, 8, col::accent, 4);
@@ -2609,11 +3081,10 @@ void bookSpine(ImDrawList* dl, const Game& g, float x, float y, float w, float h
 
 void drawBookcase(ImDrawList* dl, Game* focused)
 {
-	const float top = 96;
-	gameHeader(dl, focused, top);
+	(void)focused; // (said in the strip under it)
 	const int columns = bookColumns();
 	const int n = static_cast<int>(lib.flat.size());
-	const float caseTop = top + 184, rowH = BookH + BookRowGap, viewH = H - 72 - caseTop;
+	const float caseTop = bodyTop + 56, rowH = BookH + BookRowGap, viewH = bodyBottom - caseTop;
 	const int rows = (n + columns - 1) / columns, focusRow = lib.flatFocus / columns;
 	const float visibleRows = viewH / rowH;
 	const float target =
@@ -2626,7 +3097,7 @@ void drawBookcase(ImDrawList* dl, Game* focused)
 		lib.ringRow = jump ? row : approach(lib.ringRow, row, 20);
 	}
 	const float coverW = bookCoverW();
-	dl->PushClipRect(V(0, caseTop - 44), V(W, H - 72), true);
+	dl->PushClipRect(V(0, caseTop - 44), V(W, bodyBottom), true);
 	for (int row = 0; row < rows; row++)
 	{
 		const float y = caseTop + (row - lib.flatScroll) * rowH;
@@ -2669,8 +3140,9 @@ void drawBookcase(ImDrawList* dl, Game* focused)
 
 void drawTable(ImDrawList* dl, Game* focused)
 {
-	const float top = 96 + 36, x0 = 96, w = W - 192, headH = 50, rowH = 56;
-	const float viewTop = top + headH, viewH = H - 72 - viewTop - 28;
+	(void)focused; // (said in the strip under it)
+	const float top = bodyTop + 12, x0 = 96, w = W - 192, headH = 50, rowH = 56;
+	const float viewTop = top + headH, viewH = bodyBottom - viewTop - 12;
 	const int n = static_cast<int>(lib.flat.size());
 	const float visibleRows = viewH / rowH;
 	const float target =
@@ -2825,8 +3297,8 @@ float gameFacts(ImDrawList* dl, const Game& g, float x, float y, float w, float 
 void drawShowcase(ImDrawList* dl, Game* focused, bool selectDisc)
 {
 	const int n = static_cast<int>(lib.flat.size());
-	const float top = 96;
-	const float stripH = 196, stripW = std::round(stripH / CARD_SHAPE), stripGap = 18, stripY = H - 72 - stripH - 40;
+	const float top = bodyTop - 30;
+	const float stripH = 196, stripW = std::round(stripH / CARD_SHAPE), stripGap = 18, stripY = bodyBottom - stripH - 40;
 	if (focused != nullptr)
 	{
 		const float a = artFadeFor(*focused);
@@ -2847,7 +3319,7 @@ void drawShowcase(ImDrawList* dl, Game* focused, bool selectDisc)
 	static float scroll = 0;
 	const float want = std::clamp(at - 2.f, 0.f, std::max(0.f, static_cast<float>(n) - shown + 0.2f));
 	scroll = (motion() == MotionOff) ? want : approach(scroll, want, 12);
-	dl->PushClipRect(V(64, stripY - 40), V(W - 64, H - 72), true);
+	dl->PushClipRect(V(64, stripY - 40), V(W - 64, bodyBottom), true);
 	for (int i = std::max(0, static_cast<int>(scroll) - 1); i < std::min(n, static_cast<int>(scroll + shown) + 2); i++)
 	{
 		const float x = 96 + (static_cast<float>(i) - scroll) * step;
@@ -2874,17 +3346,17 @@ void drawShowcase(ImDrawList* dl, Game* focused, bool selectDisc)
 void drawWheel(ImDrawList* dl, Game* focused, bool selectDisc)
 {
 	const int n = static_cast<int>(lib.flat.size());
-	const float top = 96;
-	const float wheelX = W * 0.6f, wheelW = W - 64 - wheelX, cy = top + (H - 72 - top) / 2, rowH = 78;
+	const float top = bodyTop, bottomEdge = bodyBottom;
+	const float wheelX = W * 0.6f, wheelW = W - 64 - wheelX, cy = top + (bottomEdge - top) / 2, rowH = 78;
 	if (focused != nullptr)
 	{
 		const float a = artFadeFor(*focused);
-		gameArt(dl, *focused, a, 0, top - 24, wheelX + 80, H - 72 - top + 24);
+		gameArt(dl, *focused, a, 0, top - 24, wheelX + 80, bottomEdge - top + 24);
 		// Darker toward the wheel, so that its titles read over the art.
-		gradientH(dl, wheelX - 220, top, 220, H - 72 - top, col::rgba(0, 0, 0, 0), col::rgba(0, 0, 0, 120));
-		rect(dl, wheelX, top, W - wheelX, H - 72 - top, col::rgba(0, 0, 0, 120));
+		gradientH(dl, wheelX - 220, top, 220, bottomEdge - top, col::rgba(0, 0, 0, 0), col::rgba(0, 0, 0, 120));
+		rect(dl, wheelX, top, W - wheelX, bottomEdge - top, col::rgba(0, 0, 0, 120));
 		const float coverH = 330, coverW = std::round(coverH / CARD_SHAPE);
-		const float bottom = H - 72 - 48;
+		const float bottom = bottomEdge - 48;
 		const float cx = 96, cyCover = bottom - coverH;
 		drawCover(dl, *focused, cx, cyCover + (1 - a) * 14, coverW, coverH, 12, 1);
 		const float tx = cx + coverW + 40, tw = wheelX - tx - 64;
@@ -2899,8 +3371,8 @@ void drawWheel(ImDrawList* dl, Game* focused, bool selectDisc)
 		glow(dl, wheelX + 12, cy - rowH / 2, wheelW - 12, rowH, 14, alpha(col::accent, 0.5f), 14);
 		rect(dl, wheelX + 12, cy - rowH / 2, wheelW - 12, rowH, col::accent, 14);
 	}
-	dl->PushClipRect(V(wheelX, top), V(W, H - 72), true);
-	const int reach = static_cast<int>((H - 72 - top) / 2 / (rowH * 0.8f)) + 2;
+	dl->PushClipRect(V(wheelX, top), V(W, bottomEdge), true);
+	const int reach = static_cast<int>((bottomEdge - top) / 2 / (rowH * 0.8f)) + 2;
 	for (int i = std::max(0, static_cast<int>(lib.wheelAt) - reach); i <= std::min(n - 1, static_cast<int>(lib.wheelAt) + reach); i++)
 	{
 		const float d = static_cast<float>(i) - lib.wheelAt, ad = std::fabs(d);
@@ -2925,11 +3397,11 @@ void drawWheel(ImDrawList* dl, Game* focused, bool selectDisc)
 
 void drawWall(ImDrawList* dl, Game* focused)
 {
-	const float top = 96 + 20;
+	const float top = bodyTop + 24;
 	const int n = static_cast<int>(lib.flat.size());
 	const float gap = 10;
 	const float cardW = (W - 128 - gap * (WallColumns - 1)) / WallColumns, cardH = std::round(cardW * CARD_SHAPE);
-	const float viewH = H - 72 - top - 70;
+	const float viewH = bodyBottom - top - 16;
 	const int rows = (n + WallColumns - 1) / WallColumns;
 	const float rowH = cardH + gap, visibleRows = viewH / rowH;
 	const float target = std::clamp(static_cast<float>(lib.flatFocus / WallColumns) - (visibleRows - 1) / 2, 0.f,
@@ -2941,7 +3413,7 @@ void drawWall(ImDrawList* dl, Game* focused)
 		lib.ringColumn = jump ? column : approach(lib.ringColumn, column, 22);
 		lib.ringRow = jump ? row : approach(lib.ringRow, row, 22);
 	}
-	dl->PushClipRect(V(0, top - 30), V(W, top + viewH + 40), true);
+	dl->PushClipRect(V(0, top - 30), V(W, bodyBottom), true);
 	float fx = -1, fy = 0;
 	for (int i = 0; i < n; i++)
 	{
@@ -2972,19 +3444,7 @@ void drawWall(ImDrawList* dl, Game* focused)
 		outline(dl, x - 4, y - 4, w + 8, h + 8, col::text, 11, 4);
 	}
 	dl->PopClipRect();
-	// The focused game, said under the wall.
-	if (focused != nullptr)
-	{
-		const float y = H - 72 - 58;
-		std::string line = focused->title;
-		const std::string meta = metaText(*focused);
-		const float tw = textIn(dl, bold(), 30, 64, y, col::text, focused->title, W * 0.55f, true).x;
-		if (!meta.empty())
-			textIn(dl, regular(), 22, 64 + tw + 28, y + 6, col::dim, meta, W - 64 - tw - 28 - 260, false);
-		const std::string where = std::to_string(lib.flatFocus + 1) + " of " + std::to_string(n);
-		const ImVec2 ws = textSize(regular(), 20, where.c_str());
-		text(dl, regular(), 20, W - 64 - ws.x, y + 8, col::faint, where.c_str());
-	}
+	// (The focused game is said in the strip under the wall.)
 }
 
 // ---- the discs view: the games' discs in a row, the focused one large and turning, as it would in
@@ -2995,8 +3455,9 @@ void drawDiscs(ImDrawList* dl, Game* focused)
 	const int n = static_cast<int>(lib.flat.size());
 	const float at = static_cast<float>(lib.flatFocus);
 	lib.discsAt = (lib.discsAt < 0 || motion() == MotionOff) ? at : approach(lib.discsAt, at, 11);
-	const float mid = W / 2, cy = 96 + 70 + 250;
-	const float bigR = 250, smallR = 118, first = bigR + 44 + smallR, spacing = smallR * 2 + 26;
+	const float bigR = std::min(250.f, (bodyBottom - bodyTop - 120) / 2), smallR = std::round(bigR * 0.47f), first = bigR + 44 + smallR,
+				spacing = smallR * 2 + 26;
+	const float mid = W / 2, cy = bodyTop + 30 + bigR;
 	const int reach = static_cast<int>((W / 2 - first) / spacing) + 3;
 	std::vector<int> order;
 	for (int i = std::max(0, static_cast<int>(std::floor(lib.discsAt)) - reach); i <= std::min(n - 1, static_cast<int>(std::ceil(lib.discsAt)) + reach); i++)
@@ -3025,25 +3486,12 @@ void drawDiscs(ImDrawList* dl, Game* focused)
 		if (a < 0.5f && !lib.details)
 			dl->AddCircle(V(x, cy), (r + 8) * S, alpha(col::accent, 1 - 2 * a), 128, 4 * S);
 	}
-	if (focused != nullptr)
-	{
-		const float ty = cy + bigR + 44;
-		const std::string title = fit(bold(), 46, focused->title, W * 0.72f);
-		const ImVec2 ts = textSize(bold(), 46, title.c_str());
-		text(dl, bold(), 46, mid - ts.x / 2, ty, col::text, title.c_str());
-		std::string meta = kindText(focused->info);
-		const std::string more = metaText(*focused);
-		if (!more.empty())
-			meta += "   \xc2\xb7   " + more;
-		meta = fit(regular(), 24, meta, W * 0.72f);
-		const ImVec2 ms = textSize(regular(), 24, meta.c_str());
-		text(dl, regular(), 24, mid - ms.x / 2, ty + 64, col::dim, meta.c_str());
-	}
+	(void)focused; // (said in the strip under them)
 	if (n > 1)
 	{
 		const std::string where = std::to_string(lib.flatFocus + 1) + " of " + std::to_string(n);
 		const ImVec2 ws = textSize(regular(), 20, where.c_str());
-		text(dl, regular(), 20, mid - ws.x / 2, H - 72 - 50, col::faint, where.c_str());
+		text(dl, regular(), 20, mid - ws.x / 2, std::min(cy + bigR + 24, bodyBottom - 30), col::faint, where.c_str());
 	}
 }
 
@@ -3055,6 +3503,9 @@ void drawDiscs(ImDrawList* dl, Game* focused)
 // and the name are on their way, 0 to 1; rest how much of everything else is left, 1 to 0. Not
 // lively ("Less" motion): the mark and the name, still.
 } // namespace
+
+const char* const* const libraryViewNames = viewNames;
+const int LibraryViewCount = ViewCount;
 
 // ----------------------------------------------------- what the others ask
 
@@ -3071,6 +3522,20 @@ const GameInfo* libraryGame(const std::string& path)
 			return &g.info;
 	}
 	return nullptr;
+}
+
+bool libraryDiscOf(const std::string& path, int& disc, int& discs)
+{
+	for (const Game& g : games)
+	{
+		if (g.info.path == path && !g.set.empty() && g.setSize > 1)
+		{
+			disc = g.discOrder;
+			discs = g.setSize;
+			return true;
+		}
+	}
+	return false;
 }
 
 void drawGameCover(ImDrawList* dl, const GameInfo& game, float x, float y, float w, float h, float r, float lift)
@@ -3399,7 +3864,7 @@ void quickViewsMenu()
 
 void listMenu()
 {
-	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Ps2Menu, Whole };
+	enum { Search, Quick, Order, ShowRow, Filters, CollectionRow, ViewRow, Random, Scan, Ps2Menu, TexturePacks, Whole };
 	std::vector<std::string> names;
 	names.push_back(nar.search.empty() ? std::string(ICON_FA_MAGNIFYING_GLASS "   Search by name") :
 	                                     std::string(ICON_FA_MAGNIFYING_GLASS "   Search: \"") + nar.search + "\"  (change it)");
@@ -3419,6 +3884,7 @@ void listMenu()
 	names.push_back(ICON_FA_DICE "   A game at random");
 	names.push_back(ICON_FA_ROTATE "   Look for new games");
 	names.push_back(ICON_FA_MICROCHIP "   The PlayStation 2 menu");
+	names.push_back(ICON_FA_IMAGES "   HD texture packs");
 	if (narrowed())
 		names.push_back(ICON_FA_XMARK "   Show all games again");
 	pick("The list", std::move(names), -1, [](int choice) {
@@ -3475,13 +3941,488 @@ void listMenu()
 			case Ps2Menu:
 				startPs2Menu();
 				break;
+			case TexturePacks:
+				// The texture pack manager (bp_textures.cpp): every game's packs, on every place.
+				if (TexturePackShelf* shelf = be->texturePackShelf())
+					openTexturePacks(shelf);
+				else
+					toast("Texture packs are not managed here.", 3.f);
+				break;
 			case Whole:
 				applyQuick(-1);
 				break;
 		}
 	});
 }
+
+// ---- the filter row: where the games are, and what they are to be
+//
+// Under the top bar: All (every place), Console, USB (while USB drives are on), Share, then
+// Favourites, Never played and Collections; what else the list is narrowed to (a quick view, a
+// search, filters) is a chip after them, Cross on it showing all games again. At its right: how
+// many games there are, in which order, and the view. Up from the games' first row is in it.
+enum ChipKind { ChipPlace, ChipFavourites, ChipNever, ChipCollections, ChipNarrowed };
+struct Chip
+{
+	std::string name;
+	int kind = ChipPlace;
+	int place = 0;
+	bool on = false;
+};
+
+// The row as it is now. While a disc is chosen for the running game: the places only.
+std::vector<Chip> chipsNow(bool selectDisc)
+{
+	std::vector<Chip> chips;
+	const auto place = [&](const char* name, int source) { chips.push_back({name, ChipPlace, source, lib.source == source}); };
+	place("All", AllSources);
+	place("Console", Internal);
+	if (be->usbWanted())
+		place("USB", Usb);
+	place("Share", Network);
+	if (selectDisc)
+	{
+		// (The disc in a drive can be the next disc of the running game, as can an image.)
+		if (!drive.games.empty())
+			place("Disc", DiscDrive);
+		return chips;
+	}
+	chips.push_back({"Favourites", ChipFavourites, 0, nar.show == ShowFavourites});
+	chips.push_back({"Never played", ChipNever, 0, nar.played == 1});
+	chips.push_back({nar.collection.empty() ? std::string("Collections") : nar.collection, ChipCollections, 0, !nar.collection.empty()});
+	// What else narrows the list: by the quick view's name, or what was set by hand.
+	Narrow rest = nar;
+	if (rest.show == ShowFavourites)
+		rest.show = ShowAll;
+	if (rest.played == 1)
+		rest.played = 0;
+	rest.collection.clear();
+	if (quickNow >= 0 && quickNow < static_cast<int>(quickViews.size()))
+		chips.push_back({std::string(ICON_FA_BOLT "  ") + quickViews[static_cast<size_t>(quickNow)].name, ChipNarrowed, 0, true});
+	else if (rest.any())
+	{
+		const Narrow kept = nar;
+		nar = rest;
+		chips.push_back({narrowText(), ChipNarrowed, 0, true});
+		nar = kept;
+	}
+	return chips;
+}
+
+void chooseChip(const Chip& chip)
+{
+	switch (chip.kind)
+	{
+		case ChipPlace:
+			switchSource(chip.place);
+			break;
+		case ChipFavourites:
+			quickLeft();
+			nar.show = (nar.show == ShowFavourites) ? ShowAll : ShowFavourites;
+			break;
+		case ChipNever:
+			quickLeft();
+			nar.played = (nar.played == 1) ? 0 : 1;
+			break;
+		case ChipCollections:
+			collectionsMenu();
+			break;
+		case ChipNarrowed:
+			applyQuick(-1);
+			break;
+	}
+}
+
+constexpr float CHIPS_Y = 106, CHIPS_H = 50, CHIP_TYPE = 22;
+
+float chipWidth(const Chip& chip)
+{
+	return std::min(textSize(bold(), CHIP_TYPE, chip.name.c_str()).x, 420.f) + 44;
+}
+
+// At the row's right: how many games, in which order, and the view.
+std::string chipsCount(bool selectDisc)
+{
+	static const char* const orderWords[] = {"by name", "last played first", "most played first", "largest first", "newest file first"};
+	const size_t count = lib.flat.size(); // (made for every view)
+	return std::to_string(count) + (count == 1 ? " game" : " games") +
+		   (selectDisc ? std::string() : std::string("  \xc2\xb7  ") + orderWords[std::clamp(options().sort, 0, 4)]);
+}
+
+// Where the chips have to end: left of the count and the view.
+float chipsRight(bool selectDisc)
+{
+	float right = W - 64;
+	if (!selectDisc)
+		right -= textSize(bold(), CHIP_TYPE, viewNames[view()]).x + 44 + 20;
+	return right - textSize(regular(), CHIP_TYPE, chipsCount(selectDisc).c_str()).x;
+}
+
+// How many of the chips are drawn (the rest has no room): only those can have the focus.
+size_t chipsThatFit(const std::vector<Chip>& chips, bool selectDisc)
+{
+	const float right = chipsRight(selectDisc);
+	float x = 64;
+	for (size_t i = 0; i < chips.size(); i++)
+	{
+		if (right - 28 - x < 90)
+			return i;
+		x += std::min(chipWidth(chips[i]), right - 28 - x) + 12;
+		if (chips[i].kind == ChipPlace && i + 1 < chips.size() && chips[i + 1].kind != ChipPlace)
+			x += 20;
+	}
+	return chips.size();
+}
+
+void drawChips(ImDrawList* dl, const std::vector<Chip>& chips, bool selectDisc)
+{
+	const settings::Palette p = settings::palette();
+	// At the right: how many games, in which order, and the view.
+	const std::string games = chipsCount(selectDisc);
+	const char* const layout = viewNames[view()];
+	const float lw = textSize(bold(), CHIP_TYPE, layout).x + 44;
+	float right = W - 64;
+	if (!selectDisc)
+	{
+		rect(dl, right - lw, CHIPS_Y, lw, CHIPS_H, p.card, CHIPS_H / 2);
+		text(dl, bold(), CHIP_TYPE, right - lw + 22, CHIPS_Y + CHIPS_H / 2 - textSize(bold(), CHIP_TYPE, layout).y / 2, p.text, layout);
+		right -= lw + 20;
+	}
+	const ImVec2 gs = textSize(regular(), CHIP_TYPE, games.c_str());
+	right -= gs.x;
+	// (On a pill of the page's colour: the shelves' art can be behind it.)
+	rect(dl, right - 18, CHIPS_Y, gs.x + 36, CHIPS_H, alpha(p.ground, 0.72f), CHIPS_H / 2);
+	text(dl, regular(), CHIP_TYPE, right, CHIPS_Y + CHIPS_H / 2 - gs.y / 2, p.secondary, games.c_str());
+	// The chips, from the left; the narrowing chip is cut to what is left.
+	float x = 64;
+	for (size_t i = 0; i < chips.size(); i++)
+	{
+		const Chip& c = chips[i];
+		if (right - 28 - x < 90)
+			break;
+		const float w = std::min(chipWidth(c), right - 28 - x);
+		const bool focus = (chipFocus == static_cast<int>(i));
+		rect(dl, x, CHIPS_Y, w, CHIPS_H, c.on ? p.accent : focus ? p.raised : p.card, CHIPS_H / 2);
+		if (focus)
+			settings::focusRing(dl, x, CHIPS_Y, w, CHIPS_H, CHIPS_H / 2);
+		const std::string shown = fit(bold(), CHIP_TYPE, c.name, w - 44);
+		text(dl, bold(), CHIP_TYPE, x + 22, CHIPS_Y + CHIPS_H / 2 - textSize(bold(), CHIP_TYPE, shown.c_str()).y / 2,
+			c.on ? p.onAccent : focus ? p.text : p.secondary, shown.c_str());
+		x += w + 12;
+		// (A gap between the places and what the games are to be.)
+		if (c.kind == ChipPlace && i + 1 < chips.size() && chips[i + 1].kind != ChipPlace)
+			x += 20;
+	}
+}
+
+// ---- the focused game's strip, under the views that do not show what is known of it
+//
+// Its name, its region, serial and how well it runs, the time played, its saved states and where it
+// is; tags for a texture pack and a favourite; at the right, where in the list it is.
+constexpr float STRIP_H = 92;
+
+bool stripped(View v)
+{
+	return v == Grid || v == Bookcase || v == Table || v == Wall || v == Flow || v == Discs;
+}
+
+const char* placeWords(int source)
+{
+	switch (source)
+	{
+		case Internal:
+			return "on the console";
+		case Usb:
+			return "on a USB drive";
+		case Network:
+			return "on the share";
+		case DiscDrive:
+			return "in the drive";
+		default:
+			return "";
+	}
+}
+
+// How many saved states a game has (asked of the Backend once for each game the focus comes to).
+int stateCount(const Game& g)
+{
+	static std::string forPath;
+	static unsigned forGeneration = ~0u;
+	static int count = 0;
+	if (g.info.path != forPath || forGeneration != libraryGeneration)
+	{
+		forPath = g.info.path;
+		forGeneration = libraryGeneration;
+		count = 0;
+		if (g.info.hasStates && g.info.crc != 0)
+		{
+			for (const StateInfo& state : be->states(g.info.serial, g.info.crc, false))
+				count += (state.slot >= -1 && !state.backup) ? 1 : 0;
+		}
+	}
+	return count;
+}
+
+void drawStrip(ImDrawList* dl, const Game* focused)
+{
+	if (focused == nullptr)
+		return;
+	const settings::Palette p = settings::palette();
+	const Game& g = *focused;
+	const float x = 64, w = W - 128, y = bodyBottom + 14, h = STRIP_H;
+	rect(dl, x, y, w, h, p.card, 20);
+	// At the right: the tags, and where in the list it is.
+	float right = x + w - 28;
+	if (!lib.flat.empty())
+	{
+		const std::string where = std::to_string(lib.flatFocus + 1) + " of " + std::to_string(lib.flat.size());
+		const ImVec2 ws = textSize(regular(), 20, where.c_str());
+		right -= ws.x;
+		text(dl, regular(), 20, right, y + h / 2 - ws.y / 2, p.faint, where.c_str());
+		right -= 24;
+	}
+	const auto tag = [&](const char* label, ImU32 tint) {
+		const ImVec2 ts = textSize(bold(), 19, label);
+		const float tw = ts.x + 28;
+		right -= tw;
+		rect(dl, right, y + h / 2 - 18, tw, 36, alpha(tint, 0.22f), 18);
+		text(dl, bold(), 19, right + 14, y + h / 2 - ts.y / 2, tint, label);
+		right -= 12;
+	};
+	if (g.info.favourite)
+		tag(ICON_FA_STAR "  Favourite", col::warm);
+	if (g.info.hasTextures)
+		tag(ICON_FA_IMAGES "  Texture pack", p.accent);
+	// The name, and what is known of the game after it.
+	const float nameW = std::min(textSize(bold(), 30, g.title.c_str()).x, (right - x - 56) * 0.45f);
+	textIn(dl, bold(), 30, x + 28, y + h / 2 - 18, p.text, g.title, nameW, true);
+	std::string meta = metaText(g);
+	const auto add = [&](const std::string& part) {
+		if (!part.empty())
+			meta += (meta.empty() ? "" : "   \xc2\xb7   ") + part;
+	};
+	const std::string played = formatPlayed(g.info.playedSeconds);
+	add(played.empty() ? std::string("Never played") : "Played " + played);
+	if (const int states = stateCount(g); states > 0)
+		add(std::to_string(states) + (states == 1 ? " save state" : " save states"));
+	add(placeWords(g.info.source));
+	const float mx = x + 28 + nameW + 28;
+	textIn(dl, regular(), 22, mx, y + h / 2 - 13, p.secondary, meta, std::max(0.f, right - mx - 12), false);
+}
+
+// ---- the top bar's tabs from the library screen
+
+void goTab(int to)
+{
+	if (to == TabDisc)
+	{
+		if (lib.source != DiscDrive)
+			switchSource(DiscDrive);
+	}
+	else if (lib.source == DiscDrive)
+	{
+		switchSource(keptPlace());
+	}
+	tab = to;
+	chipFocus = -1;
+}
 } // namespace
+
+// ------------------------------------------------------- the tabs, and what Home asks
+
+int libraryTab()
+{
+	return (lib.source == DiscDrive) ? TabDisc : tab;
+}
+
+void stepTab(int direction)
+{
+	std::vector<int> ids;
+	for (const TopTab& t : topTabs())
+		ids.push_back(t.id);
+	const int n = static_cast<int>(ids.size());
+	const int at = static_cast<int>(std::find(ids.begin(), ids.end(), libraryTab()) - ids.begin());
+	const int to = ids[static_cast<size_t>(((at + direction) % n + n) % n)];
+	goTab(to);
+	// It comes in from the side the button points to, also when it went round.
+	entranceSide(direction > 0 ? 1.f : -1.f);
+}
+
+int libraryChip()
+{
+	return chipFocus;
+}
+
+void showLibraryTab(int to, int source)
+{
+	if (be == nullptr)
+		return;
+	chooseSource();
+	if (source >= 0 && source != lib.source)
+		switchSource(source);
+	goTab(to);
+}
+
+namespace
+{
+// A game that stands for itself on the lists: not hidden, not another disc of a set shown as one,
+// not the disc in the drive (which is the Disc tab's).
+bool standsAlone(const Game& g)
+{
+	return !g.info.hidden && !hiddenDisc(g, false) && g.info.source != DiscDrive;
+}
+} // namespace
+
+namespace
+{
+// What Home asks of the library each frame, made again only when the games change (refreshGames,
+// the disc sets, a favourite or a hidden game: libraryGeneration moves) or the sets are grouped
+// otherwise: the games played, the newest, and their number on each place.
+struct HomeLists
+{
+	size_t generation = 0;
+	bool grouped = false;
+	std::vector<size_t> played, newest;
+	int count[SourceCount + 1] = {};
+};
+
+const HomeLists& homeLists()
+{
+	static HomeLists h;
+	const bool grouped = grouping(false);
+	if (h.generation == libraryGeneration && h.grouped == grouped)
+		return h;
+	h.generation = libraryGeneration;
+	h.grouped = grouped;
+	h.played.clear();
+	h.newest.clear();
+	for (int& c : h.count)
+		c = 0;
+	for (size_t i = 0; i < games.size(); i++)
+	{
+		if (!standsAlone(games[i]))
+			continue;
+		h.newest.push_back(i);
+		if (games[i].info.lastPlayed > 0)
+			h.played.push_back(i);
+		const int source = games[i].info.source;
+		if (source >= 0 && source < SourceCount)
+			h.count[source]++;
+		h.count[SourceCount]++;
+	}
+	std::sort(h.played.begin(), h.played.end(), [](size_t a, size_t b) {
+		return games[a].info.lastPlayed != games[b].info.lastPlayed ? games[a].info.lastPlayed > games[b].info.lastPlayed : byTitle(a, b);
+	});
+	std::sort(h.newest.begin(), h.newest.end(), [](size_t a, size_t b) {
+		return games[a].info.added != games[b].info.added ? games[a].info.added > games[b].info.added : byTitle(a, b);
+	});
+	return h;
+}
+
+std::vector<HomeGame> firstOf(const std::vector<size_t>& which, int most)
+{
+	std::vector<HomeGame> out;
+	for (size_t i : which)
+	{
+		if (static_cast<int>(out.size()) >= most || i >= games.size())
+			break;
+		out.push_back({&games[i].info, games[i].title, i});
+	}
+	return out;
+}
+} // namespace
+
+void drawHomeCover(ImDrawList* dl, const HomeGame& game, float x, float y, float w, float h, float r, float lift)
+{
+	if (game.index < games.size() && &games[game.index].info == game.info)
+		drawCover(dl, games[game.index], x, y, w, h, r, lift);
+	else
+		drawGameCover(dl, *game.info, x, y, w, h, r, lift);
+}
+
+std::vector<HomeGame> recentGames(int most)
+{
+	return firstOf(homeLists().played, most);
+}
+
+std::vector<HomeGame> newestGames(int most)
+{
+	return firstOf(homeLists().newest, most);
+}
+
+int libraryCount(int source)
+{
+	const HomeLists& h = homeLists();
+	return (source < 0 || source >= SourceCount) ? h.count[SourceCount] : h.count[source];
+}
+
+void goToGame(const GameInfo& game, bool page)
+{
+	if (be == nullptr)
+		return;
+	chooseSource();
+	goTab(game.source == DiscDrive ? TabDisc : TabLibrary);
+	if (game.source != DiscDrive && lib.source != AllSources && lib.source != game.source)
+		switchSource(game.source);
+	const auto there = [&] {
+		buildShelves(false);
+		buildFlat(false);
+		for (size_t i : lib.flat)
+		{
+			if (games[i].info.path == game.path)
+				return true;
+		}
+		return false;
+	};
+	// (A list narrowed so that the game is not on it is whole again.)
+	if (!there() && narrowed())
+	{
+		nar = Narrow();
+		quickLeft();
+		there();
+	}
+	focusAnywhere(game.path);
+	lib.heroPath = game.path;
+	if (!page)
+		return;
+	for (const Game& g : games)
+	{
+		if (g.info.path == game.path)
+		{
+			openDetails(g);
+			return;
+		}
+	}
+}
+
+bool newestState(const GameInfo& game, StateInfo& out)
+{
+	if (be == nullptr || game.crc == 0)
+		return false;
+	bool found = false;
+	for (const StateInfo& state : be->states(game.serial, game.crc, false))
+	{
+		// (The state saved by itself every few minutes is the quick menu's; a game starts from the
+		// one made when it was closed, or from a slot.)
+		if (state.backup || state.slot < -1 || state.slot == 0)
+			continue;
+		if (!found || state.when > out.when)
+		{
+			out = state;
+			found = true;
+		}
+	}
+	return found;
+}
+
+void resumeFromNewest(const GameInfo& game)
+{
+	StateInfo state;
+	if (newestState(game, state))
+		launchGame(game, state.slot, 0);
+	else
+		launchGame(game, INT_MIN, 0);
+}
 
 // ------------------------------------------------------------ the library
 
@@ -3662,6 +4603,14 @@ void libraryScreen(bool selectDisc)
 	ImDrawList* dl = beginScreen("##bp-library", true);
 	chooseSource();
 	refreshGames();
+	// Home is this screen's too: bp_home.cpp has it.
+	if (!selectDisc && tab == TabHome)
+	{
+		updateDiscSets(false);
+		homeFrame(dl);
+		endScreen();
+		return;
+	}
 	// A disc is to be chosen for the running game: its own tab, and the disc after the one in the
 	// drive, if the game has several.
 	static bool choosing = false;
@@ -3730,13 +4679,33 @@ void libraryScreen(bool selectDisc)
 	// The details are of one game: gone from under the focus (the list was made again), they close.
 	if (lib.details && (focused == nullptr || focused->info.path != det.path))
 		lib.details = false;
+	// The filter row (not on the Disc tab, which is one disc; while a disc is chosen for the running
+	// game, the places, the drive's among them). Only the chips that are drawn can have the focus.
+	std::vector<Chip> chips = (lib.source != DiscDrive || selectDisc) ? chipsNow(selectDisc) : std::vector<Chip>();
+	chips.resize(chipsThatFit(chips, selectDisc));
+	if (chipFocus >= static_cast<int>(chips.size()))
+		chipFocus = static_cast<int>(chips.size()) - 1;
 	if (lib.details)
 	{
 		detailsInput(*focused, selectDisc);
 	}
 	else
 	{
-		if (v == Shelves && !lib.shelves.empty())
+		// Up from the games' first row: to the filter row; down (or Circle) from it: back to them.
+		bool toChips = false;
+		const bool inChips = (chipFocus >= 0);
+		if (inChips)
+		{
+			if (in.left && chipFocus > 0)
+				chipFocus--;
+			if (in.right && chipFocus + 1 < static_cast<int>(chips.size()))
+				chipFocus++;
+			if (in.down || in.back)
+				chipFocus = -1;
+			else if (in.accept)
+				chooseChip(chips[static_cast<size_t>(chipFocus)]);
+		}
+		else if (v == Shelves && !lib.shelves.empty())
 		{
 			Shelf& sh = lib.shelves[static_cast<size_t>(lib.shelf)];
 			const int n = static_cast<int>(sh.items.size());
@@ -3752,6 +4721,8 @@ void libraryScreen(bool selectDisc)
 				sh.focus = sh.byTitle ? letterJump(sh.items, sh.focus, 1) : std::min(n - 1, sh.focus + 6);
 			if (in.up && lib.shelf > 0)
 				lib.shelf--;
+			else if (in.up)
+				toChips = true;
 			if (in.down && lib.shelf < static_cast<int>(lib.shelves.size()) - 1)
 				lib.shelf++;
 		}
@@ -3767,6 +4738,7 @@ void libraryScreen(bool selectDisc)
 					f--;
 				if (in.right && f < n - 1)
 					f++;
+				toChips = in.up;
 			}
 			else
 			{
@@ -3779,6 +4751,8 @@ void libraryScreen(bool selectDisc)
 				}
 				if (in.up && f - step >= 0)
 					f -= step;
+				else if (in.up)
+					toChips = true;
 				if (in.down)
 					f = (f + step < n) ? f + step : ((step > 1 && f / step < (n - 1) / step) ? n - 1 : f);
 			}
@@ -3792,9 +4766,23 @@ void libraryScreen(bool selectDisc)
 				f = letters ? letterJump(lib.flat, f, 1) : std::min(n - 1, f + far);
 			lib.flatPath = games[lib.flat[static_cast<size_t>(f)]].info.path;
 		}
-		if (in.accept && focused != nullptr)
+		else
+		{
+			// (No game here: up still reaches the filter row, for another place.)
+			toChips = in.up;
+		}
+		if (toChips && !chips.empty())
+		{
+			chipFocus = 0;
+			for (size_t i = 0; i < chips.size(); i++)
+			{
+				if (chips[i].kind == ChipPlace && chips[i].on)
+					chipFocus = static_cast<int>(i);
+			}
+		}
+		if (!inChips && in.accept && focused != nullptr)
 			launch(*focused, selectDisc);
-		if (in.triangle && focused != nullptr)
+		if (!inChips && in.triangle && focused != nullptr)
 			openDetails(*focused);
 		// Square: the list's menu (search, order, which games show, the scan); on the Disc tab, an
 		// image of the disc.
@@ -3825,32 +4813,43 @@ void libraryScreen(bool selectDisc)
 		// are in the quick menu).
 		if (in.options && !selectDisc)
 			openSettings(nullptr, Screen::Library);
-		if (selectDisc && in.back)
+		if (!inChips && selectDisc && in.back)
 			setScreen(Screen::Quick);
 		// Circle: a list that is narrowed is whole again; with nothing to go back to, it closes
 		// the title, asked first.
-		if (!selectDisc && in.back && narrowed())
+		if (!inChips && !selectDisc && in.back && narrowed())
 		{
 			applyQuick(-1);
 		}
-		else if (!selectDisc && in.back)
+		else if (!inChips && !selectDisc && in.back)
 		{
 			confirm(std::string("Close ") + be->appName() + "?", "Are you sure?", [](bool yes) {
 				if (yes && be != nullptr)
 					be->quit();
 			}, "Yes, close it", "No");
 		}
-		if (in.l1 || in.r1)
+		if ((in.l1 || in.r1) && selectDisc)
 		{
-			// The next tab, round and round.
+			// While a disc is chosen: the next place, round and round.
 			std::vector<int> sources;
-			for (const TopTab& tab : topTabs())
-				sources.push_back(tab.id);
-			const int n = static_cast<int>(sources.size());
-			const int at = static_cast<int>(std::find(sources.begin(), sources.end(), lib.source) - sources.begin()) + (in.r1 ? 1 : -1);
-			switchSource(sources[static_cast<size_t>((at + n) % n)]);
-			// It comes in from the side the button points to, also when it went round.
-			entranceSide(in.r1 ? 1.f : -1.f);
+			for (const Chip& chip : chips)
+			{
+				if (chip.kind == ChipPlace)
+					sources.push_back(chip.place);
+			}
+			if (!sources.empty())
+			{
+				const int n = static_cast<int>(sources.size());
+				const int at = static_cast<int>(std::find(sources.begin(), sources.end(), lib.source) - sources.begin()) + (in.r1 ? 1 : -1);
+				switchSource(sources[static_cast<size_t>((at + n) % n)]);
+				// It comes in from the side the button points to, also when it went round.
+				entranceSide(in.r1 ? 1.f : -1.f);
+			}
+		}
+		else if (in.l1 || in.r1)
+		{
+			// The next tab of the top bar, round and round.
+			stepTab(in.r1 ? 1 : -1);
 		}
 	}
 	if (screen != Screen::Library && screen != Screen::Disc)
@@ -3894,6 +4893,11 @@ void libraryScreen(bool selectDisc)
 		if (focused != nullptr && view() != Shelves)
 			lib.heroPath = focused->info.path;
 	}
+	// Where the views draw: under the filter row, above the strip (where they have one).
+	const bool showChips = !chips.empty();
+	const bool showStrip = !empty && lib.source != DiscDrive && stripped(view());
+	bodyTop = showChips ? CHIPS_Y + CHIPS_H + 12 : 96;
+	bodyBottom = showStrip ? H - 72 - 28 - STRIP_H : H - 72;
 	const Layer content = beginLayer(dl);
 	if (empty)
 		emptyLibrary(dl, selectDisc);
@@ -3919,12 +4923,16 @@ void libraryScreen(bool selectDisc)
 		drawDiscs(dl, focused);
 	else
 		drawTable(dl, focused);
+	if (showStrip)
+		drawStrip(dl, focused);
 	endEntrance(content, e);
+	if (showChips)
+		drawChips(dl, chips, selectDisc);
 	// The letter just jumped to, large, for a moment.
 	if (const float since = static_cast<float>(timeNow - lib.letterAt); since < 0.9f && lib.letter != 0)
 	{
 		const float a = (since < 0.6f) ? 1.f : 1.f - (since - 0.6f) / 0.3f;
-		const float size = 190, lx = W - 96 - size, ly = 150;
+		const float size = 190, lx = W - 96 - size, ly = bodyTop + 16;
 		glow(dl, lx, ly, size, size, 28, alpha(col::accent, 0.6f * a), 18);
 		rect(dl, lx, ly, size, size, alpha(col::sheet, 0.94f * a), 28);
 		outline(dl, lx, ly, size, size, alpha(col::accent, a), 28, 3);
@@ -3933,20 +4941,8 @@ void libraryScreen(bool selectDisc)
 		text(dl, bold(), 120, lx + (size - ls.x) / 2, ly + (size - ls.y) / 2, alpha(col::text, a), shown);
 	}
 
-	// What the list is narrowed to, said at its top right.
-	if (!selectDisc && lib.source != DiscDrive && narrowed())
-	{
-		// (A quick view by its name; else what was set by hand.)
-		std::string chip = (quickNow >= 0 && quickNow < static_cast<int>(quickViews.size())) ?
-							   std::string(ICON_FA_BOLT "   ") + quickViews[static_cast<size_t>(quickNow)].name :
-							   narrowText();
-		chip = fit(bold(), 22, chip, W * 0.5f);
-		const ImVec2 cs = textSize(bold(), 22, chip.c_str());
-		const float cw = cs.x + 44, cx = W - 96 - cw, cy = 112;
-		rect(dl, cx, cy, cw, 44, alpha(col::sheet, 0.94f), 22);
-		outline(dl, cx, cy, cw, 44, alpha(col::accent, 0.8f), 22, 2);
-		text(dl, bold(), 22, cx + 22, cy + 22 - cs.y / 2, col::text, chip.c_str());
-	}
+	// (What the list is narrowed to is said in the filter row: a quick view by its name, else what
+	// was set by hand.)
 
 	// What goes on in the background, quietly, above the hint bar: the scan, cover downloads.
 	std::vector<std::string> notes;
@@ -3955,7 +4951,7 @@ void libraryScreen(bool selectDisc)
 	const std::string background = be->backgroundNote();
 	if (!background.empty())
 		notes.push_back(std::string(ICON_FA_DOWNLOAD) + "   " + background);
-	float noteY = H - 72 - 52;
+	float noteY = bodyBottom - 52;
 	for (const std::string& note : notes)
 	{
 		const ImVec2 ns = textSize(regular(), 20, note.c_str());
@@ -3971,40 +4967,34 @@ void libraryScreen(bool selectDisc)
 	if (lib.detailsAnim > 0.01f && focused != nullptr)
 		detailsPanel(dl, *focused, lib.detailsAnim, selectDisc);
 
-	topBar(dl, lib.source, selectDisc, Reach::All);
+	topBar(dl, selectDisc ? (lib.source == DiscDrive ? TabDisc : TabLibrary) : libraryTab(), selectDisc,
+		selectDisc ? Reach::None : Reach::All);
 	const Glyph browse = (view() == List || view() == Table || view() == Wheel) ? Glyph::DPadUD : Glyph::DPadLR;
-	const bool pictures = det.hasPicture[1] || det.hasPicture[2];
-	if (lib.details && selectDisc)
-		hintBar(dl, {{Glyph::Cross, "Insert"}, {Glyph::Circle, "Back"}});
-	else if (lib.details && det.page == PageActions)
-	{
-		std::vector<Hint> hints = {{Glyph::DPadLR, "Choose"}};
-		if (pictures)
-			hints.push_back({Glyph::DPadUD, "Pictures"});
-		if (setsGrouped && focused != nullptr && focused->setSize > 1)
-			hints.push_back({Glyph::Square, "Next disc"});
-		hints.insert(hints.end(), {{Glyph::L1, "Favourite"}, {Glyph::R1, "Hide"}, {Glyph::Cross, "Select"}, {Glyph::Circle, "Back"}});
-		hintBar(dl, hints);
-	}
-	else if (lib.details)
-		hintBar(dl, {{Glyph::DPadUD, "State"}, {Glyph::Square, "Delete"}, {Glyph::Cross, "Start from it"}, {Glyph::Circle, "Back"}});
+	// (A game's page has its own: detailsHints.)
+	if (lib.details && focused != nullptr)
+		detailsHints(dl, *focused, selectDisc);
+	else if (chipFocus >= 0)
+		hintBar(dl, {{Glyph::DPadLR, "Choose"}, {Glyph::DPadUD, "Back to the games"}, {Glyph::L1R1, selectDisc ? "Place" : "Sections"},
+						{Glyph::Cross, "Show"}, {Glyph::Circle, "Back"}});
 	else if (selectDisc)
-		hintBar(dl, {{Glyph::L1R1, "Source"}, {browse, "Browse"}, {Glyph::L2R2, "Letter"}, {Glyph::Cross, "Insert disc"},
-						{Glyph::Triangle, "Details"}, {Glyph::Circle, "Back"}});
+		hintBar(dl, {{Glyph::L1R1, "Place"}, {browse, "Browse"}, {Glyph::L2R2, "Letter"}, {Glyph::Cross, "Insert disc"},
+						{Glyph::Triangle, "Game page"}, {Glyph::Circle, "Back"}});
 	else if (empty)
-		hintBar(dl, {{Glyph::Circle, narrowed() ? "All games" : "Quit"}, {Glyph::L1R1, "Tab"}, {Glyph::Square, "List"}, {Glyph::Options, "Settings"}});
+		hintBar(dl, {{Glyph::Circle, narrowed() ? "All games" : "Quit"}, {Glyph::L1R1, "Sections"}, {Glyph::DPadUD, "Places and filters"},
+						{Glyph::Square, "Filter and sort"}, {Glyph::Options, "Settings"}});
 	else if (lib.source == DiscDrive)
 	{
-		std::vector<Hint> hints = {{Glyph::Circle, "Quit"}, {Glyph::L1R1, "Tab"}};
+		std::vector<Hint> hints = {{Glyph::Circle, "Quit"}, {Glyph::L1R1, "Sections"}};
 		if (lib.shelves.size() == 1 && lib.shelves[0].items.size() > 1)
 			hints.push_back({Glyph::DPadLR, "Other disc"});
-		hints.insert(hints.end(), {{Glyph::Options, "Settings"}, {Glyph::Square, "Make an image"}, {Glyph::Triangle, "Details"}, {Glyph::Cross, "Play"}});
+		hints.insert(hints.end(), {{Glyph::Options, "Settings"}, {Glyph::Square, "Make an image"}, {Glyph::Triangle, "Game page"}, {Glyph::Cross, "Play"}});
 		hintBar(dl, hints);
 	}
 	else
-		hintBar(dl, {{Glyph::Circle, narrowed() ? "All games" : "Quit"}, {Glyph::L1R1, "Tab"}, {browse, "Browse"},
-						{Glyph::L2R2, sortedByName() ? "Letter" : "Far"}, {Glyph::R3, "Quick view"}, {Glyph::TouchPad, "View"}, {Glyph::Square, "List"},
-						{Glyph::Options, "Settings"}, {Glyph::Triangle, "Details"}, {Glyph::Cross, "Play"}});
+		// (Fewer than before: the directions go without saying.)
+		hintBar(dl, {{Glyph::Circle, narrowed() ? "All games" : "Quit"}, {Glyph::L1R1, "Sections"}, {Glyph::L2R2, sortedByName() ? "Letter" : "Far"},
+						{Glyph::R3, "Quick view"}, {Glyph::TouchPad, "Layout"}, {Glyph::Square, "Filter and sort"}, {Glyph::Options, "Settings"},
+						{Glyph::Triangle, "Game page"}, {Glyph::Cross, "Play"}});
 	endScreen();
 }
 
@@ -4074,7 +5064,7 @@ void loadingScreen()
 		text(dl, regular(), 22, tx, by + 56, col::faint, state.slow.c_str(), tw);
 	endLayer(words, e, (1 - e) * 44, 0);
 
-	topBar(dl, loadingGame.path.empty() ? lib.source : loadingGame.source, false, Reach::None);
+	topBar(dl, libraryTab(), false, Reach::None);
 	hintBar(dl, {});
 	endScreen();
 }

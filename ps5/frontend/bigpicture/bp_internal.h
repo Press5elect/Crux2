@@ -141,7 +141,7 @@ extern const int AccentCount;
 struct Options
 {
 	int view = 0;        // 0 shelves, 1 grid, 2 list, 3 flow, 4 bookcase, 5 table, 6 showcase, 7 wheel, 8 wall, 9 discs
-	int source = 0;      // the library tab last open: 0 internal, 1 USB, 2 network
+	int source = 0;      // the library's place last shown: 0 internal, 1 USB, 2 network, 4 (SourceCount) all of them
 	bool groupDiscs = true;
 	bool splash = true;
 	int skin = 0;
@@ -259,7 +259,7 @@ float discSpin();
 
 // ------------------------------------------------------------ button glyphs
 
-enum class Glyph { Cross, Circle, Square, Triangle, L1, R1, L1R1, L2, R2, L2R2, R3, Options, TouchPad, DPadLR, DPadUD };
+enum class Glyph { Cross, Circle, Square, Triangle, L1, R1, L1R1, L2, R2, L2R2, R3, Options, TouchPad, DPadLR, DPadUD, L3 };
 float glyph(ImDrawList* dl, Glyph g, float x, float cy, float size = 34.f);
 
 struct Hint
@@ -267,7 +267,11 @@ struct Hint
 	Glyph glyph;
 	const char* label;
 };
+/// The hint bar at the foot: the hints in one order on every screen (Circle at the left, then the
+/// shoulders, directions, sticks, touch pad, OPTIONS, Square, Triangle, and Cross at the right).
 void hintBar(ImDrawList* dl, const std::vector<Hint>& hints);
+/// That order, for a screen that draws its hints itself (the quick menu).
+void orderHints(std::vector<Hint>& hints);
 
 // ------------------------------------------------------------------ input
 
@@ -287,11 +291,18 @@ void endScreen();
 
 // --------------------------------------------------------------- top bar
 
-// (DiscDrive is a tab only while a disc is in the console's drive, and is not kept as the tab
-// last open.)
+// Where a game is (GameInfo::source). (DiscDrive is the Disc tab's, there only while a disc is in
+// a drive, and is not kept as the place last shown.)
 enum Source { Internal, Usb, Network, DiscDrive, SourceCount };
+/// The top bar's tabs, left to right: L1 / R1 go from one to the next. The bar holds places only:
+/// Home, the Library and, while a disc is in a drive, the Disc (a peer of the Library). OPTIONS
+/// opens the settings from everywhere, so they are no tab. (Where the games are stored, the
+/// console, USB and the share, is the library's filter row; tools such as the texture pack manager
+/// are in Settings, the game page and the library's menu.)
+enum Tab { TabHome = 10, TabLibrary, TabDisc };
 /// Which other tabs L1 / R1 go to from a screen; the rest are fainter.
 enum class Reach { All, None };
+/// `active`: the Tab that is lit.
 void topBar(ImDrawList* dl, int active, bool inGame, Reach reach = Reach::All);
 struct TopTab
 {
@@ -349,6 +360,14 @@ bool cardManagerOpen();
 void cardManagerInput(const Input& now);
 void cardManagerDraw(ImDrawList* dl);
 void closeCardManager();
+/// The texture pack manager (bp_textures.cpp), the same way.
+bool texturePacksOpen();
+void texturePacksInput(const Input& now);
+void texturePacksDraw(ImDrawList* dl);
+void closeTexturePacks();
+/// The manager's row of a game, by its serial, in focus (the left pane). False when there is no
+/// such row. For the PC preview's walk through the screens.
+bool texturePacksFocus(const std::string& serial);
 /// The lists and questions that are up go, unanswered (the screen that asked is gone).
 void dropScreenDialogs();
 /// A dialog or a toast with no screen under it (a game runs): this draws them.
@@ -401,10 +420,50 @@ void libraryScreen(bool selectDisc);
 void librarySplashOrScreen(bool selectDisc);
 void loadingScreen();
 void quickScreen();
+/// For the PC preview's walk through the screens: the quick menu's focus on a tile or an entry of More
+/// by its name (bp_quick_layout.h's, "screenshot" for that tile), or on the n-th pinned setting ("pin:n").
+bool quickFocus(const std::string& id);
 void settingsScreen();
 
-/// The library's tab that is open (for the top bar of the other screens).
+/// The library's place that is shown (a Source, or all of them: SourceCount).
 int librarySource();
+/// The top bar's tab the library screen shows (TabHome, TabLibrary or TabDisc), for the screens it
+/// opens to light theirs over.
+int libraryTab();
+/// For the PC preview's walk through the screens: the library screen on a tab (TabHome, TabLibrary,
+/// TabDisc), and on a place (a Source, SourceCount for all of them; -1 leaves it).
+void showLibraryTab(int tab, int source = -1);
+/// The library's filter row: the chip in focus, -1 while the focus is in the games.
+int libraryChip();
+
+// ---- Home (bp_home.cpp): the game to go on with, what goes on now, the games played lately. It is
+// drawn by the library screen while its Home tab is open (libraryScreen hands the frame over).
+/// One frame of it, inside the library screen's beginScreen / endScreen.
+void homeFrame(ImDrawList* dl);
+/// What Home shows of the library (bp_library.cpp has the games).
+struct HomeGame
+{
+	const GameInfo* info;
+	std::string title;    // as the library shows it
+	size_t index = 0;     // the library's own entry (good until its games are made again)
+};
+/// A game of Home's lists drawn as the library draws its cover (no search by its path).
+void drawHomeCover(ImDrawList* dl, const HomeGame& game, float x, float y, float w, float h, float r, float lift);
+/// The games played, the latest first (hidden ones and a set's other discs left out), at most `most`.
+std::vector<HomeGame> recentGames(int most);
+/// The library's games that are listed anywhere (not hidden), and their number on each place.
+int libraryCount(int source = -1);
+/// The newest games of the library (by their file's date), for Home when none was played yet.
+std::vector<HomeGame> newestGames(int most);
+/// The Library tab, on the game's place, with the focus on it; `page`: its game page opened.
+void goToGame(const GameInfo& game, bool page);
+/// Starts the game from its newest saved state (the one made when it was closed, or a slot), or
+/// from its beginning when it has none.
+void resumeFromNewest(const GameInfo& game);
+/// The newest state a game can be started from (slot -1 or 1..10); none: false.
+bool newestState(const GameInfo& game, StateInfo& out);
+/// The top bar's tabs from the library screen: L1 / R1 to the next, round and round.
+void stepTab(int direction);
 /// Once a frame, before any screen: asks the Backend what is in the console's disc drive, says so
 /// when a disc has come, and takes the library off the Disc tab when the disc has gone.
 void pollDisc();
@@ -412,6 +471,8 @@ void pollDisc();
 const DiscState& discNow();
 /// A game of the library by its path; null when it is not there.
 const GameInfo* libraryGame(const std::string& path);
+/// Of a game that is one of the discs of a set the library has: which disc it is, and of how many.
+bool libraryDiscOf(const std::string& path, int& disc, int& discs);
 /// The cover of a game as the library draws it (a placeholder with its title when it has none).
 void drawGameCover(ImDrawList* dl, const GameInfo& game, float x, float y, float w, float h, float r, float lift);
 /// The game the loading screen is for.
@@ -430,8 +491,34 @@ const GameInfo& settingsGame();
 /// The open settings' page of that name, with the focus on the row of that label (none: on the
 /// page). False when there is no such page or row. For the PC preview's walk through the screens.
 bool settingsFocus(const char* page, const char* row = nullptr);
-/// The settings of all games, and of one game, as pages of options (bp_options.cpp).
+/// For the PC preview's walk through the settings: their sections at the level shown ("Area/Section",
+/// in order), the focus on the n-th row of one (false: it has no such row), and the search for a text
+/// (chip: 0 everything, 1 settings, 2 games, 3 changed from default) with its first result in focus.
+std::vector<std::string> settingsSections();
+bool settingsFocusAt(int section, int row);
+void settingsSearchFor(const std::string& query, int chip);
+/// The settings of all games, and of one game, as pages of options (bp_options.cpp), with the words
+/// and places of settings-text.yaml put on their rows (applySettingsText).
 std::vector<Page> settingsPages(bool forGame);
+/// The pages' rows, their words and places from the baked table of settings-text.yaml
+/// (bp_settings_words.cpp): each row's label, description and choice names, and its entry.
+struct SettingsText;
+void applySettingsText(Page& page);
+void applySettingsText(std::vector<Page>& pages);
+/// A row's entry in the table (area, section, level, today's page); null when it has none.
+const SettingsText* settingsTextOf(const Option& o);
+/// A row's id as settings-text.yaml names it (its place after "@" when it is in several), or, with no
+/// entry, as it would be named (section.key, or kind:label).
+std::string settingsIdOf(const Option& o);
+std::string settingsBaseId(const Option& o);
+/// A label as an id has it: "Add Network Share" -> "add-network-share".
+std::string settingsSlug(const std::string& text);
+/// The "This game" page the open game's settings begin with (bp_settings.cpp), for the settings
+/// inventory (ps5/tests/bigpicture/inventory).
+Page settingsSummaryPage();
+/// The library's views, by the number [UI] View keeps (bp_library.cpp).
+extern const char* const* const libraryViewNames;
+extern const int LibraryViewCount;
 
 // A game's title without its dump's tags, and the discs of one game (bp_library.cpp).
 std::string cleanTitle(const std::string& name);

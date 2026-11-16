@@ -14,15 +14,98 @@ item is done or something new is learned; delete what no longer applies.
 - The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, PS5_Vulkan
   `7f492b4`, the SDK `3345cde` with upstream v0.45's C++ runtime, PS2Recomp `e563698`); `check-sources.sh`
   reports every source current. None of it has run on a console. Save states from before don't load.
+- The settings' revamp, phase 3 (bp_settings.cpp, bp_settings_home.cpp, bp_settings_words.cpp; the
+  words of settings-text.yaml applied): checked on the PC only (the crawl, the shots, the inventory).
+  Not run on a console. To check there: every area and section opens and its rows behave as before
+  (lists, ranges, bindings and their capture, actions, the network share being added, the memory
+  cards and their manager, the log, achievements' sign-in); a game's own settings from the library
+  and the quick menu (Game options, Patches and cheats), L3 (Use Global Setting, clear a binding),
+  the touch pad's switch to all games and back, and that what is changed there is written to the
+  game's file and to PCSX2.ini; the texture-pack manager's "Texture settings of the game"; Restart
+  and NextStart rows (Takes effect) and the quick menu's "Apply changes now"; pins and Changed lately
+  kept across starts ([PS5UI] Pins, RecentChanges); the search's keyboard (a USB or the phone's one
+  too); readability at Text size Largest and Interface size 70%; the skins (light ones: Brutal,
+  Clay, Gloss) on the new layout; how fast the home is drawn (what is changed is looked at again every
+  half second: about 700 values, twice; see phase 5 for the PC's figure). The README names settings
+  by their area, section and PCSX2-style labels since phase 5.
+- The interface revamp, phase 4A (bp_home.cpp; the top bar, the library's filter row and strip in
+  bp_library.cpp): checked on the PC only (crawl, shots). Not run on a console. To check there: Home
+  after the start-up, its Resume (the newest state: the one made at closing or a slot) and Game page;
+  "Right now" with a real texture pack download, a disc in the drive and a share that answers or not;
+  L1 / R1 through Home, Library and Disc, Options to the settings and back to the same tab, the
+  "Right now" card opening the texture pack manager during a download; the filter row's All (every place
+  at once) with USB drives and a share, and its Favourites / Never played / Collections chips; the
+  strip's save state count (Backend::states for the focused game, once per game); choosing a disc
+  for a running game (the filter row's places, L1 / R1); how fast Home is drawn with a few thousand
+  games (since phase 5 its lists and counts are made once per change of the library, not every frame).
+- The interface revamp, phase 4B (a game's page in bp_library.cpp, the quick menu in bp_quick.cpp):
+  checked on the PC only (crawl, shots). Not run on a console. To check there: how long a game's page
+  takes to open (it opens the game's own settings once to count them, its patches, cheats and memory
+  card; texture packs from the manager's list); the Overview's description, which now asks
+  PS5About (Wikipedia, [PS5] FetchAbout) for every game whose page is opened, not only the disc in
+  the drive; the quick menu's Screenshot tile (PS5Shots::Take while the game is paused under the
+  menu: is the picture the game's, and is the menu not in it); pinned settings changed in the quick
+  menu (written to the running game's own settings where a game can have one, as the Settings do;
+  Apply changes now for those the game takes at its start); how fast the quick menu is drawn with
+  several settings pinned (their rows are made once when it opens, from every page).
+- The interface revamp, phase 5 (polish): checked on the PC only (crawl, shots, inventory, host
+  tests). Not run on a console. What changed: one order of the hints on every screen (bp_draw.cpp
+  hintBar/orderHints); messages (toasts) in the top right corner over the clock; the settings' home
+  cards' two summary lines; corner radii no longer multiplied twice by a skin's roundness; the cards'
+  hairline edge (light skins, Contrast); entrances 0.2 s (0.14 s and fades only with Motion: Less);
+  Home's lists and counts and the settings' id lookups cached; Change disc offers the drive's disc
+  again (a Disc chip, L1 / R1); L3 on a game's own pinned value in the quick menu. On the PC the
+  changed-from-default scan took 75 microseconds on average (470 at most) for 392 rows, every half
+  second. To check there: readability of the toasts over the clock and over a running game; that a
+  toast never hides something one needs (the Disc tab's R1 glyph sits close to it with three tabs);
+  the skin sheets (shots 71-*) against the television; Change disc from an image to the drive's disc
+  and back, and from the drive to an image; L3 in the quick menu on a game's own value.
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.
 - Online play through the network adapter's DNS presets (PS2 Online, PS Rewired) has not been tried.
 - The overlay's EE/GS/VU percentages are each thread's own report; whether a title may read
   another thread's processor time is not measured.
+- The performance overlay's sizes ([PS5] OsdSize; ps5_osd.cpp, ps5_osd_draw.h, ps5_osd_logic.h with
+  its host test `tests/osd/osd_logic_test.cpp`; pictured in the interface's shots 49c2-49c7). Not run
+  on a console. To check: readability on a television from the sofa at OSD scale 100% (the design's
+  pixels are a 1080-line screen's times the OSD scale: on the 2160-line output the overlay is twice
+  as large in pixels as on a 1080-line one, and larger than the v1.0.2 panel was); Minimal, Compact
+  and Full in each corner and top centre, with "Move the figures from corner to corner"; amber and red
+  where a game is slow; "30 → 60" with frame generation; the card's footer (the kernel's temperature,
+  the memory figure); a settings file from before it gets Custom when its switches match no size.
+  Cost: the overlay is made 10 times a second and drawn every frame (about 150 thin bars and a few
+  dozen text runs for Full); its GPU and GS-thread time is not measured.
 - Not every setting has been tried one by one; paraLLEl-GS not in every game; native code modules
   and many PS2 accessories not tried. PGO's worth has not been measured before/after.
 - Screen care: how fast a panel ages is not measured.
+- Looks' black screen (GSDeviceVK_PS5.cpp, DoLook): the look's picture is now left in the shader
+  read layout and PCSX2's vertex buffer bound again after the look's passes (the two causes the
+  reverted eca7923/d01f2cd found). Not run on a console. To check: a Look (e.g. CRT) shows the game,
+  the menus over it are drawn; the boot log has `look: frame 1 made, WxH from WxH`.
+- Downsampling ([PS5] Downsample) and SMAA ([PS5] SMAA), both off by default (ps5_aa.h, ps5_aa.glsl,
+  GSDevice::PS5Antialias, GSDeviceVK_PS5.cpp's DoDownsample/DoSMAA). Checked on lavapipe only
+  (`tests/aa`). On a console, check: with Upscaling Off or CAS and 8x at 4K, Soft and Sharp show a
+  picture with less shimmer than Bilinear, nothing shifted or cropped, the menus fine; the boot log's
+  `picture: downsampling's passes made`, `picture: downsampled (Sharp) from ... to ...`, `picture:
+  SMAA's passes made`, `picture: SMAA runs at WxH`; a paused game (menu open) looks the same as
+  running; with frame generation and a look on top; HDR and debanding after it. GPU cost: the test
+  window's `downsampling and SMAA` figure in the boot log's GPU line (and the overlay's conversions).
+  Not measured: the cost at 8x-12x (Sharp's two passes reach up to 33 texels each at a ratio of 8).
+- The HD texture pack manager (bp_textures.cpp, ps5_texture_pack_manager.cpp; the file work in
+  ps5_texture_pack_store.cpp, host-tested in `tests/texturepacks/store_test.cpp`; the screen in the
+  interface crawl). Not run on a console. To check: the manager lists packs on the console, a USB
+  drive (elevated) and a share, with sizes (`texture packs: ... measured in` lines; how long 100k
+  files take on a drive and over SMB); a move console to USB and back, and to a share (the share's
+  copy is written with `ps5vfs_store_from`, file by file: its speed), stopped half-way (the source
+  as it was, `replacements.crux2-moving` beside the target) and begun again; a delete stopped and
+  finished; two downloads queued one after the other; the bar during a move. Free space: the
+  console gives a title none (statvfs is a stand-in), so the "may not fit" question never comes on
+  the console; a pack too large stops with the drive full. Whether rename() works on an exFAT USB
+  drive from the elevated title (the move's last step there) is not known.
+- PS Move: whether the console's own libSceMove gives a payload process Move data is unknown; the
+  probe in [`../../ps5/probes/move/`](../../ps5/probes/move/README.md) (built, never run) calls it with
+  the PS4's signatures and logs to `/data/crux2-move-probe.log`. Nothing in the title uses it yet.
 
 ## Known problems
 
@@ -38,9 +121,20 @@ item is done or something new is learned; delete what no longer applies.
   constant Z, and LRPS2's native taps for an indexed read of a scaled target. The rest of that work
   is in history (2bf2d08 and before) and would have to be brought back.
 - From the reverted v1.0.19 work: Settings > Debug > Logs, network shares in Settings > Folders,
-  the boot log writer thread, the safety save in memory, the USB headset, CJK names,
-  `settings-text.yaml`: all out of the tree now. b075fe1's boot log in memory overlaps with the
+  the boot log writer thread, the safety save in memory, the USB headset, CJK names: all out of
+  the tree now (`settings-text.yaml` is back, made again from the code: the interface revamp's
+  phase 1, [`settings-inventory.md`](settings-inventory.md)). b075fe1's boot log in memory overlaps with the
   v1.0.19 log settings; reconcile before restoring either.
+- The interface revamp: phases 1 to 4 are in (1: the inventory, the no-loss test,
+  `settings-text.yaml`; 2: every setting's words, PCSX2's word for word where it has the setting and
+  in its voice elsewhere; 3: the settings' home, the eight areas, the search and the performance
+  overlay's sizes; 4: Home, the top bar of places, the library's filter row and strip, a game's page,
+  the quick menu), and phase 5's polish. All of it is checked on the PC only (crawl, shots,
+  inventory); nothing of it has run on a console (the items above say what to look at there). 60
+  rows' area or section is a guess (`ps5/tools/settings-text.py doubtful`), for the owner. PCSX2's
+  own descriptions keep the games they name (the owner's decision of 2026-11-15). The inventory does
+  not see rows of states its fakes do not make (a typed cheat, saved controller profiles, backups on
+  the drive, multitap ports, a share being changed).
 - Porpoise ports in progress (networking, input/aim, texture-pack memory cap, steady 30,
   colour-blind filter, trophy pop-ups, launch arguments, recommended settings, backups,
   screenshots): see the Unreleased changelog as they land.

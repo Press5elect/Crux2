@@ -22,7 +22,7 @@
 #include "bp.h"
 #include "bp_internal.h" // the screen that is on, for the checks
 #include "ps5_mc.h"      // the memory cards the card manager is shown: true ones, held in memory
-#include "ps5_osd_draw.h" // the on-screen display's panel, pictured with made-up figures
+#include "ps5_osd_draw.h" // the performance overlay, pictured with made-up figures
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -36,6 +36,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -393,7 +394,7 @@ struct Check
 	}
 } g_check;
 
-class PreviewBackend final : public bp::Backend, public bp::CardShelf
+class PreviewBackend final : public bp::Backend, public bp::CardShelf, public bp::TexturePackShelf
 {
 public:
 	std::vector<bp::GameInfo> list;
@@ -613,9 +614,23 @@ public:
 		download.total = 1800ull << 20;
 	}
 	std::string texturePackDoing() override { return download.title.empty() ? std::string() : download.title + ": downloading"; }
-	void stopTexturePack() override { download = DownloadBar(); }
+	void stopTexturePack() override
+	{
+		download = DownloadBar();
+		packDownloading.reset(); // (a download stopped is not a pack brought)
+	}
 	DownloadBar texturePackBar() override
 	{
+		// (With no download, a move or a delete of the texture pack manager has the bar.)
+		if (download.title.empty() && packJobOn)
+		{
+			DownloadBar bar;
+			bar.title = packJobWhat;
+			bar.got = packJobDone;
+			bar.total = packJobTotal;
+			bar.speed = 30e6;
+			return bar;
+		}
 		if (download.title.empty())
 			return download;
 		download.got = std::min(download.total, download.got + (3u << 20));
@@ -741,6 +756,13 @@ public:
 	{
 		g_check.expect(run.valid, "a GS dump is recorded in a running game");
 		gsDumps++;
+	}
+	bool screenshot() override
+	{
+		g_check.expect(run.valid, "a screenshot is taken of a running game");
+		screenshots++;
+		bp::toast("Screenshot saved: snaps/" + run.serial + "/2026-11-16_21-40-00.png");
+		return true;
 	}
 	bool memoryCardBusy() override { return busyCard; }
 	bool canUndoLoad() override { return undo && run.valid; }
@@ -1799,7 +1821,7 @@ public:
 	int addresses = 0;
 	int backups = 0, restores = 0, logsShown = 0;
 	bool undo = false;
-	int undone = 0, cheevos = 0, overlay = 0, gsDumps = 0;
+	int undone = 0, cheevos = 0, overlay = 0, gsDumps = 0, screenshots = 0;
 	int loadedSlot = 0; // the slot of the state last loaded into the running game
 	std::string signedIn;
 	bool recommended = false;
@@ -1890,6 +1912,250 @@ public:
 	}
 	int imagesAsked = 0;
 
+	// ---- the texture pack manager's shelf, made up: three places, packs on them (one of a game
+	// that is not in the library, one unfinished move), the collection's list a moment after it
+	// is asked for, moves and deletes that take a second or two, the downloads' queue.
+	bp::TexturePackShelf* texturePackShelf() override { return this; }
+	unsigned packsGen = 0;
+	int packsLooked = 0, collectionAt = -1, measureLeft = 0;
+	std::vector<bp::PackPlace> packPlacesHeld;
+	std::vector<bp::InstalledPack> packsHeld;
+	std::vector<bp::OfferedPack> offersHeld;
+	struct Queued
+	{
+		bp::OfferedPack pack;
+		int place;
+	};
+	std::deque<Queued> packQueue;
+	std::optional<Queued> packDownloading;
+	bool packJobOn = false, packJobDelete = false, packJobStop = false;
+	std::string packJobWhat;
+	uint64_t packJobDone = 0, packJobTotal = 0;
+	bp::InstalledPack packJobPack;
+	int packJobTo = 0;
+	unsigned packMoves = 0, packDeletes = 0, packDownloads = 0, movesRefused = 0;
+
+	void inventPacks()
+	{
+		packPlacesHeld = {{"This console", "/data/homebrew/PPSA99249/textures", 0, true, true, -1},
+			{"USB drive 1", "/mnt/usb0/Crux2/textures", 1, true, true, -1},
+			{"Share: games", "/smb/games/Crux2/textures", 2, true, false, -1}};
+		const auto pack = [](const char* serial, const char* path, int place, bool zip, bp::InstalledPack::State state, bool read, uint64_t files,
+							  uint64_t bytes) {
+			bp::InstalledPack p;
+			p.serial = serial;
+			p.path = path;
+			p.place = place;
+			p.zip = zip;
+			p.state = state;
+			p.read = read;
+			p.measured = false;
+			p.files = files;
+			p.bytes = bytes;
+			return p;
+		};
+		using S = bp::InstalledPack;
+		packsHeld = {pack("SLUS-29001", "/data/homebrew/PPSA99249/textures/SLUS-29001/replacements", 0, false, S::Whole, true, 41233, 3300ull << 20),
+			pack("SLUS-29001", "/smb/games/Crux2/textures/SLUS-29001/replacements", 2, false, S::Whole, false, 41233, 3300ull << 20),
+			pack("SLUS-29002", "/mnt/usb0/Crux2/textures/SLUS-29002.zip", 1, true, S::Whole, true, 1, 900ull << 20),
+			pack("SLES-59003", "/smb/games/Crux2/textures/SLES-59003/replacements", 2, false, S::Whole, true, 8120, 1200ull << 20),
+			pack("SLUS-29900", "/data/homebrew/PPSA99249/textures/SLUS-29900/replacements", 0, false, S::Whole, true, 512, 64ull << 20),
+			pack("SLUS-29004", "/mnt/usb0/Crux2/textures/SLUS-29004/replacements.crux2-moving", 1, false, S::Moving, false, 300, 20ull << 20),
+			pack("SLUS-29004", "/data/homebrew/PPSA99249/textures/SLUS-29004/replacements", 0, false, S::Whole, true, 900, 60ull << 20)};
+		const auto offer = [](const char* title, uint64_t size, std::vector<std::string> serials) {
+			bp::OfferedPack o;
+			o.title = title;
+			o.file = std::string(title) + ".rar";
+			o.size = size;
+			o.serials = std::move(serials);
+			return o;
+		};
+		offersHeld = {offer("Brass Comet (USA) [SLUS-29001] HD Pack", 3100ull << 20, {"SLUS-29001"}),
+			offer("Neon Harbor Racing (USA) [SLUS-29007] HD Remaster", 1800ull << 20, {"SLUS-29007"}),
+			offer("Velvet Engine (USA) [SLUS-29011] Upscaled", 640ull << 20, {"SLUS-29011"}),
+			offer("Ashen Crown (USA) [SLUS-29008, SLUS-29009, SLUS-29010] HD", 5200ull << 20, {"SLUS-29008", "SLUS-29009", "SLUS-29010"}),
+			offer("Lost Signal (USA) [SLUS-29900] HD", 70ull << 20, {"SLUS-29900"})};
+	}
+	unsigned packsGeneration() override { return packsGen; }
+	std::vector<bp::PackPlace> packPlaces() override
+	{
+		std::vector<bp::PackPlace> places = packPlacesHeld;
+		// (Free space as a PC would know it; the console knows none.)
+		if (!places.empty())
+			places[0].freeBytes = 18ll << 30;
+		if (places.size() > 1)
+			places[1].freeBytes = 2ll << 30;
+		return places;
+	}
+	std::vector<bp::InstalledPack> installedPacks() override { return packsHeld; }
+	void lookAgain(bool all) override
+	{
+		packsLooked++;
+		measureLeft = 40;
+		for (bp::InstalledPack& p : packsHeld)
+			p.measured = p.measured && !all;
+		if (collectionAt < 0 || all)
+			collectionAt = 50;
+		packsGen++;
+	}
+	int measuring() override
+	{
+		int n = 0;
+		for (const bp::InstalledPack& p : packsHeld)
+			n += p.measured ? 0 : 1;
+		return n;
+	}
+	int collectionState() override { return collectionAt < 0 ? 0 : collectionAt > 0 ? 1 : 2; }
+	std::string collectionError() override { return {}; }
+	std::vector<bp::OfferedPack> collectionPacks() override { return collectionAt == 0 ? offersHeld : std::vector<bp::OfferedPack>(); }
+	std::string packBusy(const bp::InstalledPack& pack) override
+	{
+		if (packJobOn)
+			return "A pack is being moved or deleted: wait for it, or stop it.";
+		if (run.valid && run.serial == pack.serial)
+			return "The game that runs reads it: close the game first.";
+		return {};
+	}
+	bool knownPack(const bp::InstalledPack& pack)
+	{
+		for (const bp::InstalledPack& p : packsHeld)
+		{
+			if (p.path == pack.path)
+				return true;
+		}
+		return false;
+	}
+	void deletePack(const bp::InstalledPack& pack) override
+	{
+		g_check.expect(knownPack(pack), "only a pack that is there is deleted");
+		g_check.expect(packBusy(pack).empty(), "a pack is deleted only when it may be");
+		packJobOn = true;
+		packJobDelete = true;
+		packJobPack = pack;
+		packJobDone = 0;
+		packJobTotal = std::max<uint64_t>(pack.bytes, 1);
+		packJobWhat = "Deleting " + pack.serial;
+		packsGen++;
+	}
+	void movePack(const bp::InstalledPack& pack, int place) override
+	{
+		g_check.expect(knownPack(pack), "only a pack that is there is moved");
+		g_check.expect(place >= 0 && place < static_cast<int>(packPlacesHeld.size()) && place != pack.place, "a pack is moved to another place that exists");
+		g_check.expect(pack.state == bp::InstalledPack::Whole, "only a whole pack is moved");
+		// (The menu leaves out a place that has a whole copy; one found there since is refused, as
+		// the store refuses it.)
+		for (const bp::InstalledPack& other : packsHeld)
+		{
+			if (other.serial == pack.serial && other.zip == pack.zip && other.place == place && other.state == bp::InstalledPack::Whole)
+			{
+				movesRefused++;
+				bp::message("Texture packs", "A pack of " + pack.serial + " is there already: delete one of them first.");
+				return;
+			}
+		}
+		packJobOn = true;
+		packJobDelete = false;
+		packJobPack = pack;
+		packJobTo = place;
+		packJobDone = 0;
+		packJobTotal = std::max<uint64_t>(pack.bytes, 1);
+		packJobWhat = "Moving " + pack.serial + " to " + packPlacesHeld[static_cast<size_t>(place)].name;
+		packsGen++;
+	}
+	std::string packJob() override
+	{
+		if (!packJobOn)
+			return {};
+		return packJobWhat + ": " + std::to_string(packJobDone * 100 / packJobTotal) + "%";
+	}
+	void stopPackJob() override { packJobStop = true; }
+	void queueDownload(const bp::OfferedPack& pack, int place) override
+	{
+		g_check.expect(place >= 0 && place < static_cast<int>(packPlacesHeld.size()) && packPlacesHeld[static_cast<size_t>(place)].downloads,
+			"a download goes to a place that takes one");
+		packQueue.push_back({pack, place});
+		packsGen++;
+	}
+	std::vector<std::string> queuedDownloads() override
+	{
+		std::vector<std::string> out;
+		for (const Queued& q : packQueue)
+			out.push_back(q.pack.title + " to " + packPlacesHeld[static_cast<size_t>(q.place)].name);
+		return out;
+	}
+	void unqueueDownload(int index) override
+	{
+		g_check.expect(index >= 0 && index < static_cast<int>(packQueue.size()), "what is taken off the queue is on it");
+		if (index >= 0 && index < static_cast<int>(packQueue.size()))
+			packQueue.erase(packQueue.begin() + index);
+		packsGen++;
+	}
+	void packsTick()
+	{
+		if (collectionAt > 0 && --collectionAt == 0)
+			packsGen++;
+		if (measureLeft > 0 && --measureLeft == 0)
+		{
+			for (bp::InstalledPack& p : packsHeld)
+				p.measured = true;
+			packsGen++;
+		}
+		if (packJobOn)
+		{
+			packJobDone = std::min(packJobTotal, packJobDone + packJobTotal / 90 + 1);
+			if (packJobStop || packJobDone >= packJobTotal)
+			{
+				const bool stopped = packJobStop;
+				packJobOn = packJobStop = false;
+				for (size_t i = 0; i < packsHeld.size(); i++)
+				{
+					if (packsHeld[i].path != packJobPack.path)
+						continue;
+					if (stopped)
+						break;
+					if (packJobDelete)
+					{
+						packsHeld.erase(packsHeld.begin() + static_cast<std::ptrdiff_t>(i));
+						packDeletes++;
+					}
+					else
+					{
+						packsHeld[i].place = packJobTo;
+						packsHeld[i].path = packPlacesHeld[static_cast<size_t>(packJobTo)].where + "/" + packJobPack.serial + "/replacements";
+						packMoves++;
+					}
+					break;
+				}
+				bp::toast(stopped ? "Stopped: the pack is where it was." : packJobDelete ? "The pack is deleted." : "The pack is moved.", 3.f);
+				packsGen++;
+			}
+		}
+		// The downloads, one after another.
+		if (packDownloading && download.title.empty())
+		{
+			bp::InstalledPack p;
+			p.serial = packDownloading->pack.serials.front();
+			p.place = packDownloading->place;
+			p.path = packPlacesHeld[static_cast<size_t>(p.place)].where + "/" + p.serial + "/replacements";
+			p.measured = true;
+			p.files = 2000;
+			p.bytes = packDownloading->pack.size;
+			packsHeld.push_back(p);
+			packDownloading.reset();
+			packDownloads++;
+			packsGen++;
+		}
+		if (!packDownloading && download.title.empty() && !packQueue.empty())
+		{
+			packDownloading = packQueue.front();
+			packQueue.pop_front();
+			download = DownloadBar();
+			download.title = packDownloading->pack.title;
+			download.total = std::min<uint64_t>(packDownloading->pack.size, 600ull << 20);
+			packsGen++;
+		}
+	}
+
 	// One frame of the world: what was asked of the machine happens, a start completes, a game on
 	// its way down is down, a wait for a button ends.
 	void tick(float dt)
@@ -1943,6 +2209,7 @@ public:
 			scanBusy = false;
 			scanFrames = 0;
 		}
+		packsTick();
 	}
 
 	unsigned long long writes = 0;
@@ -1965,7 +2232,11 @@ struct Harness
 	std::string out;
 	unsigned frames = 0;
 
-	Harness(int w, int h) : width(w), height(h) { backend.inventCards(); }
+	Harness(int w, int h) : width(w), height(h)
+	{
+		backend.inventCards();
+		backend.inventPacks();
+	}
 
 	bool optionsWas = false;
 	int over = 0, under = 0, nowhere = 0;
@@ -2017,6 +2288,52 @@ struct Harness
 	{
 		wait(2, button);
 		wait(settle);
+	}
+
+	// A sheet of small pictures (a quarter of the screen each, six to a row): the same screen in
+	// every skin, or in each way of seeing it, side by side.
+	struct Sheet
+	{
+		int cols = 6, cellW = 480, cellH = 270, gap = 8, n = 0;
+		Frame picture{6 * 488 + 8, 6 * 278 + 8};
+	};
+	void cell(Sheet& sheet)
+	{
+		Frame picture(width, height);
+		frame(0, &picture, false);
+		const int col = sheet.n % sheet.cols, row = sheet.n / sheet.cols;
+		sheet.n++;
+		const int x0 = sheet.gap + col * (sheet.cellW + sheet.gap), y0 = sheet.gap + row * (sheet.cellH + sheet.gap);
+		if (y0 + sheet.cellH > sheet.picture.height)
+			return;
+		const int fx = width / sheet.cellW, fy = height / sheet.cellH;
+		for (int y = 0; y < sheet.cellH; y++)
+		{
+			for (int x = 0; x < sheet.cellW; x++)
+			{
+				for (int c = 0; c < 3; c++)
+				{
+					float sum = 0;
+					for (int dy = 0; dy < fy; dy++)
+					{
+						for (int dx = 0; dx < fx; dx++)
+							sum += picture.rgb[(static_cast<size_t>(y * fy + dy) * width + static_cast<size_t>(x * fx + dx)) * 3 + c];
+					}
+					sheet.picture.rgb[(static_cast<size_t>(y0 + y) * sheet.picture.width + static_cast<size_t>(x0 + x)) * 3 + c] = sum / static_cast<float>(fx * fy);
+				}
+			}
+		}
+	}
+	void writeSheet(Sheet& sheet, const char* name)
+	{
+		const int rows = (sheet.n + sheet.cols - 1) / sheet.cols;
+		Frame cut(sheet.picture.width, sheet.gap + rows * (sheet.cellH + sheet.gap));
+		std::copy(sheet.picture.rgb.begin(), sheet.picture.rgb.begin() + static_cast<std::ptrdiff_t>(cut.rgb.size()), cut.rgb.begin());
+		const std::string path = out + "/" + name + ".ppm";
+		if (!writePPM(path, cut))
+			std::fprintf(stderr, "cannot write %s\n", path.c_str());
+		else
+			std::printf("  %s\n", path.c_str());
 	}
 
 	void shot(const char* name)
@@ -2128,6 +2445,123 @@ void shots(Harness& h)
 	until(5.30f, "00h-startup-5.30");
 	h.wait(120);
 	g_check.expect(b.sounded[0] && !b.sounded[1] && b.sounded[2], "a start-up left alone begins and opens the library");
+	g_check.expect(bp::libraryTab() == bp::TabHome, "the start-up hands over to Home");
+	h.shot("00i-home");
+	// ---- the revamp's Home and library chrome (phase 4A): the library's filter row and the focused
+	// game's strip in several views, on all places with USB drives on; Home with games, with none
+	// played and with none at all; the Right now card opening the texture pack manager; then with a light skin, the interface at
+	// 70% and the largest text, and with another skin.
+	{
+		const auto viewShot = [&](int view, const char* name) {
+			b.setInt(0, "PS5UI", "View", view);
+			bp::loadOptions();
+			h.wait(40);
+			h.shot(name);
+		};
+		const auto revampShots = [&](const char* tag) {
+			char name[64];
+			bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+			const int views[] = {1, 2, 0, 3, 5, 8, 4, 9, 6, 7};
+			const char* const viewNames[] = {"grid", "list", "shelves", "flow", "table", "wall", "bookcase", "discs", "showcase", "wheel"};
+			for (int i = 0; i < 10; i++)
+			{
+				std::snprintf(name, sizeof(name), "4a-%s-library-%s", tag, viewNames[i]);
+				viewShot(views[i], name);
+			}
+			b.setInt(0, "PS5UI", "View", 0);
+			bp::loadOptions();
+			bp::showLibraryTab(bp::TabHome);
+			h.wait(40);
+			std::snprintf(name, sizeof(name), "4a-%s-home", tag);
+			h.shot(name);
+		};
+		const bool usbWas = b.wantUsb;
+		b.wantUsb = true;
+		revampShots("default");
+		g_check.expect(bp::libraryTab() == bp::TabHome, "the preview's hook opens Home");
+		// The covers' row in focus, and a game page from it.
+		h.press(P::Down, 30);
+		h.press(P::Right, 30);
+		h.shot("4a-home-recent-focus");
+		// The chips in focus in the grid, and Favourites chosen there.
+		bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+		b.setInt(0, "PS5UI", "View", 1);
+		bp::loadOptions();
+		h.wait(20);
+		for (int i = 0; i < 8 && bp::libraryChip() < 0; i++)
+			h.press(P::Up, 8);
+		g_check.expect(bp::libraryChip() == 0, "Up from the grid's first row is on the All chip");
+		h.shot("4a-default-grid-chips");
+		for (int i = 0; i < 4; i++)
+			h.press(P::Right, 6);
+		h.press(P::Cross, 30);
+		h.shot("4a-default-grid-favourites");
+		h.press(P::Cross, 30); // (and off again)
+		h.press(P::Down, 20);
+		b.setInt(0, "PS5UI", "View", 0);
+		bp::loadOptions();
+		// A texture pack being downloaded: Home's "Right now" card says so, and Cross on it opens the
+		// texture pack manager (the top bar holds places only: the manager is no tab).
+		bp::showLibraryTab(bp::TabHome);
+		b.findTexturePacks();
+		b.download.got = (1240ull << 20) - (3u << 20) * 30;
+		h.wait(30);
+		h.press(P::Up, 10);
+		for (int i = 0; i < 3; i++)
+			h.press(P::Right, 10);
+		h.shot("4a-home-right-now-download");
+		h.press(P::Cross, 40);
+		g_check.expect(bp::texturePacksOpen(), "Cross on Home's Right now card opens the texture pack manager");
+		h.press(P::Circle, 30);
+		b.stopTexturePack();
+		h.wait(30);
+		h.press(P::Left, 10);
+		h.press(P::Left, 10);
+		// The top bar: L1 / R1 go between Home and the Library (no Settings tab: OPTIONS opens them).
+		h.press(P::R1, 30);
+		g_check.expect(bp::libraryTab() == bp::TabLibrary, "R1 from Home is the Library");
+		h.press(P::R1, 30);
+		g_check.expect(bp::libraryTab() == bp::TabHome, "and R1 again is Home, round and round");
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings, "OPTIONS on Home opens the Settings");
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Library && bp::libraryTab() == bp::TabHome, "and closes them, back on Home");
+		// Home with no game played yet, and with no game at all.
+		{
+			const std::vector<bp::GameInfo> kept = b.list;
+			for (bp::GameInfo& g : b.list)
+				g.lastPlayed = 0;
+			b.generation++;
+			bp::showLibraryTab(bp::TabHome);
+			h.wait(40);
+			h.shot("4a-home-none-played");
+			b.list.clear();
+			b.generation++;
+			h.wait(40);
+			h.shot("4a-home-empty");
+			b.list = kept;
+			b.generation++;
+			h.wait(20);
+		}
+		// A light skin, the interface at 70% and the largest text; then another skin.
+		b.setInt(0, "PS5UI", "Look", 8);
+		b.setInt(0, "PS5UI", "InterfaceSize", 70);
+		b.setInt(0, "PS5UI", "TextSize", 2);
+		bp::loadOptions();
+		revampShots("clay-70-largest");
+		b.setInt(0, "PS5UI", "InterfaceSize", 100);
+		b.setInt(0, "PS5UI", "TextSize", 0);
+		b.setInt(0, "PS5UI", "Look", 12);
+		bp::loadOptions();
+		revampShots("blueprint");
+		b.setInt(0, "PS5UI", "Look", 0);
+		bp::loadOptions();
+		b.wantUsb = usbWas;
+		bp::showLibraryTab(bp::TabLibrary, bp::Internal);
+		bp::showLibraryTab(bp::TabHome);
+		h.wait(40);
+	}
+
 	// Circle, with nothing to go back to: the question.
 	h.press(P::Circle, 30);
 	h.shot("01-quit-question");
@@ -2141,18 +2575,23 @@ void shots(Harness& h)
 	h.press(P::Cross, 20);
 	g_check.expect(b.quits == 1, "Yes closes the title");
 	b.quits = 0;
-	// A disc is put in the drive: it is said, and it has its tab.
+	// R1: from Home to the Library.
+	h.press(P::R1, 40);
+	g_check.expect(bp::libraryTab() == bp::TabLibrary, "R1 goes from Home to the Library");
+	// A disc is put in the drive: it is said, and it has its tab (after the Library's).
 	b.putDisc(1);
 	h.wait(40);
 	h.shot("01b-disc-put-in");
-	h.press(P::L1, 40);
+	h.press(P::R1, 40);
+	g_check.expect(bp::libraryTab() == bp::TabDisc, "R1 goes from the Library to the Disc tab");
 	h.shot("01c-disc-tab");
 	h.press(P::Triangle, 40);
 	h.shot("01d-disc-details");
-	// The disc's details have its image to make; so does Square on the tab.
-	h.press(P::Right, 6);
-	h.press(P::Right, 6);
-	h.press(P::Right, 20);
+	// The disc's page has its image to make (More, Square: its seventh row); so does Square on the tab.
+	h.press(P::Square, 20);
+	for (int i = 0; i < 6; i++)
+		h.press(P::Down, 4);
+	h.wait(10);
 	h.shot("01d2-disc-details-image");
 	h.press(P::Cross, 20);
 	g_check.expect(b.imagesAsked == 1, "Make an image in the disc's details asks for an image");
@@ -2167,7 +2606,7 @@ void shots(Harness& h)
 	h.shot("01e-disc-taken-out");
 	b.putDisc(2);
 	h.wait(20);
-	h.press(P::L1, 40);
+	h.press(P::R1, 40);
 	h.shot("01f-disc-not-a-game");
 	// A USB DVD drive beside the console's own: a CD in it, a DVD in the other.
 	// (The Disc tab is open from the shot before.)
@@ -2186,6 +2625,14 @@ void shots(Harness& h)
 	h.shot("02a-library-texture-pack-download");
 	b.stopTexturePack();
 	h.wait(30);
+	// The texture pack manager from the list's menu (Square): its last row but one.
+	h.press(P::Square, 30);
+	h.press(P::Up, 8);
+	h.press(P::Cross, 30);
+	g_check.expect(bp::texturePacksOpen(), "the list's menu opens the texture pack manager");
+	h.shot("02b-library-texture-packs");
+	h.press(P::Circle, 30);
+	g_check.expect(!bp::texturePacksOpen() && bp::screen == bp::Screen::Library, "Circle closes it, back to the library");
 	h.press(P::Down, 30);
 	h.press(P::Right);
 	h.press(P::R2, 4);
@@ -2198,24 +2645,23 @@ void shots(Harness& h)
 	h.press(P::Left);
 	h.press(P::Triangle, 30);
 	h.shot("04-details");
-	h.press(P::Right);
-	h.press(P::Cross, 20);
+	// (R1: the Save states tab, its rows in focus.)
+	h.press(P::R1);
 	h.press(P::Down);
 	h.shot("05-details-states");
-	h.press(P::Circle);
-	h.press(P::Right);
-	h.press(P::Right);
-	h.press(P::Cross, 20);
+	h.press(P::L1);
+	// Square: More.
+	h.press(P::Square, 20);
 	h.shot("06-details-more");
 	h.press(P::Cross, 20);
 	h.shot("06b-details-start-with");
 	h.press(P::Circle);
-	// The game's other pictures, in the cover's place.
-	h.press(P::Down, 20);
+	// The game's other pictures, in the cover's place (L2 / R2).
+	h.press(P::R2, 20);
 	h.shot("06c-details-title-screen");
-	h.press(P::Down, 20);
+	h.press(P::R2, 20);
 	h.shot("06d-details-in-play");
-	h.press(P::Down, 10);
+	h.press(P::R2, 10);
 	h.press(P::Circle, 30);
 
 	// The other views.
@@ -2260,13 +2706,24 @@ void shots(Harness& h)
 	h.press(P::TouchPad, 40);
 	g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 0, "the touch pad goes through the ten views and comes back to the shelves");
 
-	// The other tabs.
-	h.press(P::R1, 40);
+	// The other places (the filter row: Up from the first shelf, then the chips).
+	for (int i = 0; i < 6 && bp::libraryChip() < 0; i++)
+		h.press(P::Up, 20);
+	g_check.expect(bp::libraryChip() >= 0, "Up from the first shelf goes to the filter row");
+	h.press(P::Right, 10); // (from Console, the place shown, to USB)
+	h.shot("09a-filter-row");
+	h.press(P::Cross, 40);
+	g_check.expect(bp::librarySource() == bp::Usb, "the USB chip shows the USB drives' games");
 	h.shot("09-usb-not-available");
-	h.press(P::R1, 40);
+	h.press(P::Right, 10);
+	h.press(P::Cross, 40);
+	g_check.expect(bp::librarySource() == bp::Network, "the Share chip shows the share's games");
 	h.shot("10-network");
-	h.press(P::L1, 30);
-	h.press(P::L1, 40);
+	h.press(P::Left, 10);
+	h.press(P::Left, 10);
+	h.press(P::Cross, 30);
+	h.press(P::Down, 30);
+	g_check.expect(bp::librarySource() == bp::Internal && bp::libraryChip() < 0, "back to the console's games, and Down out of the row");
 
 	// The settings: eleven pages (v1.0.0). The walk goes to a page and a row by their names.
 	const auto go = [&](const char* page, const char* row = nullptr) {
@@ -2276,6 +2733,20 @@ void shots(Harness& h)
 	};
 	h.press(P::Options, 40);
 	h.shot("11-settings-library");
+	g_check.expect(bp::screen == bp::Screen::Settings, "Options opens the settings' home");
+	// The search (the settings' revamp): every setting at every level, by its words.
+	bp::settingsSearchFor("vsync", 0);
+	h.wait(20);
+	h.shot("11s-settings-search");
+	h.press(P::Down, 10);
+	h.shot("11s2-settings-search-result");
+	h.press(P::Square, 20);
+	g_check.expect(!b.getString(0, "PS5UI", "Pins").value_or("").empty(), "Square pins a setting from the search");
+	h.press(P::R1, 6);
+	h.press(P::R1, 20);
+	h.shot("11s3-settings-search-games");
+	h.press(P::Circle, 20);
+	g_check.expect(bp::screen == bp::Screen::Settings, "Circle goes from the search back to the settings' home");
 	go("Interface");
 	h.shot("11a-settings-interface");
 	go("Interface", "Skin");
@@ -2319,6 +2790,35 @@ void shots(Harness& h)
 	h.shot("13-0f-settings-at-80");
 	b.setInt(0, "PS5UI", "InterfaceSize", 100);
 	bp::loadOptions();
+	// The home with what was pinned and changed lately, and an area's page with only what is changed.
+	go("Graphics", "Internal resolution");
+	h.press(P::Square, 10);
+	go("Interface", "Text size");
+	h.press(P::Right, 10);
+	h.press(P::Square, 10);
+	h.press(P::Circle, 30);
+	h.shot("13-0g-settings-home-pinned");
+	g_check.expect(b.getString(0, "PS5UI", "RecentChanges").value_or("").find("PS5UI.TextSize") == 0,
+		"a setting changed is the first of the changed lately");
+	h.press(P::Triangle, 20);
+	go("Interface", "Text size");
+	h.shot("13-0h-settings-only-changed");
+	h.press(P::Left, 10);
+	h.press(P::Circle, 20);
+	h.press(P::Triangle, 20);
+	// The skins' colours on the settings (the default skin's are the design's own).
+	for (const int skin : {1, 8, 20})
+	{
+		b.setInt(0, "PS5UI", "Look", skin);
+		bp::loadOptions();
+		go("Graphics", "Texture filtering");
+		char name[48];
+		std::snprintf(name, sizeof(name), "13-0i-settings-skin-%02d-%s", skin, bp::skins[skin].name);
+		h.shot(name);
+	}
+	b.setInt(0, "PS5UI", "Look", 0);
+	bp::loadOptions();
+	h.press(P::Circle, 20);
 	// Memory cards (v1.5.0): saves brought in from a USB drive, from a PlayStation 2 over the network
 	// and from a card image; a card made, one brought in whole, one formatted; a save copied, deleted
 	// and brought back, written out; a card written out, copied, deleted and renamed.
@@ -2513,6 +3013,84 @@ void shots(Harness& h)
 		b.cardFiles.erase("SLUS-29001.ps2");
 		b.pages++;
 	}
+	// The texture pack manager (Settings > Graphics > HD texture packs): the packs by game, a game's
+	// copies, a move asked about (it may not fit), a delete asked twice, downloads one after another,
+	// and a game's texture settings.
+	{
+		go("Graphics", "HD texture packs");
+		h.press(P::Cross, 10);
+		g_check.expect(bp::texturePacksOpen(), "the texture pack manager opens from the settings");
+		h.shot("13t-1-texture-packs-measuring");
+		h.wait(70); // measured, and the collection's list is there
+		h.shot("13t-2-texture-packs");
+		g_check.expect(bp::texturePacksFocus("SLUS-29001"), "a game with two copies is listed");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.shot("13t-3-game-copies");
+		h.press(P::Cross, 30); // the console's copy
+		h.shot("13t-4-pack-menu");
+		h.press(P::Cross, 30); // Move to USB drive 1, which has 2 GB free
+		h.shot("13t-5-may-not-fit");
+		h.press(P::Cross, 20);
+		g_check.expect(b.packMoves == 0 && !b.packJobOn, "a move that may not fit is not begun by the answer the question opens on");
+		h.press(P::Cross, 30);
+		h.press(P::Cross, 30);
+		h.press(P::Left, 8);
+		h.press(P::Cross, 10);
+		h.wait(30);
+		h.shot("13t-6-moving");
+		h.wait(120);
+		g_check.expect(b.packMoves == 1, "the pack is moved after the question");
+		h.press(P::Circle, 20);
+		// A pack of a game that is not in the library, deleted: asked twice.
+		g_check.expect(bp::texturePacksFocus("SLUS-29900"), "a pack of a game not in the library is listed, by the collection's name");
+		h.wait(10);
+		h.shot("13t-7-not-in-library");
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.press(P::Up, 8); // Delete, the last
+		h.press(P::Cross, 30);
+		h.shot("13t-8-delete-question");
+		h.press(P::Left, 8);
+		h.press(P::Cross, 30);
+		g_check.expect(b.packDeletes == 0 && !b.packJobOn, "the first answer alone deletes nothing");
+		h.shot("13t-9-delete-again");
+		h.press(P::Left, 8);
+		h.press(P::Cross, 10);
+		h.wait(120);
+		g_check.expect(b.packDeletes == 1, "the pack is deleted after the second answer");
+		// Downloads: two, one after the other.
+		g_check.expect(bp::texturePacksFocus("SLUS-29007"), "a game of the library the collection has a pack for is listed");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.shot("13t-10-download-where");
+		h.press(P::Cross, 20); // This console
+		g_check.expect(bp::texturePacksFocus("SLUS-29011"), "and another");
+		h.wait(10);
+		h.press(P::Cross, 20);
+		h.press(P::Cross, 30);
+		h.press(P::Down, 8); // USB drive 1
+		h.press(P::Cross, 20);
+		g_check.expect(b.packDownloading.has_value() && b.packQueue.size() == 1, "one downloads, the other waits");
+		h.press(P::Left, 10); // out of the game's packs
+		h.press(P::R2, 10);   // to the last row: the places, the downloads above them
+		h.wait(20);
+		h.shot("13t-11-downloads-and-places");
+		h.wait(500);
+		g_check.expect(b.packDownloads == 2 && b.packQueue.empty(), "the two are downloaded one after the other");
+		// A game's texture settings (Triangle).
+		g_check.expect(bp::texturePacksFocus("SLUS-29001"), "the game is still listed");
+		h.wait(10);
+		h.press(P::Triangle, 30);
+		g_check.expect(!bp::texturePacksOpen() && bp::screen == bp::Screen::Settings && bp::settingsGame().serial == "SLUS-29001",
+			"Triangle opens the game's own settings");
+		h.shot("13t-12-game-texture-settings");
+		h.press(P::Circle, 20);
+		h.press(P::Circle, 30);
+		h.press(P::Options, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings && bp::settingsGame().path.empty(), "back to the settings of all games");
+	}
 	// Backups: one is made, one restored after the question.
 	go("Memory Cards", "Backups go to");
 	h.shot("13a-settings-backup");
@@ -2628,9 +3206,10 @@ void shots(Harness& h)
 	h.press(P::Circle, 40);
 
 	// A game with a state from when it was closed: go on, or start over. (The shelf of the games
-	// last played, whose first is the one with such a state.)
-	h.press(P::Up, 30);
-	h.press(P::Up, 30);
+	// last played, whose first is the one with such a state: up to the filter row, and down to it.)
+	for (int i = 0; i < 6 && bp::libraryChip() < 0; i++)
+		h.press(P::Up, 30);
+	h.press(P::Down, 30);
 	for (int i = 0; i < 6; i++)
 		h.press(P::Left, 4);
 	h.wait(30);
@@ -2638,13 +3217,16 @@ void shots(Harness& h)
 	h.shot("16-resume-or-start-over");
 	h.press(P::Circle, 20);
 
-	// Its own options.
+	// Its own options: its page's third tab (R1 twice), Its settings.
 	h.press(P::Triangle, 20);
-	h.press(P::Right);
-	h.press(P::Right);
+	h.press(P::R1);
+	h.press(P::R1);
 	h.press(P::Cross, 40);
 	h.shot("17-game-options");
-	// What the database recommends for it: set, and said.
+	g_check.expect(bp::screen == bp::Screen::Settings && !bp::settingsGame().path.empty(), "a game's details open its own settings");
+	// What the database recommends for it: set, and said. (Games and saves, its first section: the game.)
+	h.press(P::Cross, 10);
+	h.shot("17a-game-options-this-game");
 	h.press(P::Cross, 10);
 	for (int i = 0; i < 12 && !b.recommended; i++)
 	{
@@ -2667,6 +3249,19 @@ void shots(Harness& h)
 	h.wait(20);
 	h.shot("18-game-options-picture");
 	h.press(P::Circle);
+	// The switch in the top bar: the settings of all games while the game's are open, and back.
+	go("Graphics", "Texture filtering");
+	h.press(P::TouchPad, 20);
+	h.shot("18a-game-options-all-games");
+	h.press(P::TouchPad, 20);
+	h.press(P::Circle);
+	// A game's own Texture Replacement row opens the manager on that game.
+	go("Graphics", "HD texture packs");
+	h.press(P::Cross, 40);
+	g_check.expect(bp::texturePacksOpen(), "a game's HD texture packs row opens the manager");
+	h.shot("18b-game-texture-packs");
+	h.press(P::Circle, 30);
+	g_check.expect(!bp::texturePacksOpen(), "and Circle closes it, back to the game's options");
 	go("Patches");
 	h.press(P::Cross);
 	h.press(P::Cross);
@@ -2677,9 +3272,8 @@ void shots(Harness& h)
 	h.press(P::Circle, 30);
 
 	// A game from the network: the loading screen with its progress.
-	h.press(P::R1, 30);
-	h.press(P::R1, 30);
-	h.press(P::Up, 20);
+	bp::showLibraryTab(bp::TabLibrary, bp::Network);
+	h.wait(30);
 	h.press(P::Cross, 2);
 	h.wait(100);
 	h.shot("20-loading");
@@ -2688,42 +3282,40 @@ void shots(Harness& h)
 	bp::openQuickMenu();
 	h.wait(40);
 	h.shot("21-quick-menu");
-	h.press(P::Down);
+	// (The tiles: Resume, Save state, ...; More's rows under them. bp::quickFocus goes to one by name.)
+	h.press(P::Right);
 	h.press(P::Cross, 60);
 	bp::openQuickMenu();
 	h.wait(30);
-	h.press(P::Down);
-	h.press(P::Down);
-	h.press(P::Down);
+	bp::quickFocus("slot");
+	h.wait(4);
 	h.press(P::Right);
 	h.press(P::Left);
 	h.shot("22-quick-menu-state-slot");
-	h.press(P::Down);
+	bp::quickFocus("disc");
+	h.wait(4);
 	h.press(P::Cross, 50);
 	h.shot("23-change-disc");
 	h.press(P::Circle, 30);
-	// "Record a GS dump", the row under Change disc: the backend records one and the game goes on.
-	h.press(P::Down);
+	// "Record a GS dump": the backend records one and the game goes on.
+	bp::quickFocus("gsdump");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.gsDumps == 1 && bp::screen == bp::Screen::None && !b.run.paused,
 		"Record a GS dump in the quick menu records one and resumes the game");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 4; i++) // to Change disc again
-		h.press(P::Down, 4);
 	// The game's patches and cheats, straight from the quick menu: its options open on that page,
-	// with the focus in its rows; leaving them is back in the quick menu. (Under Change disc: the
-	// GS dump's row, Game options, Patches and cheats.)
-	for (int i = 0; i < 3; i++)
-		h.press(P::Down, 4);
+	// with the focus in its rows; leaving them is back in the quick menu.
+	bp::quickFocus("patches");
 	h.wait(10);
 	h.press(P::Cross, 40);
 	h.shot("23b-patches-and-cheats-from-the-quick-menu");
 	g_check.expect(bp::screen == bp::Screen::Settings && b.gameOpen, "Patches and cheats in the quick menu opens the game's options");
 	h.press(P::Circle, 20);
 	h.press(P::Circle, 30);
-	g_check.expect(bp::screen == bp::Screen::Quick && !b.gameOpen, "and leaving them is back in the quick menu");
-	h.press(P::Down, 4);
+	g_check.expect(bp::screen == bp::Screen::Quick, "and leaving them is back in the quick menu");
+	bp::quickFocus("settings");
 	h.wait(10);
 	h.press(P::Cross, 40);
 	h.shot("24-settings-over-the-game");
@@ -2733,9 +3325,7 @@ void shots(Harness& h)
 	h.wait(30);
 	h.shot("25-message-and-toast");
 	h.press(P::Cross, 20);
-	// Settings, Fast forward, Restart game, Quit game.
-	for (int i = 0; i < 3; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("quit");
 	h.wait(20);
 	h.press(P::Cross, 20);
 	h.shot("26-quit-game");
@@ -2768,8 +3358,8 @@ void shots(Harness& h)
 	h.shot("28-start-failed");
 	h.press(P::Cross, 20);
 	b.startWillFail = false;
-	h.press(P::L1, 30);
-	h.press(P::L1, 40);
+	bp::showLibraryTab(bp::TabLibrary, bp::Internal);
+	h.wait(40);
 
 	// ---- the list's menu: a search typed on the keyboard, the order, favourites, hidden games
 	h.press(P::Square, 30);
@@ -2815,14 +3405,17 @@ void shots(Harness& h)
 	for (int i = 0; i < 9; i++)
 		h.press(P::TouchPad, 30);
 	h.wait(20);
-	// A favourite, from the details of the game that was found.
+	// A favourite, from the page of the game that was found: More (Square), its fifth row.
 	h.press(P::Triangle, 30);
-	h.press(P::L1, 30);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 4; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 30);
 	{
 		int favourites = 0;
 		for (const bp::GameInfo& g : b.list)
 			favourites += g.favourite ? 1 : 0;
-		g_check.expect(favourites == 1, "L1 in a game's details makes it a favourite");
+		g_check.expect(favourites == 1, "More > A favourite on a game's page makes it one");
 	}
 	h.shot("53-details-favourite");
 	h.press(P::Circle, 20);
@@ -2901,11 +3494,9 @@ void shots(Harness& h)
 		g_check.expect(b.getString(0, "PS5UI", "QuickView4").has_value(), "what is shown is kept as a fourth quick view");
 		h.press(P::Circle, 40);
 		g_check.expect(b.getInt(0, "PS5UI", "Sort").value_or(0) == 0, "Circle shows all games again");
-		// A collection: made from a game's details, and a shelf of its own.
+		// A collection: made from a game's page (More), and a shelf of its own.
 		h.press(P::Triangle, 30);
-		for (int i = 0; i < 3; i++)
-			h.press(P::Right, 4);
-		h.press(P::Cross, 20);
+		h.press(P::Square, 20);
 		h.press(P::Down, 4);
 		h.press(P::Down, 4);
 		h.press(P::Cross, 20);
@@ -2924,9 +3515,7 @@ void shots(Harness& h)
 		h.shot("55l-collection-shelf");
 		// Renamed, and given its own name back.
 		h.press(P::Triangle, 30);
-		for (int i = 0; i < 3; i++)
-			h.press(P::Right, 4);
-		h.press(P::Cross, 20);
+		h.press(P::Square, 20);
 		h.press(P::Down, 4);
 		h.press(P::Cross, 20);
 		h.shot("55m-rename");
@@ -2941,7 +3530,7 @@ void shots(Harness& h)
 				renamed += g.renamed ? 1 : 0;
 			g_check.expect(renamed == 1, "More > Rename gives the game another title");
 		}
-		h.press(P::Cross, 20); // More again: its own name is the fifth row now
+		h.press(P::Square, 20); // More again: its own name is the fifth row now
 		for (int i = 0; i < 4; i++)
 			h.press(P::Down, 4);
 		h.press(P::Cross, 20);
@@ -2962,7 +3551,10 @@ void shots(Harness& h)
 	}
 	// A game hidden, found among the hidden ones, and listed again.
 	h.press(P::Triangle, 30);
-	h.press(P::R1, 30);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 5; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 30);
 	h.shot("56-hide-question");
 	h.press(P::Left, 6);
 	h.press(P::Cross, 40);
@@ -2970,7 +3562,7 @@ void shots(Harness& h)
 		int hidden = 0;
 		for (const bp::GameInfo& g : b.list)
 			hidden += g.hidden ? 1 : 0;
-		g_check.expect(hidden == 1, "R1 in a game's details, answered yes, hides it");
+		g_check.expect(hidden == 1, "More > Hide it on a game's page, answered yes, hides it");
 	}
 	h.press(P::Square, 20);
 	for (int i = 0; i < 3; i++)
@@ -2981,12 +3573,15 @@ void shots(Harness& h)
 	h.press(P::Cross, 40);
 	h.shot("57-hidden-games");
 	h.press(P::Triangle, 30);
-	h.press(P::R1, 40);
+	h.press(P::Square, 20);
+	for (int i = 0; i < 5; i++)
+		h.press(P::Down, 4);
+	h.press(P::Cross, 40);
 	{
 		int hidden = 0;
 		for (const bp::GameInfo& g : b.list)
 			hidden += g.hidden ? 1 : 0;
-		g_check.expect(hidden == 0, "R1 on a hidden game lists it again");
+		g_check.expect(hidden == 0, "More > List it again on a hidden game lists it again");
 	}
 	h.shot("57b-none-hidden");
 	h.press(P::Circle, 40);
@@ -3002,21 +3597,21 @@ void shots(Harness& h)
 	bp::openQuickMenu();
 	h.wait(40);
 	h.shot("58-quick-menu-more");
-	// (This game has a state saved by itself: "Load the auto-save" is the row after the slot's.)
-	for (int i = 0; i < 4; i++)
-		h.press(P::Down, 4);
+	// (This game has a state saved by itself: "Load the auto-save" is in More.)
+	bp::quickFocus("autosave");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.loadedSlot == -2 && !bp::active(), "Load the auto-save loads the state saved by itself, and the game goes on");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 5; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("undo");
+	h.wait(4);
 	h.press(P::Cross, 30);
 	g_check.expect(b.undone == 1 && !bp::active(), "Undo the last load is run, and the game goes on");
 	bp::openQuickMenu();
 	h.wait(30);
-	for (int i = 0; i < 6; i++)
-		h.press(P::Down, 4);
+	bp::quickFocus("achievements");
+	h.wait(4);
 	h.press(P::Cross, 20);
 	g_check.expect(b.overlay == 1 && bp::active(), "Achievements opens the emulator's list, and the game stays held");
 	// While that list is up the screens draw nothing and take no button.
@@ -3025,14 +3620,14 @@ void shots(Harness& h)
 	g_check.expect(b.overlay == 1, "the screens leave the controller to the list");
 	b.overlay = 0;
 	h.wait(20);
-	h.press(P::Down, 4);
+	bp::quickFocus("leaderboards");
+	h.wait(4);
 	h.press(P::Cross, 20);
 	g_check.expect(b.overlay == 2, "and Leaderboards its leaderboards");
 	b.overlay = 0;
 	h.wait(20);
 	// Out of the game again.
-	for (int i = 0; i < 8; i++)
-		h.press(P::Up, 4);
+	bp::quickFocus("quit");
 	h.wait(10);
 	h.press(P::Cross, 20);
 	h.press(P::Down);
@@ -3134,43 +3729,111 @@ void shots(Harness& h)
 	g_check.expect(b.run.valid && bp::screen == bp::Screen::None, "a game runs with no screen over it");
 	g_check.expect(b.corner >= 0, "the figures are sent to a corner");
 	h.shot("49c-game-with-grey-bars");
-	// The on-screen display's panel (v1.0.2), with made-up figures, over the game.
+	// The performance overlay in its sizes (ps5_osd_draw.h), with made-up figures, over the game:
+	// Minimal, Compact, Full; frame generation running ("30 → 60"); figures close to and over their
+	// limits (amber, red); Custom's card.
 	{
-		static float history[150];
+		using namespace PS5OsdDraw;
+		using PS5OsdLogic::Level;
+		static float steady[150], spiky[150];
+		const float budget = PS5OsdLogic::FrameBudgetMs(59.94f, 1.0f);
 		for (int i = 0; i < 150; i++)
-			history[i] = 16.7f + 2.0f * std::sin(i * 0.7f) + ((i % 37) == 0 ? 14.0f : 0.0f);
-		g_overlay = [] {
-			using namespace PS5OsdDraw;
-			Panel p;
-			const auto add = [&p](const char* n, const char* v, const char* u, ImU32 nc, ImU32 vc) { p.rows.push_back({n, v, u, nc, vc}); };
-			add("GPU", "71", "%", GPU_NAME, HOT_VALUE);
-			add("time", "11.8", "ms", GPU_NAME, HOT_VALUE);
-			p.sections.push_back(p.rows.size());
-			add("EE", "48", "%", CPU_NAME, HOT_VALUE);
-			add("GS", "86", "%", CPU_NAME, HOT_VALUE);
-			add("VU", "62", "%", CPU_NAME, HOT_VALUE);
-			add("temp", "61", "\xc2\xb0" "C", CPU_NAME, HOT_VALUE);
-			add("clock", "3500", "MHz", CPU_NAME, HOT_VALUE);
-			add("RAM", "7387", "MB", CPU_NAME, HOT_VALUE);
-			p.sections.push_back(p.rows.size());
-			add("Vulkan", "60", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Frametime", "16.7", "ms", FRAME_NAME, COOL_VALUE);
-			add("Max", "62", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Average", "59", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Min", "32", "FPS", FRAME_NAME, COOL_VALUE);
-			add("1% Low", "43", "FPS", FRAME_NAME, COOL_VALUE);
-			add("0.1% Low", "32", "FPS", FRAME_NAME, COOL_VALUE);
-			p.graph = true;
-			p.history = history;
-			p.history_size = 150;
-			const ImGuiIO& io = ImGui::GetIO();
-			const float scale = io.DisplaySize.y / 1080.0f;
-			PS5OsdDraw::Draw(ImGui::GetForegroundDrawList(), bp::brand(), std::round(15.0f * 1.3f * scale * 1.6f), p, 3, scale,
-				std::round(10.0f * scale), std::round(10.0f * scale), io.DisplaySize.x, io.DisplaySize.y);
+		{
+			steady[i] = 16.7f + 0.6f * std::sin(i * 0.7f);
+			spiky[i] = 16.7f + 1.2f * std::sin(i * 0.9f) + ((i % 37) == 0 ? 17.0f : (i % 23) == 0 ? 3.5f : 0.0f);
+		}
+		static std::vector<std::pair<Overlay, int>> shown; // what to draw, and where (PCSX2's places)
+		const auto meters = [](Overlay& o, float gpu, float ee, float gs, float vu) {
+			for (const auto& [label, v] : {std::pair<const char*, float>{"GPU", gpu}, {"EE", ee}, {"GS", gs}, {"VU", vu}})
+				o.meters.push_back({label, v, std::to_string(static_cast<int>(std::lround(v))), "%", PS5OsdLogic::LoadLevel(v)});
 		};
-		h.wait(2);
-		h.shot("49c2-osd-panel");
+		const auto make = [&](PS5OsdLogic::Size size, float fps, float screen, float speed, const float* history) {
+			Overlay o;
+			o.size = size;
+			o.fps = true;
+			o.game_fps = fps;
+			o.screen_fps = screen;
+			o.fps_level = PS5OsdLogic::SpeedLevel(speed, 1.0f);
+			o.budget_ms = budget;
+			if (size == PS5OsdLogic::Full || size == PS5OsdLogic::Custom)
+			{
+				o.frame_ms = o.speed = o.graph = true;
+				o.last_ms = 16.7f;
+				o.frame_level = PS5OsdLogic::FrameLevel(o.last_ms, budget);
+				o.speed_percent = speed;
+				o.speed_level = PS5OsdLogic::SpeedLevel(speed, 1.0f);
+				o.low1_fps = 43;
+				o.low01_fps = 32;
+				o.history = history;
+				o.history_size = 150;
+				o.footer_left = "3840x2688  \xc2\xb7  6x";
+				o.footer_right = "61 \xc2\xb0" "C  \xc2\xb7  7.4 GB";
+			}
+			return o;
+		};
+		g_overlay = [] {
+			const ImGuiIO& io = ImGui::GetIO();
+			const float u = io.DisplaySize.y / 1080.0f; // the design's pixels at the OSD scale's 100 %
+			const Fonts fonts{bp::regular(), bp::bold()};
+			const float margin = std::round(10.0f * u);
+			for (const auto& [o, place] : shown)
+				Draw(ImGui::GetForegroundDrawList(), fonts, u, o, place, margin, margin, io.DisplaySize.x, io.DisplaySize.y);
+		};
+		const auto picture = [&](const char* name) {
+			h.wait(2);
+			h.shot(name);
+		};
+		// Each size alone, at the top right (the default place).
+		shown = {{make(PS5OsdLogic::Minimal, 60, 0, 100, steady), 3}};
+		picture("49c2-osd-minimal");
+		shown = {{make(PS5OsdLogic::Compact, 60, 0, 100, steady), 3}};
+		meters(shown[0].first, 71, 48, 62, 22);
+		picture("49c3-osd-compact");
+		shown = {{make(PS5OsdLogic::Full, 60, 0, 100, steady), 3}};
+		meters(shown[0].first, 71, 48, 62, 22);
+		picture("49c4-osd-full");
+		// Frame generation running: the game's 30 to the screen's 60, in all three (top left, top
+		// centre, top right).
+		shown = {{make(PS5OsdLogic::Minimal, 30, 60, 100, steady), 1}, {make(PS5OsdLogic::Compact, 30, 60, 100, steady), 2},
+			{make(PS5OsdLogic::Full, 30, 60, 100, steady), 3}};
+		meters(shown[1].first, 64, 52, 58, 20);
+		meters(shown[2].first, 64, 52, 58, 20);
+		picture("49c5-osd-frame-generation");
+		// Close to the limits (amber: 93 % speed, the GPU at 86 %, a frame a little late) and over them
+		// (red: 74 % speed, GS at 97 %, spikes in the graph).
+		{
+			Overlay near = make(PS5OsdLogic::Compact, 56, 0, 93, steady);
+			meters(near, 86, 81, 64, 30);
+			Overlay over = make(PS5OsdLogic::Full, 44, 0, 74, spiky);
+			meters(over, 88, 79, 97, 41);
+			over.last_ms = 22.8f;
+			over.frame_level = PS5OsdLogic::FrameLevel(over.last_ms, budget);
+			over.low1_fps = 29;
+			over.low01_fps = 21;
+			Overlay pill = make(PS5OsdLogic::Minimal, 41, 0, 70, steady);
+			shown = {{pill, 1}, {near, 2}, {over, 3}};
+			g_check.expect(near.fps_level == Level::Near && over.fps_level == Level::Over && over.frame_level == Level::Near,
+				"the overlay's levels: 93 % speed close, 74 % over, a 22.8 ms frame a little over its budget");
+		}
+		picture("49c6-osd-amber-red");
+		// Custom: Full's card with what the switches give (here frame times without the lows' line, VPS,
+		// the GS statistics, the version).
+		{
+			Overlay c = make(PS5OsdLogic::Custom, 60, 0, 100, steady);
+			meters(c, 71, 48, 62, 22);
+			c.speed = false;
+			c.vps = true;
+			c.vps_value = 60;
+			c.footer_right.clear();
+			for (const auto& [label, value] : {std::pair<const char*, const char*>{"prims", "4210"}, {"draws", "388"}, {"calls", "402"},
+					 {"barriers", "12"}, {"passes", "41"}, {"readbacks", "0"}, {"GPU time", "11.8"}})
+				c.stats.push_back({label, value, std::strcmp(label, "GPU time") == 0 ? "ms" : "", Level::Fine});
+			c.version = "Crux2 v1.5.0";
+			shown = {{c, 3}};
+		}
+		picture("49c7-osd-custom");
 		g_overlay = nullptr;
+		shown.clear();
 	}
 	bp::careSetIdle(301);
 	h.wait(240);
@@ -3188,7 +3851,8 @@ void shots(Harness& h)
 	g_check.expect(!bp::careAsleep() && bp::screen == bp::Screen::Quick && b.run.paused,
 		"the quick menu's button ends the screen saver and leaves the menu up");
 	h.wait(100);
-	h.press(P::Up, 14); // (from Resume round to the last row: Quit game)
+	bp::quickFocus("quit");
+	h.wait(14);
 	h.press(P::Cross, 20);
 	h.press(P::Down);
 	h.press(P::Cross, 4);
@@ -3210,6 +3874,321 @@ void shots(Harness& h)
 	h.shot("40-settings-after-the-device-was-made-anew");
 	h.press(P::Down, 20);
 	h.shot("41-and-a-press-later");
+
+	// ---- a game's page, tab by tab, and the quick menu (the revamp's phase 4), reached directly
+	// (bp::goToGame, bp::quickFocus): what the walk above left open does not decide where they start.
+	{
+		const auto leaveAll = [&] {
+			for (int i = 0; i < 12 && (bp::dialogOpen() || bp::texturePacksOpen() || bp::screen == bp::Screen::Settings); i++)
+				h.press(P::Circle, 12);
+			if (b.run.valid)
+			{
+				b.run = bp::Running();
+				bp::gameStopped();
+				h.wait(30);
+			}
+		};
+		const auto game = [&](const char* serial) -> bp::GameInfo {
+			for (const bp::GameInfo& g : b.list)
+			{
+				if (g.serial == serial)
+					return g;
+			}
+			return b.list.front();
+		};
+		const auto page = [&](const char* serial) {
+			leaveAll();
+			bp::goToGame(game(serial), true);
+			h.wait(40);
+		};
+		const auto skinNamed = [](const char* name) {
+			for (int i = 0; i < bp::SkinCount; i++)
+			{
+				if (std::strcmp(bp::skins[i].name, name) == 0)
+					return i;
+			}
+			return 0;
+		};
+		const auto look = [&](int skin, int size, int text) {
+			b.setInt(0, "PS5UI", "Look", skin);
+			b.setInt(0, "PS5UI", "InterfaceSize", size);
+			b.setInt(0, "PS5UI", "TextSize", text);
+			bp::loadOptions();
+			h.wait(10);
+		};
+		look(0, 100, 0);
+		// A game with states, one made as it was closed among them: Resume, and every tab.
+		page("SLUS-29001");
+		h.shot("60-game-page-overview");
+		g_check.expect(bp::screen == bp::Screen::Library, "goToGame opens the game's page in the library");
+		h.press(P::R1, 30);
+		h.shot("60b-game-page-save-states");
+		h.press(P::Down, 30);
+		h.shot("60c-game-page-a-state-and-its-picture");
+		h.press(P::R1, 30);
+		h.shot("60d-game-page-its-settings");
+		h.press(P::R1, 30);
+		h.shot("60e-game-page-patches-and-cheats");
+		h.press(P::Down, 10);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Settings && b.gameOpen, "Patches and cheats > Cheats opens the game's own settings");
+		h.shot("60e2-game-page-cheats-opened");
+		h.press(P::Circle, 20);
+		h.press(P::Circle, 30);
+		g_check.expect(bp::screen == bp::Screen::Library, "and leaving them is back on the game's page");
+		h.press(P::R1, 30);
+		h.shot("60f-game-page-texture-packs");
+		h.press(P::Cross, 40);
+		g_check.expect(bp::texturePacksOpen(), "the Texture packs tab opens the texture pack manager");
+		h.press(P::Circle, 30);
+		h.press(P::Square, 30);
+		g_check.expect(bp::dialogOpen(), "Square on a game's page opens More");
+		h.shot("60g-game-page-more");
+		h.press(P::Circle, 20);
+		// More > A favourite (its fifth row for a game not renamed), and back.
+		const auto favourite = [&] {
+			for (const bp::GameInfo& g : b.list)
+			{
+				if (g.serial == "SLUS-29001")
+					return g.favourite;
+			}
+			return false;
+		};
+		const bool was = favourite();
+		h.press(P::Square, 30);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Down, 4);
+		h.press(P::Cross, 30);
+		g_check.expect(favourite() != was, "More > A favourite makes the game one");
+		h.shot("60h-game-page-a-favourite");
+		h.press(P::Square, 30);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Down, 4);
+		h.press(P::Cross, 30);
+		g_check.expect(favourite() == was, "and again not");
+		// Left of the tab's rows are the cover's buttons: Resume goes on from where it was closed.
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.press(P::L1, 20);
+		h.wait(20);
+		h.shot("60i-game-page-overview-again");
+		// A game with no states: Play alone.
+		page("SLES-59003");
+		h.shot("61-game-page-no-save-states");
+		h.press(P::R1, 30);
+		h.shot("61b-game-page-no-save-states-tab");
+		// A long name, and a set of discs.
+		page("SLUS-29018");
+		h.shot("62-game-page-long-name");
+		page("SLUS-29008");
+		h.shot("63-game-page-disc-set");
+		// A light skin, the interface at 70 % and the largest text.
+		look(skinNamed("Clay"), 70, 2);
+		page("SLUS-29001");
+		h.shot("64-game-page-clay-70-largest");
+		h.press(P::R1, 30);
+		h.press(P::Down, 30);
+		h.shot("64b-game-page-clay-states");
+		h.press(P::R1, 30);
+		h.press(P::R1, 30);
+		h.shot("64c-game-page-clay-patches");
+		look(0, 100, 2);
+		page("SLUS-29018");
+		h.shot("64d-game-page-largest-text-long-name");
+		look(0, 100, 0);
+		leaveAll();
+		h.press(P::Circle, 30);
+
+		// The quick menu: nothing pinned; then pinned settings, changed in place.
+		const std::string pinsWere = b.getString(0, "PS5UI", "Pins").value_or("");
+		b.setString(0, "PS5UI", "Pins", "");
+		b.start(game("SLUS-29001"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(40);
+		g_check.expect(bp::screen == bp::Screen::Quick, "the quick menu is up over the game");
+		h.shot("65-quick-menu-nothing-pinned");
+		bp::quickFocus("load");
+		h.wait(20);
+		h.shot("65b-quick-menu-load-state");
+		bp::quickFocus("screenshot");
+		h.wait(4);
+		h.press(P::Cross, 30);
+		g_check.expect(b.screenshots == 1 && bp::screen == bp::Screen::Quick, "the Screenshot tile takes one, and the menu stays");
+		b.setString(0, "PS5UI", "Pins",
+			"EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar;EmuCore/GS.FrameGeneration;PS5UI.Look");
+		h.wait(20);
+		bp::quickFocus("resume");
+		h.wait(20);
+		h.shot("66-quick-menu-pinned");
+		const unsigned long long writes = b.writes;
+		h.press(P::Down, 10);
+		h.press(P::Down, 20);
+		h.press(P::Right, 20);
+		g_check.expect(b.writes > writes, "Right on a pinned setting writes it");
+		h.shot("66b-quick-menu-pinned-changed");
+		h.press(P::R1, 20);
+		h.press(P::Down, 10);
+		h.shot("66c-quick-menu-more");
+		h.press(P::Triangle, 30);
+		h.shot("67-quick-menu-editing-more");
+		h.press(P::Triangle, 30);
+		g_check.expect(bp::screen == bp::Screen::None && !b.run.paused, "Triangle ends the editing, and the game goes on");
+		leaveAll();
+		// A game of three discs.
+		b.start(game("SLUS-29008"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(30);
+		h.shot("68-quick-menu-a-set-of-discs");
+		// A light skin, the interface at 70 % and the largest text.
+		look(skinNamed("Clay"), 70, 2);
+		h.wait(20);
+		h.shot("69-quick-menu-clay-70-largest");
+		look(0, 100, 2);
+		h.shot("69b-quick-menu-largest-text");
+		look(0, 100, 0);
+		b.setString(0, "PS5UI", "Pins", pinsWere);
+		leaveAll();
+
+		// ---- Change disc (the quick menu's) with a disc in a drive: the drive is one of the places
+		// (L1 / R1 and the filter row), whether the game runs from an image or from the drive.
+		b.putDisc(1);
+		h.wait(40);
+		b.start(game("SLUS-29008"), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(4);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Disc, "Change disc opens the library to choose one");
+		for (int i = 0; i < 6 && bp::librarySource() != bp::DiscDrive; i++)
+			h.press(P::R1, 20);
+		g_check.expect(bp::librarySource() == bp::DiscDrive, "R1 reaches the disc in the drive as the next disc of a game run from an image");
+		h.shot("70-change-disc-the-drive-as-a-place");
+		h.press(P::R1, 20);
+		g_check.expect(bp::librarySource() != bp::DiscDrive, "and R1 goes on from it, round to the images");
+		leaveAll();
+		b.start(b.drive.games.front(), INT_MIN, 0);
+		h.wait(360);
+		bp::openQuickMenu();
+		h.wait(30);
+		bp::quickFocus("disc");
+		h.wait(4);
+		h.press(P::Cross, 40);
+		g_check.expect(bp::screen == bp::Screen::Disc && bp::librarySource() == bp::DiscDrive,
+			"Change disc of a game run from the drive opens on the drive");
+		h.press(P::Up, 20);
+		g_check.expect(bp::libraryChip() >= 0, "Up there reaches the places");
+		h.shot("70b-change-disc-from-the-drive");
+		h.press(P::Down, 10);
+		h.press(P::L1, 20);
+		g_check.expect(bp::librarySource() != bp::DiscDrive, "and L1 goes to another place for an image");
+		leaveAll();
+		b.putDisc(0);
+		h.wait(30);
+
+		// ---- phase 5: each new screen in every skin (a sheet of 36: the skins in their order,
+		// six to a row), and in each way of seeing it (Interface size 70 %, Text size Largest and
+		// Smallest, Colours for colour blindness, High contrast); the special skins whole.
+		{
+			struct Place
+			{
+				const char* name;
+				std::function<void()> open;
+			};
+			const auto library = [&](int viewNumber) {
+				leaveAll();
+				b.setInt(0, "PS5UI", "View", viewNumber);
+				bp::loadOptions();
+				bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+				h.wait(30);
+			};
+			const auto settingsHome = [&] {
+				leaveAll();
+				bp::showLibraryTab(bp::TabHome);
+				h.wait(10);
+				h.press(P::Options, 30);
+			};
+			const std::vector<Place> places = {
+				{"home", [&] { leaveAll(); bp::showLibraryTab(bp::TabHome); h.wait(30); }},
+				{"grid", [&] { library(1); }},
+				{"list", [&] { library(2); }},
+				{"shelves", [&] { library(0); }},
+				{"game-page", [&] { page("SLUS-29001"); }},
+				{"settings-home", settingsHome},
+				{"settings-area", [&] { settingsHome(); bp::settingsFocus("Graphics", "Blending accuracy"); h.wait(20); }},
+				{"settings-search", [&] { settingsHome(); bp::settingsSearchFor("vsync", 0); h.wait(10); h.press(P::Down, 20); }},
+				{"quick-menu", [&] {
+					 leaveAll();
+					 b.start(game("SLUS-29001"), INT_MIN, 0);
+					 h.wait(360);
+					 bp::openQuickMenu();
+					 h.wait(40);
+				 }},
+			};
+			const std::string pinsWere5 = b.getString(0, "PS5UI", "Pins").value_or("");
+			b.setString(0, "PS5UI", "Pins", "EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar");
+			const int special[] = {skinNamed("Carbon"), skinNamed("Brutal"), skinNamed("Clay"), skinNamed("Gloss"), skinNamed("Blueprint"),
+				skinNamed("Contrast"), skinNamed("Pixel")};
+			for (const Place& place : places)
+			{
+				place.open();
+				Harness::Sheet sheet;
+				for (int skin = 0; skin < bp::SkinCount; skin++)
+				{
+					look(skin, 100, 0);
+					h.wait(16);
+					h.cell(sheet);
+					if (std::find(std::begin(special), std::end(special), skin) != std::end(special) &&
+						(std::strcmp(place.name, "home") == 0 || std::strcmp(place.name, "settings-home") == 0 || std::strcmp(place.name, "game-page") == 0 ||
+							std::strcmp(place.name, "quick-menu") == 0))
+					{
+						char name[80];
+						std::snprintf(name, sizeof(name), "71-%s-skin-%02d-%s", place.name, skin, bp::skins[skin].name);
+						h.shot(name);
+					}
+				}
+				char name[64];
+				std::snprintf(name, sizeof(name), "71-%s-every-skin", place.name);
+				h.writeSheet(sheet, name);
+				// The ways of seeing it: 70 %, Largest, Smallest, colour blindness, high contrast.
+				Harness::Sheet seeing;
+				seeing.cols = 3;
+				const auto way = [&](int size, int textSize, bool blind, bool contrast) {
+					b.setBool(0, "PS5UI", "ColourBlind", blind);
+					b.setBool(0, "PS5UI", "HighContrast", contrast);
+					look(0, size, textSize);
+					h.wait(16);
+					h.cell(seeing);
+				};
+				way(100, 0, false, false);
+				way(70, 0, false, false);
+				way(100, 2, false, false);
+				way(100, -2, false, false);
+				way(100, 0, true, false);
+				way(100, 0, false, true);
+				std::snprintf(name, sizeof(name), "72-%s-ways-of-seeing", place.name);
+				h.writeSheet(seeing, name);
+				// (Largest text at 70 %, whole: the tightest the layout gets.)
+				b.setBool(0, "PS5UI", "ColourBlind", false);
+				b.setBool(0, "PS5UI", "HighContrast", false);
+				look(0, 70, 2);
+				h.wait(16);
+				std::snprintf(name, sizeof(name), "73-%s-70-largest", place.name);
+				h.shot(name);
+				look(0, 100, 0);
+			}
+			b.setString(0, "PS5UI", "Pins", pinsWere5);
+			leaveAll();
+			b.setInt(0, "PS5UI", "View", 0);
+			bp::loadOptions();
+		}
+	}
 }
 
 // Every row of every settings page, changed in every way a controller can; then a long time of
@@ -3219,52 +4198,188 @@ void crawl(Harness& h, unsigned seed)
 	PreviewBackend& b = h.backend;
 	h.wait(200);
 
-	const auto walk = [&](const char* what) {
-		// Through the categories: into each, down every row, with every button on each.
-		for (int category = 0; category < 16; category++)
+	// (A walk's step may have left the settings: a game started by a row is put away, and the
+	// settings are opened again, of all games or of the game.)
+	bp::GameInfo walkGame;
+	const auto backToSettings = [&](bool forGame) {
+		for (int i = 0; i < 4 && bp::dialogOpen(); i++)
+			h.press(P::Circle, 3);
+		if (b.starting())
 		{
-			h.press(P::Cross, 3);
-			for (int row = 0; row < 90; row++)
+			b.isStarting = false;
+			bp::startFailed("Put away by the walk through the settings.");
+			h.wait(3);
+		}
+		if (b.run.valid)
+		{
+			b.run = bp::Running();
+			bp::gameStopped();
+			h.wait(3);
+		}
+		if (bp::screen != bp::Screen::Settings)
+		{
+			bp::openSettings(forGame ? &walkGame : nullptr, bp::Screen::Library);
+			h.wait(3);
+		}
+	};
+	const auto walk = [&](const char* what, bool forGame) {
+		// Every section of every area, every row of it, with every button on each.
+		const std::vector<std::string> sections = bp::settingsSections();
+		unsigned rows = 0;
+		for (int section = 0; section < static_cast<int>(sections.size()); section++)
+		{
+			for (int row = 0; row < 400; row++)
 			{
+				backToSettings(forGame);
+				// (A row of the walk may be Settings Shown itself: the walk stays at Everything.)
+				if (b.getInt(0, "PS5UI", "SettingsLevel").value_or(0) != 2)
+				{
+					b.setInt(0, "PS5UI", "SettingsLevel", 2);
+					bp::loadOptions();
+				}
+				if (b.listening() > 0)
+					h.wait(320);
+				if (!bp::settingsFocusAt(section, row))
+					break;
+				rows++;
+				h.wait(2);
 				h.press(P::Right, 2);
 				h.press(P::Left, 2);
 				h.press(P::Left, 2);
-				h.press(P::Square, 2);
+				h.press(P::Square, 2); // pinned...
+				h.press(P::Square, 2); // ...and not
 				h.press(P::Cross, 3);
 				// (A list or a question may be up: one choice down and taken, or left.)
 				h.press(P::Down, 2);
 				h.press((row % 2) ? P::Cross : P::Circle, 3);
 				h.press(P::Circle, 2);
-				h.press(P::Cross, 2);
-				h.press(P::Circle, 2);
 				h.wait(b.listening() > 0 ? 320 : 0);
-				// Back into the rows if that left them, and on.
-				h.press(P::Cross, 2);
+				if (bp::screen == bp::Screen::Settings && bp::settingsFocusAt(section, row))
+				{
+					h.press(P::L3, 2);
+					h.press(P::L1, 2);
+					h.press(P::R1, 2);
+					h.press(P::Down, 2);
+				}
 				h.press(P::Circle, 2);
-				h.press(P::Right, 2);
-				h.press(P::Down, 2);
 			}
-			h.press(P::Circle, 3);
-			h.press(P::Circle, 0);
-			if (bp::active() && b.listening() <= 0)
-				h.press(P::Down, 3);
 		}
-		std::printf("crawl: %s walked, %llu values written\n", what, b.writes);
+		std::printf("crawl: %s walked, %zu sections, %u rows, %llu values written\n", what, sections.size(), rows, b.writes);
+		g_check.expect(rows > 100, "the walk went through the settings' rows");
 	};
 
 	h.press(P::Options, 20);
-	walk("the settings of all games");
+	// At every level: what Everything shows has every row.
+	b.setInt(0, "PS5UI", "SettingsLevel", 2);
+	bp::loadOptions();
+	walk("the settings of all games", false);
+	// The home, the search and the levels with every button.
+	{
+		backToSettings(false);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Circle, 3);
+		h.press(P::Options, 10);
+		const uint32_t keys[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1, P::L2,
+			P::R2, P::L3, P::TouchPad};
+		std::mt19937 prng(seed * 13 + 5);
+		const char* queries[] = {"vsync", "resolution", "a", "", "controller", "zz-nothing", "game"};
+		for (int step = 0; step < 3000; step++)
+		{
+			backToSettings(false);
+			if (step % 300 == 0)
+				bp::settingsSearchFor(queries[(step / 300) % 7], static_cast<int>(prng() % 4));
+			h.wait(1, keys[prng() % (sizeof(keys) / sizeof(keys[0]))]);
+			h.wait(1 + static_cast<int>(prng() % 2));
+		}
+		std::printf("crawl: the settings' home and search walked, %llu values written\n", b.writes);
+	}
+	b.setInt(0, "PS5UI", "SettingsLevel", 0);
+	bp::loadOptions();
+	// A game's own, at every level, and the switch to all games and back.
+	if (!b.list.empty())
+	{
+		walkGame = b.list.front();
+		for (int i = 0; i < 6 && bp::screen == bp::Screen::Settings; i++)
+			h.press(P::Circle, 4);
+		b.setInt(0, "PS5UI", "SettingsLevel", 2);
+		bp::loadOptions();
+		bp::openSettings(&walkGame, bp::Screen::Library);
+		h.wait(10);
+		walk("a game's own settings", true);
+		backToSettings(true);
+		h.press(P::TouchPad, 6);
+		h.press(P::TouchPad, 6);
+		for (int i = 0; i < 6 && bp::screen == bp::Screen::Settings; i++)
+			h.press(P::Circle, 4);
+		b.setInt(0, "PS5UI", "SettingsLevel", 0);
+		bp::loadOptions();
+	}
 	// Out of the settings, whatever is up.
 	for (int i = 0; i < 6; i++)
 		h.press(P::Circle, 4);
 	h.press(P::Options, 10);
 	h.press(P::Options, 10);
 
+	// The texture pack manager, with every button for a while: opened on a game and on none,
+	// packs moved, deleted, downloads queued and taken off, its lists made again under it.
+	{
+		std::mt19937 prng(seed * 7 + 1);
+		const uint32_t keys[] = {P::Up, P::Down, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Cross, P::Circle, P::Square, P::L2, P::R2, P::Triangle};
+		unsigned opened = 0;
+		const char* serials[] = {"", "SLUS-29001", "SLUS-29900", "SLUS-29007", "SLUS-00000"};
+		for (int step = 0; step < 5000; step++)
+		{
+			// (A Cross that left the manager may have started a game from the library: it is put
+			// away, as the random walk below does; the manager is opened over the library or the
+			// settings, as the interface opens it.)
+			if (b.starting())
+			{
+				b.isStarting = false;
+				bp::startFailed("Put away by the walk through the texture pack manager.");
+				h.wait(3);
+			}
+			if (b.run.valid)
+			{
+				b.run = bp::Running();
+				bp::gameStopped();
+				h.wait(3);
+			}
+			if (!bp::texturePacksOpen() && !bp::dialogOpen() && (bp::screen == bp::Screen::Library || bp::screen == bp::Screen::Settings))
+			{
+				bp::openTexturePacks(&b, serials[opened % 5]);
+				opened++;
+			}
+			const uint32_t key = keys[prng() % (sizeof(keys) / sizeof(keys[0]))];
+			h.wait(1 + static_cast<int>(prng() % 2), key);
+			h.wait(1 + static_cast<int>(prng() % 4));
+			if (step % 900 == 450)
+			{
+				// The world changes under it: a game goes from the library, a pack is found anew.
+				if (!b.list.empty())
+					b.list.erase(b.list.begin() + static_cast<std::ptrdiff_t>(prng() % b.list.size()));
+				b.generation++;
+				b.packsHeld.push_back(b.packsHeld.empty() ? bp::InstalledPack() : b.packsHeld[prng() % b.packsHeld.size()]);
+				b.packsHeld.back().path += "/again" + std::to_string(step);
+				b.packsGen++;
+			}
+		}
+		for (int i = 0; i < 12 && (bp::texturePacksOpen() || bp::dialogOpen()); i++)
+			h.press(P::Circle, 4);
+		std::printf("crawl: the texture pack manager opened %u times: %u moves, %u deletes, %u downloads\n", opened, b.packMoves, b.packDeletes,
+			b.packDownloads);
+		g_check.expect(opened > 3, "the random walk opened the texture pack manager");
+		g_check.expect(b.packMoves + b.packDeletes + b.packDownloads > 0, "and something was done in it");
+		for (int i = 0; i < 6; i++)
+			h.press(P::Circle, 4);
+		h.press(P::Options, 10);
+		h.press(P::Options, 10);
+	}
+
 	// (A texture pack's bar over the screens for the first of the random steps.)
 	b.findTexturePacks();
 	std::mt19937 rng(seed);
 	const uint32_t buttons[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1,
-		P::L2, P::R2, P::Options, P::TouchPad, P::R3};
+		P::L2, P::R2, P::Options, P::TouchPad, P::R3, P::L3};
 	unsigned started = 0, menus = 0;
 	for (int step = 0; step < 60000; step++)
 	{

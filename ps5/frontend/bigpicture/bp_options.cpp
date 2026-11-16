@@ -37,7 +37,7 @@ constexpr const char* FRONT = "PS5UI";
 
 using Names = std::vector<std::string>;
 
-// The level a row is shown from (Settings shown: Normal, Advanced, Expert; Triangle in the Settings).
+// The level a row is shown from (Settings shown: Essentials, More, Everything; Triangle in the Settings).
 Option adv(Option o)
 {
 	o.flags |= Option::Advanced;
@@ -288,10 +288,9 @@ Page interfacePage()
 
 	rows.push_back(heading("BEHAVIOUR"));
 	rows.push_back(list("Settings shown",
-		"How many settings are shown. Normal covers what most people need, Advanced adds finer options, and Expert "
-			"shows everything, including options that can stop games from working. Press Triangle anywhere in Settings to "
-			"switch.",
-		FRONT, "SettingsLevel", 0, {"Normal", "Advanced", "Expert"}, 0, Option::Front));
+		"Determines how many settings are shown. More adds finer options; Everything shows every option, including ones "
+			"that can stop games from working.",
+		FRONT, "SettingsLevel", 0, {"Essentials", "More", "Everything"}, 0, Option::Front));
 	rows.push_back(toggle("Pause when a controller disconnects", "Pauses the emulator when a controller with bindings is disconnected.", "UI",
 		"PauseOnControllerDisconnection", false, A));
 	rows.push_back(toggle("Warn about unsafe settings", "Displays warnings when settings are enabled which may break games.", CORE,
@@ -943,9 +942,16 @@ Page graphicsPage(int layer, bool forGame)
 							true),
 		GS, "LoadTextureReplacements", true)));
 	{
-		Option o = action("Download an HD texture pack",
-			"Downloads this game's HD texture pack from the Internet Archive. Packs can be several GB.",
-			[] { be->findTexturePacks(); }, Option::OneGame);
+		// (The texture pack manager, bp_textures.cpp: on this game in a game's options.)
+		Option o = action("HD texture packs",
+			"Opens the texture pack manager: the packs on this console, the USB drives and the shares, by game. Download packs from "
+			"the Internet Archive, one after another, and move or delete them. Packs can be several GB.",
+			[] {
+				if (TexturePackShelf* shelf = be->texturePackShelf())
+					openTexturePacks(shelf, settingsGame().serial);
+				else
+					be->findTexturePacks();
+			});
 		o.info = [] { return be->texturePackDoing(); };
 		rows.push_back(std::move(o));
 	}
@@ -965,7 +971,23 @@ Page graphicsPage(int layer, bool forGame)
 
 	// ---- Post-Processing
 	rows.push_back(heading("POST-PROCESSING"));
-	rows.push_back(toggle("FXAA", "Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.", GS, "fxaa", false));
+	// Crux2: one row for every anti-aliasing (FXAA, SMAA, SSAA by downsampling, SSAA then SMAA). It sets the keys
+	// the renderer reads ([EmuCore/GS] fxaa, [PS5] SMAA and Downsample) and, for SSAA, a resolution above the
+	// screen's (bp_pcsx2.cpp Changed; ps5/frontend/ps5_aa.h; the passes in GSDeviceVK_PS5.cpp, ps5_aa.glsl).
+	rows.push_back(list("Anti-aliasing",
+		"Smooths the jagged edges of the picture. FXAA: quick, a little soft. SMAA: sharper edges, a little GPU time. "
+		"SSAA: the game drawn larger than the screen and made screen-sized, the least shimmer; choosing it raises the "
+		"internal resolution to about one and a half times the screen's (8x at 4K) and turns FSR 1 off, and costs the most. "
+		"SSAA + SMAA: SSAA, then SMAA over it for the edges it leaves.",
+		"PS5", "AntiAliasing", 0, {"Off", "FXAA", "SMAA", "SSAA", "SSAA + SMAA"}, 0, Option::AllGames));
+	{
+		Option o = list("SSAA filter",
+			"How SSAA makes the larger picture screen-sized. Soft: every pixel it covers averaged, the least shimmer. Sharp: a "
+			"Lanczos filter, crisper edges.",
+			"PS5", "SSAAFilter", 1, {"Soft", "Sharp"}, 1, Option::AllGames);
+		o.enabled = [](int l) { return effectiveInt(l, "PS5", "AntiAliasing", 0) >= 3; };
+		rows.push_back(std::move(o));
+	}
 	rows.push_back(adv(list("TV shader", "Applies a shader which replicates the visual effects of different styles of television sets.", GS, "TVShader", 0,
 		{"None", "Scanlines", "Diagonal", "Triangular", "Wave", "Lottes CRT", "4xRGSS", "NxAGSS"})));
 	rows.push_back(strings("Look (shader preset)",
@@ -1096,6 +1118,10 @@ Page osdPage()
 	rows.push_back(toggle("Move the figures from corner to corner", "Moves the on-screen figures to another corner every five minutes to prevent burn-in.", FRONT, "OsdMove",
 		false, F));
 	rows.push_back(list("Style", "Crux2: one panel with sections and a frame-time graph. PCSX2: PCSX2's own lines of text.", "PS5", "OsdStyle", 0, {"Crux2's panel", "PCSX2's lines"}, 0, A));
+	// A preset of the switches under SHOW (bp_pcsx2.cpp writes them; ps5_osd_logic.h): Compact for a new user.
+	rows.push_back(listOf("Overlay size", "Selects how much of the performance overlay is shown. Minimal shows the FPS; Compact adds the GPU and CPU "
+		"usage; Full adds frame times, the resolution and hardware info. Custom shows what is switched on below.", "PS5", "OsdSize", 2,
+		{"Minimal", "Compact", "Full", "Custom"}, {1, 2, 3, 0}, A));
 	rows.push_back(heading("SHOW"));
 	rows.push_back(toggle("Speed percentages", "Shows the current emulation speed of the system as a percentage.", GS, "OsdShowSpeed", false, A));
 	rows.push_back(toggle("FPS", "Shows the number of internal video frames displayed per second by the system.", GS,
@@ -1441,8 +1467,12 @@ Page statisticsPage()
 
 } // namespace
 
-// The pages of the settings, in their order: for every game, or for the game opened.
-std::vector<Page> settingsPages(bool forGame)
+namespace
+{
+
+// The pages of the settings, in their order: for every game, or for the game opened. (Their words are
+// the code's here; settingsPages puts settings-text.yaml's on them.)
+std::vector<Page> codePages(bool forGame)
 {
 	const int layer = forGame ? Own : Shared;
 	std::vector<Page> pages;
@@ -1514,6 +1544,15 @@ std::vector<Page> settingsPages(bool forGame)
 	pages.push_back(debugPage());
 	pages.push_back(ps5Page(layer));
 	pages.push_back(statisticsPage());
+	return pages;
+}
+
+} // namespace
+
+std::vector<Page> settingsPages(bool forGame)
+{
+	std::vector<Page> pages = codePages(forGame);
+	applySettingsText(pages);
 	return pages;
 }
 

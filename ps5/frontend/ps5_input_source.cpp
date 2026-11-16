@@ -137,9 +137,6 @@ namespace
 		PAD_INTERCEPTED = 0x80000000u,
 	};
 
-	// The touch pad is 1920 units wide on both the DualSense and the DualShock 4.
-	constexpr u16 TOUCH_PAD_MIDDLE = 960;
-
 	// SDL's gamepad button and axis numbering, which the binding strings and keys are made of.
 	enum : u32
 	{
@@ -709,6 +706,7 @@ void PS5InputSource::SetConnected(u32 index, bool connected)
 		pad.button_values = {};
 		pad.axes = {128, 128, 128, 128, 0, 0};
 		pad.touch_is_back = false;
+		pad.touch.Reset();
 		pad.gun_trigger_down = false;
 		pad.trigger_feel_sent = 0; // a controller that comes back has forgotten its trigger effect
 		pad.trigger_click = false;
@@ -730,12 +728,28 @@ void PS5InputSource::ApplySample(u32 index, const void* sample_ptr)
 	// (Start). Which half is decided when the click starts, so a finger sliding across does not
 	// change it. With no game running, or one held still under the quick menu, there is only the
 	// interface, whose hints show the touch pad for one button: the whole pad is "Back" then.
+	// (The finger that clicks is the one that touched last, or the last seen a moment before when the
+	// reading has the click but no finger yet: PS5InputLogic::TouchClick.)
 	const bool touch_down = (sample.buttons & PAD_TOUCH_PAD) != 0;
 	const bool touch_was_down = (pad.buttons & ((1u << BUTTON_BACK) | (1u << BUTTON_TOUCHPAD))) != 0;
+	{
+		const unsigned count = (sample.touch_count <= 2) ? sample.touch_count : 0;
+		const uint16_t xs[2] = {sample.touch[0].x, sample.touch[1].x};
+		const uint8_t ids[2] = {sample.touch[0].id, sample.touch[1].id};
+		pad.touch.Touches(count, xs, ids, NowMicroseconds());
+	}
 	if (touch_down && !touch_was_down)
 	{
-		pad.touch_is_back = !running ||
-							(sample.touch_count > 0 && sample.touch_count <= 2 && sample.touch[0].x < TOUCH_PAD_MIDDLE);
+		pad.touch_is_back = !running || pad.touch.LeftHalf(NowMicroseconds());
+		// The first clicks of a run in the log, to see which half each was taken for and why.
+		if (running && pad.touch_clicks_logged < 12)
+		{
+			pad.touch_clicks_logged++;
+			ps5px_log("pads: player %u touch pad click: %s (fingers %u%s%s)", index + 1, pad.touch_is_back ? "Select" : "Start",
+				static_cast<unsigned>(sample.touch_count),
+				sample.touch_count > 0 ? fmt::format(", first at x {}", sample.touch[0].x).c_str() : "",
+				sample.touch_count > 1 ? fmt::format(", second at x {}", sample.touch[1].x).c_str() : "");
+		}
 	}
 
 	const u32 buttons = ButtonsFromSample(sample, pad.touch_is_back);

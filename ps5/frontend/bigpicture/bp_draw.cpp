@@ -434,7 +434,7 @@ Options& options()
 	return s_options;
 }
 
-const char* const settingsLevelNames[3] = {"Normal", "Advanced", "Expert"};
+const char* const settingsLevelNames[3] = {"Essentials", "More", "Everything"};
 
 void setSettingsLevel(int level)
 {
@@ -450,7 +450,10 @@ void loadOptions()
 	if (be != nullptr)
 	{
 		o.view = std::clamp(be->getInt(Shared, UI, "View").value_or(o.view), 0, 9);
-		o.source = std::clamp(be->getInt(Shared, UI, "Source").value_or(o.source), 0, static_cast<int>(Network));
+		// (SourceCount: every place at once, the library's "All".)
+		o.source = std::clamp(be->getInt(Shared, UI, "Source").value_or(o.source), 0, static_cast<int>(SourceCount));
+		if (o.source == DiscDrive)
+			o.source = Internal;
 		o.groupDiscs = be->getBool(Shared, UI, "GroupDiscs").value_or(o.groupDiscs);
 		o.splash = be->getBool(Shared, UI, "Splash").value_or(o.splash);
 		// ("Look", not the "Skin" of the builds before Crux: their numbers named other skins.)
@@ -861,7 +864,8 @@ float entered(int screen_id)
 		s_entrance.next = 0;
 	}
 	s_entrance.frame = frame;
-	const float seconds = (motion() == MotionFull) ? 0.32f : (motion() == MotionReduced) ? 0.16f : 0.f;
+	// (Quick, and never in the way: the input is read from the first frame on.)
+	const float seconds = (motion() == MotionFull) ? 0.2f : (motion() == MotionReduced) ? 0.14f : 0.f;
 	return seconds <= 0 ? 1.f : easeOut(static_cast<float>(timeNow - s_entrance.at) / seconds);
 }
 
@@ -877,7 +881,13 @@ void entranceSide(float side)
 
 void endEntrance(const Layer& layer, float e)
 {
-	endLayer(layer, e, (1 - e) * 56 * s_entrance.side, s_entrance.side == 0 ? (1 - e) * 18 : 0);
+	// (Motion: less fades only; nothing slides.)
+	if (motion() != MotionFull)
+	{
+		endLayer(layer, e);
+		return;
+	}
+	endLayer(layer, e, (1 - e) * 48 * s_entrance.side, s_entrance.side == 0 ? (1 - e) * 16 : 0);
 }
 
 void discMark(ImDrawList* dl, float cx, float cy, float radius, ImU32 ring, ImU32 arc, float thickness)
@@ -1183,6 +1193,8 @@ float glyph(ImDrawList* dl, Glyph g, float x, float cy, float size)
 			return pair("L2", "R2");
 		case Glyph::R3:
 			return label("R3", size * 1.35f);
+		case Glyph::L3:
+			return label("L3", size * 1.35f);
 		case Glyph::Options:
 		{
 			rect(dl, x, cy - r * 0.8f, size * 1.1f, size * 0.8f, bg, r * 0.5f);
@@ -1244,8 +1256,45 @@ float glyph(ImDrawList* dl, Glyph g, float x, float cy, float size)
 }
 
 // The bottom bar: hints right-aligned, as on Steam's.
-void hintBar(ImDrawList* dl, const std::vector<Hint>& hints)
+namespace
 {
+// Where a button's hint stands on the bar, left to right, whatever the screen: Circle first, the
+// shoulders, the directions and the sticks, the touch pad, OPTIONS, Square, Triangle, and Cross last
+// (at the right). The same button is always in the same place.
+int hintPlace(Glyph g)
+{
+	switch (g)
+	{
+		case Glyph::Circle: return 0;
+		case Glyph::L1R1: return 1;
+		case Glyph::L1: return 2;
+		case Glyph::R1: return 3;
+		case Glyph::L2R2: return 4;
+		case Glyph::L2: return 5;
+		case Glyph::R2: return 6;
+		case Glyph::DPadUD: return 7;
+		case Glyph::DPadLR: return 8;
+		case Glyph::L3: return 9;
+		case Glyph::R3: return 10;
+		case Glyph::TouchPad: return 11;
+		case Glyph::Options: return 12;
+		case Glyph::Square: return 13;
+		case Glyph::Triangle: return 14;
+		case Glyph::Cross: return 15;
+	}
+	return 15;
+}
+} // namespace
+
+void orderHints(std::vector<Hint>& hints)
+{
+	std::stable_sort(hints.begin(), hints.end(), [](const Hint& a, const Hint& b) { return hintPlace(a.glyph) < hintPlace(b.glyph); });
+}
+
+void hintBar(ImDrawList* dl, const std::vector<Hint>& given)
+{
+	std::vector<Hint> hints = given;
+	orderHints(hints);
 	rect(dl, 0, H - 72, W, 72, col::bar);
 	rect(dl, 0, H - 72, W, 1, col::line);
 	// (Its words stand still for as long as a screen is up: they go faint when nothing is pressed
@@ -1448,16 +1497,13 @@ void endScreen()
 
 // --------------------------------------------------------------- top bar
 
-// The tabs, left to right; USB only while USB drives are on in the settings, Disc only while a
-// disc is in a disc drive (the console's own or a USB one).
+// The tabs, left to right; Disc only while a disc is in a disc drive (the console's own or a USB
+// one). (Where the games are, the console, USB and the share, is the library's filter row.)
 std::vector<TopTab> topTabs()
 {
-	std::vector<TopTab> tabs{{Internal, ICON_FA_HARD_DRIVE, "Internal"}};
-	if (be != nullptr && be->usbWanted())
-		tabs.push_back({Usb, ICON_FA_PLUG, "USB"});
-	tabs.push_back({Network, ICON_FA_NETWORK_WIRED, "Network"});
+	std::vector<TopTab> tabs{{TabHome, ICON_FA_HOUSE, "Home"}, {TabLibrary, ICON_FA_TABLE_CELLS_LARGE, "Library"}};
 	if (discNow().present)
-		tabs.push_back({DiscDrive, ICON_FA_COMPACT_DISC, "Disc"});
+		tabs.push_back({TabDisc, ICON_FA_COMPACT_DISC, "Disc"});
 	return tabs;
 }
 
@@ -1625,7 +1671,7 @@ void topBar(ImDrawList* dl, int active_tab, bool inGame, Reach reach)
 		{
 			if (active_tab == tabs[i].id)
 			{
-				const bool fresh = pillX < 0 || frameNow > pillFrame + 2 || motion() == MotionOff;
+				const bool fresh = pillX < 0 || frameNow > pillFrame + 2 || motion() != MotionFull;
 				pillX = fresh ? at : approach(pillX, at, 20);
 				pillW = fresh ? widths[i] : approach(pillW, widths[i], 20);
 				pillFrame = frameNow;
@@ -1640,7 +1686,7 @@ void topBar(ImDrawList* dl, int active_tab, bool inGame, Reach reach)
 		const bool on = (active_tab == tabs[i].id);
 		const bool reachable = on || reach == Reach::All;
 		const ImU32 colour = on ? col::onAccent : reachable ? col::dim : col::faint;
-		if (tabs[i].id == DiscDrive)
+		if (tabs[i].id == TabDisc)
 		{
 			// The disc itself, turning, where the others have an icon.
 			const float iconWidth = textSize(bold(), 26, tabs[i].icon).x;
@@ -1933,6 +1979,7 @@ void toast(const std::string& line, float seconds)
 void dropScreenDialogs()
 {
 	closeCardManager();
+	closeTexturePacks();
 	for (auto it = s_dialogs.begin(); it != s_dialogs.end();)
 	{
 		if (it->kind != Dialog::Message && it->kind != Dialog::Text)
@@ -1944,7 +1991,7 @@ void dropScreenDialogs()
 
 bool dialogOpen()
 {
-	return !s_dialogs.empty() || cardManagerOpen() || (be != nullptr && be->listening() > 0);
+	return !s_dialogs.empty() || cardManagerOpen() || texturePacksOpen() || (be != nullptr && be->listening() > 0);
 }
 
 void dialogInput()
@@ -1964,6 +2011,12 @@ void dialogInput()
 			const Input now = in;
 			in = Input{};
 			cardManagerInput(now);
+		}
+		else if (texturePacksOpen())
+		{
+			const Input now = in;
+			in = Input{};
+			texturePacksInput(now);
 		}
 		return;
 	}
@@ -2237,8 +2290,12 @@ float drawDownloadBar(ImDrawList* dl)
 		std::snprintf(part, sizeof(part), "   \xc2\xb7   %.1f MB/s", b.speed / 1e6);
 		detail += part;
 	}
-	std::snprintf(part, sizeof(part), "   \xc2\xb7   %d connection%s", b.connections, b.connections == 1 ? "" : "s");
-	detail += part;
+	// (A move or a delete shown in the bar has no connections.)
+	if (b.connections > 0)
+	{
+		std::snprintf(part, sizeof(part), "   \xc2\xb7   %d connection%s", b.connections, b.connections == 1 ? "" : "s");
+		detail += part;
+	}
 	if (b.secondsLeft >= 0)
 	{
 		const long sec = static_cast<long>(b.secondsLeft + 0.5);
@@ -2273,24 +2330,29 @@ void drawToasts(ImDrawList* dl)
 {
 	while (!s_toasts.empty() && timeNow > s_toasts.front().until + 0.3)
 		s_toasts.pop_front();
-	float y = H - 72 - 60 - drawDownloadBar(dl);
+	// (The texture pack's download bar stays above the hints, where it always was.)
+	drawDownloadBar(dl);
+	// In the top right corner, where the console's own notices come: over the clock and the pads,
+	// never over the hints at the foot or what a screen shows (the newest at the top, a little
+	// lower each one before it). A long one goes over several lines: nothing of it is cut.
+	const float most = 560, right = W - 40;
+	float y = 14;
 	for (auto it = s_toasts.rbegin(); it != s_toasts.rend(); ++it)
 	{
 		Toast& t = *it;
-		t.shown = approach(t.shown, timeNow < t.until ? 1.f : 0.f, 12);
+		t.shown = approach(t.shown, timeNow < t.until ? 1.f : 0.f, 14);
 		if (t.shown < 0.01f)
 			continue;
-		// (A long one goes over several lines: nothing of it is cut.)
-		const float most = W - 400;
-		const ImVec2 one = textSize(regular(), 24, t.text.c_str());
+		const ImVec2 one = textSize(regular(), 22, t.text.c_str());
 		const bool wraps = one.x > most;
-		const ImVec2 ts = wraps ? textSize(regular(), 24, t.text.c_str(), most) : one;
-		const float w = (wraps ? most : ts.x) + 56, h = ts.y + 22, x = (W - w) / 2;
-		const float ty = y + 48 - h + (1 - t.shown) * 12;
-		rect(dl, x, ty, w, h, alpha(col::sheetHi, 0.96f * t.shown), 24);
-		outline(dl, x, ty, w, h, alpha(col::accent, 0.6f * t.shown), 24, 2);
-		text(dl, regular(), 24, x + 28, ty + 11, alpha(col::text, t.shown), t.text.c_str(), wraps ? most : 0.f);
-		y -= h + 10;
+		const ImVec2 ts = wraps ? textSize(regular(), 22, t.text.c_str(), most) : one;
+		const float w = (wraps ? most : ts.x) + 48, h = std::max(68.f, ts.y + 24), x = right - w;
+		const float ty = y - ((motion() == MotionFull) ? (1 - t.shown) * 10 : 0.f);
+		glow(dl, x, ty, w, h, 16, alpha(col::rgba(0, 0, 0, 255), 0.45f * t.shown), 12);
+		rect(dl, x, ty, w, h, alpha(col::sheetHi, t.shown), 16);
+		outline(dl, x, ty, w, h, alpha(col::accent, 0.7f * t.shown), 16, 2);
+		text(dl, regular(), 22, x + 24, ty + (h - ts.y) / 2, alpha(col::text, t.shown), t.text.c_str(), wraps ? most : 0.f);
+		y += (h + 10) * t.shown;
 	}
 }
 
@@ -2344,6 +2406,9 @@ void dialogDraw(ImDrawList* dl)
 	// The card manager, under its own lists and questions.
 	if (cardManagerOpen())
 		cardManagerDraw(dl);
+	// The texture pack manager, the same way.
+	if (texturePacksOpen())
+		texturePacksDraw(dl);
 
 	if (s_dialogs.empty())
 	{

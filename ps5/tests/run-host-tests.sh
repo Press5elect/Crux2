@@ -12,6 +12,8 @@
 #   - the libc stand-ins of frontend/ps5_libc.c, each against the PC's own libc;
 #   - the quick menu's entries and their order (frontend/bigpicture/bp_quick_layout.h), and frame
 #     generation's figures for the on-screen display and the log (frontend/ps5_pacing.h);
+#   - the performance overlay's levels (white, amber, red), its sizes' presets of the switches and
+#     what the settings keep after a switch changes (frontend/ps5_osd_logic.h);
 #   - the game list's letter jumps (frontend/ps5_letter_jump.h): the order, the groups, and where
 #     L2 and R2 land on sorted and unsorted lists;
 #   - the profiler's folding (frontend/ps5_profile_fold.h): symbols.txt read and refused, the
@@ -31,13 +33,21 @@
 #     finish out of order handed over in order, the memory they may hold, failures, slow parts and
 #     a stop; and, with the PC's libcurl and libarchive, the download over 10 connections from a
 #     made-up server with ranges, without them, cutting parts off, and a .zip unpacked as it comes;
+#   - the texture pack manager's file work (frontend/ps5_texture_pack_store.cpp): packs found,
+#     measured, moved (stopped half-way, failing, begun again: the source kept), deleted, queued;
 #   - the memory card held in memory (frontend/ps5_card_image.h): random saves on the image and
 #     on a copy, the file compared with the copy after each flush;
 #   - the memory code of common/PS5HostSys.cpp (guest memory, the code area, the fastmem window,
 #     page protection and the fault handler), over a stand-in for the platform layer with the same
 #     argument rules (mock_platform.cpp), compiled for 16 KiB host pages as the console build is;
+#   - downsampling and SMAA (frontend/ps5_aa.h, tests/aa): when they run and at what size; their passes
+#     on a software Vulkan driver against the maths in double precision;
 #   - the interface's and host's sources: no setting read through Host while the settings' lock
 #     is held (check-settings-lock.py; such a read ends the title);
+#   - the settings' no-loss test (bigpicture/inventory/run-inventory-test.sh): every row of the
+#     settings made by the console's own code (bp_options.cpp, bp_pcsx2.cpp) on the PC, against the
+#     baseline settings-inventory.json (no option, layout or skin gone or changed) and against
+#     settings-text.yaml (every row has its words there, no stale one);
 #   - the virtual file layer of frontend/vfs (run-vfs-tests.sh: needs a libsmb2 for the PC, and
 #     reads from a real Samba and a real FTP server when they are installed).
 #
@@ -100,6 +110,11 @@ echo "== frame generation's Steady 30 (frontend/ps5_framegen_pacer.h)"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/pacing/steady30_test.cpp" -o "$work/steady30_test"
 "$work/steady30_test" || status=1
+
+echo "== the performance overlay's levels and sizes (frontend/ps5_osd_logic.h)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/osd/osd_logic_test.cpp" -o "$work/osd_logic_test"
+"$work/osd_logic_test" || status=1
 
 echo "== a picture's size from its header, huge ones refused before decoding (frontend/ps5_image_header.h)"
 mkdir -p "$work/image"
@@ -188,6 +203,8 @@ echo "== quick taps held for the game"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/input/tap_hold_test.cpp" -o "$work/tap_hold_test"
 "$work/tap_hold_test" || status=1
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/input/touch_click_test.cpp" -o "$work/touch_click_test"
+"$work/touch_click_test" || status=1
 
 echo "== the updater (developer builds, the files a new version dropped)"
 # libzip: the PC's (pkg-config) or PCSX2's copy built once; rapidjson: the PC's or PCSX2's.
@@ -283,6 +300,14 @@ echo "== HD texture pack downloads: pieces over several connections, in order (f
 # 127.0.0.1 when the PC has libcurl and libarchive (tests/texturepacks/run-fetch-tests.sh).
 bash "$tests/texturepacks/run-fetch-tests.sh" "$work/texturepack-fetch" || status=1
 
+echo "== the texture pack manager's file work (frontend/ps5_texture_pack_store.cpp)"
+# Packs found on made-up places, measured, moved to a drive and to a share that cannot rename,
+# moves stopped half-way and failing (the source as it was) and begun again, deletes, the queue.
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra -Werror $sanitize -I "$frontend" "$tests/texturepacks/store_test.cpp" \
+    "$frontend/ps5_texture_pack_store.cpp" -o "$work/texture_pack_store_test"
+"$work/texture_pack_store_test" "$work/texture-pack-store" || status=1
+
 echo "== Crux2's own screenshots (frontend/ps5_shots.h)"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/shots/shots_test.cpp" -o "$work/shots_test"
@@ -298,8 +323,21 @@ echo "== HDR output and debanding (the last passes before the screen)"
 # and ps5_hdr.h's choices (run-hdr-tests.sh: says what is missing when glslang or a driver is not there).
 bash "$tests/hdr/run-hdr-tests.sh" "$work/hdr" || status=1
 
+echo "== downsampling and SMAA (before the picture is sharpened and shown)"
+# ps5_aa.h's decisions under the sanitizers; ps5_aa.glsl's five passes compiled as the device does and run on
+# lavapipe against the maths in double precision, SMAA on staircases (run-aa-tests.sh: says what is missing).
+bash "$tests/aa/run-aa-tests.sh" "$work/aa" || status=1
+
 echo "== no setting read through Host while the settings' lock is held"
 python3 "$tests/check-settings-lock.py" || status=1
+
+echo "== the settings: nothing lost (the inventory against its baseline, settings-text.yaml complete)"
+# clang++ whatever CXX is (PCSX2's headers, as the interface's tests build them); needs vendor/pcsx2.
+if command -v clang++ > /dev/null && [[ -f $pcsx2/pcsx2/Host.cpp ]]; then
+    bash "$tests/bigpicture/inventory/run-inventory-test.sh" "$work/inventory" || status=1
+else
+    echo "skipped: no clang++ or no vendor/pcsx2 (ps5/tools/fetch-pcsx2.sh)"
+fi
 
 [[ $status == 0 ]] && echo "all host tests passed" || echo "host tests FAILED"
 exit $status

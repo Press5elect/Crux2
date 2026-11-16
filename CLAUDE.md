@@ -16,6 +16,8 @@ all documentation is [`docs/README.md`](docs/README.md).
 3. **Work on the assigned branch**; commit and push only there. No pull requests, tags or GitHub
    releases unless the owner asks. Never publish a release without being asked.
 4. **No game titles** in commit messages, release notes or anything published: serials/IDs only.
+   Exception (the owner's decision, 2026-11-15): settings descriptions taken word for word from
+   PCSX2 keep the games they name.
    **No model identifiers** in anything pushed.
 5. **`vendor/pcsx2` is gitignored**: PCSX2 at the pin (`ps5/tools/fetch-pcsx2.sh`) plus
    `ps5/patches/pcsx2/ps5.patch`. Edit vendor, run `ps5/tools/fetch-pcsx2.sh --export`, and verify
@@ -24,6 +26,8 @@ all documentation is [`docs/README.md`](docs/README.md).
    `SHA256SUMS`; notes in `docs/releases/` in the existing style ([`docs/dev/releasing.md`](docs/dev/releasing.md)).
 7. **Untestable behaviour changes go behind default-off settings.** Say plainly what was and wasn't
    tested on a console.
+8. **The top bar holds places only** (Home, Library, Disc): Settings is the Options button, storage
+   is a library filter, tools (texture packs) live in Settings, the game page and the library.
 
 ## Commands
 
@@ -37,6 +41,7 @@ PS5PX_VERSION=vX.Y.Z PS5PX_RELEASE=1 ps5/tools/build.sh   # release build, clean
 ps5/tools/build-radv-crux2.sh                     # RADV with ps5/patches/mesa-27 (after a Mesa patch change)
 VFS_TEST_DIR=/tmp/crux2-host ps5/tests/run-host-tests.sh           # host tests (CI runs them)
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # interface crawl ("shots" for pictures)
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp inventory  # no setting lost; bless: ps5/tools/settings-inventory.py bless (docs/dev/settings-inventory.md)
 ps5/tools/stage-notices.py --check dist/PPSA99249 # the release check
 ps5/tools/make-release-zip.py vX.Y.Z              # ZIP, sources, SHA256SUMS
 ```

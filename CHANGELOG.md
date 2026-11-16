@@ -1,10 +1,74 @@
 # Crux2 - what changed
 
 A short entry for each version, newest first. The build copies this file into the title folder,
-where Settings > PlayStation 5 > What's new reads it: keep the `## vX.Y.Z (date)` headings and the
+where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (date)` headings and the
 `- Added:` / `- Changed:` / `- Fixed:` bullets (a heading without a version, such as Unreleased, is
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
+
+## v1.0.20 (2026-11-16)
+
+- Changed: the interface polished: the button hints in one order on every screen (Circle at the
+  left, Cross at the right); messages in the top right corner, over the clock, never over the hints
+  or what a screen shows; the settings' home cards show what is set on two lines, at every text
+  size; the same corners on every card (skins with rounder or squarer corners had them doubled);
+  screens change quicker, and only fade with Motion: Less. Change disc offers the disc in a drive
+  again (L1 / R1 and the filter row); L3 on a pinned setting in the quick menu uses the global
+  setting again. Not yet run on a console.
+- Changed: the top bar's tabs are Home, Library and Disc (with a disc in a drive), L1 / R1; Options
+  opens the settings as before. Home is the first screen after the start-up: the game played last
+  with Resume (from its newest saved state) and its game page, what goes on right now (texture pack
+  downloads, opening the texture pack manager; a disc in a drive; the share, the console's and USB
+  drives' games) and the games played lately. The
+  library's places are a filter row under the bar (All, Console, USB, Share, then Favourites, Never
+  played and Collections; Up from the first row of games), with the number of games, the order and
+  the view at its right; the views that did not show the focused game's details have a strip with
+  them at the bottom. All ten views, the quick views, the list's menu and choosing a disc for a
+  running game are as before. Not yet run on a console.
+- Changed: a game's details are its page: the cover with Resume (from the state it was closed with,
+  or its newest) and Start from the beginning, a line of what is known of it, and tabs (L1 / R1):
+  Overview (where you left off, its own settings, memory card, patches and cheats, texture pack, its
+  file, what it is), Save states, Its settings, Patches and cheats, Texture packs. Square is More,
+  which now also has A favourite, Hide it, the next disc, Make an image of the disc and starting
+  over without the state it was closed with (they were L1, R1, Square and a button before); L2 / R2
+  show its other pictures. Not yet run on a console.
+- Changed: the quick menu laid out anew: how long the game was played this time; tiles for Resume,
+  Save state, Load state, Screenshot (new: the game's picture without the menu), Change disc and
+  Quit game; the settings pinned in the Settings, changed in place (the game's own value where a
+  game can have one); More with every other entry, chosen and ordered with Triangle as before. Not
+  yet run on a console.
+- Changed: the settings rebuilt: a home with a search bar, eight areas (Picture, Sound, Controls,
+  Games and saves, Emulation, Network, Interface, System) that say what is set and how many settings
+  are changed, the pinned settings and the ones changed lately; an area's page with its sections, one
+  line a setting and the focused one described in full (choices, default, what it applies to, when it
+  takes effect); a search through every setting at every level and the library's games; pins (Square);
+  the levels named Essentials, More and Everything; a game's own settings with a switch to those of
+  all games (the touch pad) and L3 to use the global setting again. Every option of before is still
+  there (the settings inventory). Not yet run on a console.
+- Changed: every setting's description is taken word for word from PCSX2 where PCSX2 has the
+  setting, and written in PCSX2's style where it has not; labels and choice names likewise.
+- Changed: the performance overlay (Settings > On-Screen Display) comes in three sizes (Performance
+  Overlay Size): Minimal (a pill with the frame rate), Compact (one bar: frame rate, GPU, EE, GS and VU) and
+  Full (a card with the frame time, speed, 1% and 0.1% lows, a frame-time graph, the loads as bars,
+  resolution, temperature and memory), plus Custom (what the switches under Show give). A size sets
+  those switches; changing one makes it Custom. Digits of one width, colour only for meaning (amber
+  close to a limit, red over it), "30 → 60" with frame generation. The overlay stays off until a
+  figure is switched on; switching the FPS on gives Compact. Not yet run on a console.
+- Added: one Anti-aliasing row (Settings > Graphics > Post-processing): Off, FXAA, SMAA, SSAA or
+  SSAA + SMAA. SSAA draws the game larger than the screen (choosing it raises the internal resolution
+  to about 1.5 times the screen's and turns FSR 1 off) and makes it screen-sized from every texel each
+  pixel covers (SSAA filter: Soft or Sharp), instead of one bilinear tap; SSAA + SMAA runs SMAA over
+  that. Not yet run on a console.
+- Added: the HD texture pack manager (the library's Square menu, Settings > Graphics, a game's
+  options): every pack on the console, the USB drives and the shares by game, with its size and
+  files; move a pack between them (copied and checked before the original goes), delete it, download
+  the collection's packs for your games one after another. Not yet run on a console.
+- Fixed: a black screen with a look (Settings > Graphics > Look): the look's picture is put in the
+  layout the screen's pass reads, and PCSX2's vertex buffer is bound again after it. Not yet run on
+  a console.
+- Fixed: a click on the touch pad's left half could be taken for Start (and the right half for
+  Select) when another finger or a thumb was also on the pad, or when the click came a moment before
+  the finger's position: the finger that touched last decides now.
 
 ## v1.0.19 (2026-11-15)
 

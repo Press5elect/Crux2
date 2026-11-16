@@ -93,6 +93,8 @@ private:
 		std::array<u8, 2> rumble = {}; // what the emulator wants: large, small
 		std::array<u8, 2> rumble_sent = {}; // what the controller was last told
 		bool touch_is_back = false; // the click now held started on the left half
+		PS5InputLogic::TouchClick touch; // which finger, and where, a click is (ps5_input_source_logic.h)
+		u32 touch_clicks_logged = 0;
 		bool vibration_mode_logged = false;
 
 		PS5InputLogic::HoldCombo leave_combo;

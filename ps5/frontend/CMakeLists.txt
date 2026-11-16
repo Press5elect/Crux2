@@ -53,6 +53,8 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_card_sync.cpp
 	ps5_texture_packs.cpp
 	ps5_texture_packs_extract.cpp
+	ps5_texture_pack_manager.cpp
+	ps5_texture_pack_store.cpp
 	ps5_ps2_ftp.cpp
 	ps5_mic.cpp
 	ps5_priority.cpp
@@ -78,12 +80,16 @@ set(PS5PX_FRONTEND_SOURCES
 	# and their Backend over PCSX2, which is also PCSX2's FullscreenUI on the console.
 	bigpicture/bp_draw.cpp
 	bigpicture/bp_library.cpp
+	bigpicture/bp_home.cpp
 	bigpicture/bp_options.cpp
 	bigpicture/bp_pcsx2.cpp
 	bigpicture/bp_care.cpp
 	bigpicture/bp_cards.cpp
+	bigpicture/bp_textures.cpp
 	bigpicture/bp_quick.cpp
 	bigpicture/bp_settings.cpp
+	bigpicture/bp_settings_home.cpp
+	bigpicture/bp_settings_words.cpp
 	bigpicture/bp_splash.cpp
 )
 

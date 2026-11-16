@@ -33,6 +33,7 @@
 #include "../ps5_disc.h"
 #include "../ps5_disc_image.h"
 #include "../ps5_hdr.h"
+#include "../ps5_osd_logic.h"
 #include "../ps5_about.h"
 #include "../vfs/ps5_vfs.h"
 #include "../ps5_shares.h"
@@ -46,6 +47,7 @@
 #include "../ps5_online.h"
 #include "../ps5_presets.h"
 #include "../ps5_mic.h"
+#include "../ps5_texture_pack_manager.h"
 #include "../ps5_texture_packs.h"
 #include "../ps5_texture_packs_logic.h"
 #include "../ps5_ui.h"
@@ -735,7 +737,7 @@ unsigned s_web_keys = 0;
 std::atomic<bool> s_update_wanted{false};
 std::atomic<bool> s_update_asked_by_hand{false};
 
-class PCSX2Backend final : public bp::Backend, public bp::CardShelf
+class PCSX2Backend final : public bp::Backend, public bp::CardShelf, public bp::TexturePackShelf
 {
 public:
 	// ---- the library
@@ -3508,7 +3510,19 @@ public:
 		const PS5TexturePacks::Progress p = PS5TexturePacks::Now();
 		DownloadBar bar;
 		if (!p.active)
+		{
+			// (With no download, the texture pack manager's move or delete has the bar.)
+			const PS5TexturePackManager::JobBar job = PS5TexturePackManager::JobNow();
+			if (job.active)
+			{
+				bar.title = job.title;
+				bar.got = job.done;
+				bar.total = job.total;
+				bar.speed = job.speed;
+				bar.secondsLeft = job.secondsLeft;
+			}
 			return bar;
+		}
 		bar.title = p.title;
 		bar.got = p.got;
 		bar.total = p.total;
@@ -3525,6 +3539,178 @@ public:
 			PS5TexturePacks::Stop();
 			bp::toast("Stopping the download...", 3.f);
 		}
+	}
+
+	// ---- the texture pack manager (bp_textures.cpp; ps5_texture_pack_manager.h does the work)
+
+	bp::TexturePackShelf* texturePackShelf() override { return this; }
+	unsigned packsGeneration() override { return PS5TexturePackManager::Generation(); }
+
+	std::vector<bp::PackPlace> packPlaces() override
+	{
+		std::vector<bp::PackPlace> out;
+		for (const PS5TexturePackManager::PlaceInfo& p : PS5TexturePackManager::Places())
+			out.push_back({p.place.name, p.place.target, p.kind, p.place.writable, p.downloads, p.freeBytes});
+		return out;
+	}
+
+	std::vector<bp::InstalledPack> installedPacks() override
+	{
+		std::vector<bp::InstalledPack> out;
+		for (const PS5TexturePackStore::Pack& p : PS5TexturePackManager::Packs())
+		{
+			bp::InstalledPack i;
+			i.serial = p.serial;
+			i.path = p.path;
+			i.place = static_cast<int>(p.place);
+			i.zip = p.zip;
+			i.state = p.state == PS5TexturePackStore::Pack::Moving ? bp::InstalledPack::Moving :
+					  p.state == PS5TexturePackStore::Pack::Deleting ? bp::InstalledPack::Deleting : bp::InstalledPack::Whole;
+			i.read = p.read;
+			i.measured = p.measured;
+			i.files = p.files;
+			i.bytes = p.bytes;
+			out.push_back(std::move(i));
+		}
+		return out;
+	}
+
+	void lookAgain(bool all) override { PS5TexturePackManager::LookAgain(all); }
+	int measuring() override { return PS5TexturePackManager::Measuring(); }
+	int collectionState() override { return PS5TexturePackManager::CollectionState(); }
+	std::string collectionError() override { return PS5TexturePackManager::CollectionError(); }
+
+	std::vector<bp::OfferedPack> collectionPacks() override
+	{
+		std::vector<bp::OfferedPack> out;
+		for (const PS5TexturePacks::Pack& p : PS5TexturePackManager::Collection())
+			out.push_back({p.file, p.title, p.size, p.serials});
+		return out;
+	}
+
+	std::string packBusy(const bp::InstalledPack& pack) override
+	{
+		if (PS5TexturePackManager::JobBusy())
+			return "A texture pack is being moved or deleted: wait for it, or stop it (UNDER WAY, near the bottom of the list).";
+		if (VMManager::HasValidVM() && VMManager::GetDiscSerial() == pack.serial)
+			return "The game that runs reads this pack: close the game first.";
+		if (PS5TexturePackManager::Downloading(pack.serial))
+			return "A pack of this game is being downloaded or waits to be: wait for it, or take it off the queue.";
+		return {};
+	}
+
+	// The manager's pack by its path, as the store has it now.
+	std::optional<PS5TexturePackStore::Pack> StorePack(const bp::InstalledPack& pack)
+	{
+		for (const PS5TexturePackStore::Pack& p : PS5TexturePackManager::Packs())
+		{
+			if (p.path == pack.path)
+				return p;
+		}
+		bp::toast("That pack is not there any more: looking again.", 4.f);
+		PS5TexturePackManager::LookAgain(false);
+		return std::nullopt;
+	}
+
+	static void PackDone(bool ok, std::string sentence)
+	{
+		if (ok)
+			bp::toast(sentence, 6.f);
+		else
+			bp::message("Texture packs", sentence);
+	}
+
+	void deletePack(const bp::InstalledPack& pack) override
+	{
+		if (const std::optional<PS5TexturePackStore::Pack> p = StorePack(pack))
+		{
+			if (!PS5TexturePackManager::Delete(*p, &PackDone))
+				bp::toast("A texture pack is being moved or deleted already: wait for it.", 4.f);
+		}
+	}
+
+	void movePack(const bp::InstalledPack& pack, int place) override
+	{
+		if (place < 0)
+			return;
+		if (const std::optional<PS5TexturePackStore::Pack> p = StorePack(pack))
+		{
+			if (!PS5TexturePackManager::Move(*p, static_cast<size_t>(place), &PackDone))
+				bp::toast("A texture pack is being moved or deleted already: wait for it.", 4.f);
+			else
+				bp::toast("Moving the pack: copied first, checked, and only then taken away from where it was.", 5.f);
+		}
+	}
+
+	std::string packJob() override { return PS5TexturePackManager::JobLine(); }
+	void stopPackJob() override
+	{
+		PS5TexturePackManager::StopJob();
+		bp::toast("Stopping...", 3.f);
+	}
+
+	void queueDownload(const bp::OfferedPack& offer, int place) override
+	{
+		const std::vector<PS5TexturePackManager::PlaceInfo> places = PS5TexturePackManager::Places();
+		if (place < 0 || place >= static_cast<int>(places.size()) || !places[static_cast<size_t>(place)].downloads)
+			return;
+		for (const PS5TexturePacks::Pack& p : PS5TexturePackManager::Collection())
+		{
+			if (p.file != offer.file)
+				continue;
+			const PS5TexturePackManager::PlaceInfo& to = places[static_cast<size_t>(place)];
+			PS5TexturePackManager::Queue(p, {to.place.target, to.place.name});
+			bp::toast(PS5TexturePacks::Busy() ? fmt::format("{} waits its turn: the downloads come one after another.", p.title) :
+												fmt::format("Downloading {} to {}.", p.title, to.place.name),
+				4.f);
+			return;
+		}
+	}
+
+	std::vector<std::string> queuedDownloads() override { return PS5TexturePackManager::Queued(); }
+	void unqueueDownload(int index) override
+	{
+		if (index >= 0)
+			PS5TexturePackManager::Unqueue(static_cast<size_t>(index));
+	}
+
+	// Once a frame: what the manager's threads came to, and the next download of the queue.
+	void TexturePacksFrame()
+	{
+		PS5TexturePackManager::Frame([this](const PS5TexturePacks::Pack& pack, const PS5TexturePacks::Place& place) {
+			const unsigned connections = static_cast<unsigned>(std::clamp(Host::GetBaseIntSettingValue("PS5", "TexturePackConnections", 10), 1, 16));
+			const bool started = PS5TexturePacks::Start(pack, place, connections, [this, serials = pack.serials](bool ok, std::string sentence) {
+				if (ok)
+				{
+					for (const std::string& serial : serials)
+					{
+						if (const std::optional<u32> crc = CrcOf(serial))
+							UseTexturePacks(serial, *crc);
+					}
+				}
+				PS5UI::SetBackgroundNote(std::string());
+				bp::message(ok ? "The texture pack is ready" : "The texture pack is not complete", sentence);
+			});
+			if (started)
+				PS5UI::SetBackgroundNote("Downloading a texture pack");
+			else
+				bp::toast(fmt::format("{} could not be started.", pack.title), 4.f);
+			return started;
+		});
+	}
+
+	// A game's CRC from the game list, for its own settings' file.
+	static std::optional<u32> CrcOf(const std::string& serial)
+	{
+		const auto lock = GameList::GetLock();
+		const u32 count = GameList::GetEntryCount();
+		for (u32 i = 0; i < count; i++)
+		{
+			const GameList::Entry* const entry = GameList::GetEntryByIndex(i);
+			if (entry != nullptr && entry->serial == serial)
+				return entry->crc;
+		}
+		return std::nullopt;
 	}
 
 	// A pack that is whole: the game's own "Load texture packs" on, and a game that runs takes it.
@@ -4161,7 +4347,7 @@ public:
 		{
 			rows.push_back(Heading("WHERE GAMES ARE"));
 			rows.push_back(Toggle("USB drives",
-				"Shows a USB tab for games in a folder named Crux2 or PS2 on a USB drive.", "PS5",
+				"Shows the games in a \"Crux2\" or \"PS2\" folder on a USB drive in the game list.", "PS5",
 				"USBDrives", true, A | bp::Option::Restart));
 			rows.push_back(Toggle("Disc drives",
 				"Checks the console's disc drive and USB DVD drives for PS2 discs and shows them on their own tab. USB DVD "
@@ -4710,6 +4896,7 @@ public:
 
 	void frame() override
 	{
+		TexturePacksFrame();
 		NetSharesFrame();
 		SharesAndWritesFrame();
 		LaunchArgsFrame();
@@ -5518,6 +5705,13 @@ public:
 
 	bool imageBusy() override { return s_disc_copying.load(std::memory_order_acquire); }
 
+	bool screenshot() override
+	{
+		// (As the hotkey: the game's picture, at its internal resolution, on a thread of its own.)
+		PS5Shots::Take();
+		return true;
+	}
+
 	bp::GameAbout about(const bp::GameInfo& game) override
 	{
 		bp::GameAbout out;
@@ -6207,6 +6401,35 @@ private:
 		}
 		// The light gun choice plugs GunCon 2s into USB ports 1 and 2 in the same layer, with their
 		// default buttons; None takes out only the guns it put there.
+		// The anti-aliasing row (bp_options.cpp) sets the keys the renderer reads: FXAA, SMAA, the downsampling filter,
+		// and for SSAA a resolution above the screen's, with FSR 1 (which enlarges a smaller picture) off.
+		if (where == "PS5" && (what == "AntiAliasing" || what == "SSAAFilter"))
+		{
+			const auto lock = Host::GetSettingsLock();
+			if (SettingsInterface* const si = Layer(layer); si != nullptr)
+			{
+				const int aa = std::clamp(si->GetIntValue("PS5", "AntiAliasing", 0), 0, 4);
+				const bool ssaa = aa >= 3;
+				si->SetBoolValue("EmuCore/GS", "fxaa", aa == 1);
+				si->SetBoolValue("PS5", "SMAA", aa == 2 || aa == 4);
+				si->SetIntValue("PS5", "Downsample", ssaa ? std::clamp(si->GetIntValue("PS5", "SSAAFilter", 1), 1, 2) : 0);
+				if (ssaa && what == "AntiAliasing")
+				{
+					// About 1.5 times the screen's height in the PS2's 448 lines, raised only (never lowered).
+					const int screen = Host::Internal::GetBaseSettingsLayer()->GetIntValue("PS5", "OutputHeight", 2160);
+					const float want = std::min(12.f, std::ceil(1.5f * static_cast<float>(screen) / 448.f));
+					const float have = si->GetFloatValue("EmuCore/GS", "upscale_multiplier", 6.f);
+					if (have < want)
+						si->SetFloatValue("EmuCore/GS", "upscale_multiplier", want);
+					const int cas = si->GetIntValue("EmuCore/GS", "CASMode", 5);
+					if (cas >= 3)
+						si->SetIntValue("EmuCore/GS", "CASMode", 0);
+					ps5px_log("picture: SSAA chosen: internal resolution %.0fx (was %.0fx), upscaling %s", std::max(have, want), have,
+						cas >= 3 ? "FSR/NIS turned off" : "as it was");
+				}
+			}
+			m_pages++;
+		}
 		if (where == "PS5" && what == "LightGun")
 		{
 			const auto lock = Host::GetSettingsLock();
@@ -6224,6 +6447,47 @@ private:
 					else if (si->GetStringValue(section, "Type", "None") == "guncon2")
 						si->SetStringValue(section, "Type", "None");
 				}
+			}
+		}
+		// The performance overlay's sizes ([PS5] OsdSize, ps5_osd_logic.h) are presets of its switches:
+		// a size chosen writes them; a switch changed afterwards makes the size Custom, and the FPS
+		// counter switched on with nothing else shown brings the size's figures back (Compact's, for a
+		// new user). (The rows are the settings of all games only.)
+		if (layer != bp::Own &&
+			((where == "PS5" && what == "OsdSize") || (where == PS5OsdLogic::SWITCH_SECTION && PS5OsdLogic::IsSwitchKey(key))))
+		{
+			const auto lock = Host::GetSettingsLock();
+			if (SettingsInterface* const si = Layer(layer); si != nullptr)
+			{
+				PS5OsdLogic::Switches now;
+				for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
+					now.*k.field = si->GetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, false);
+				const int size = si->GetIntValue("PS5", "OsdSize", PS5OsdLogic::DEFAULT_SIZE);
+				int keep = size;
+				PS5OsdLogic::Switches write = now;
+				if (what == "OsdSize")
+				{
+					if (PS5OsdLogic::IsPreset(size))
+						write = PS5OsdLogic::Preset(size);
+				}
+				else
+				{
+					const PS5OsdLogic::FpsSwitch fps = (what != "OsdShowFPS") ? PS5OsdLogic::FpsSwitch::Other :
+						now.fps ? PS5OsdLogic::FpsSwitch::On : PS5OsdLogic::FpsSwitch::Off;
+					keep = PS5OsdLogic::SizeAfterSwitch(size, now, fps, write);
+				}
+				if (!(write == now))
+				{
+					now = write;
+					for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
+						si->SetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, now.*k.field);
+				}
+				if (keep != size)
+					si->SetIntValue("PS5", "OsdSize", keep);
+				// (As below: figures switched on while their place is "Not shown" go to the top right.)
+				SettingsInterface* const base = Host::Internal::GetBaseSettingsLayer();
+				if (now.Any() && base && base->GetIntValue("EmuCore/GS", "OsdPerformancePos", 3) == 0)
+					base->SetIntValue("EmuCore/GS", "OsdPerformancePos", 3);
 			}
 		}
 		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the

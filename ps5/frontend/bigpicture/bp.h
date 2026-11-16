@@ -190,6 +190,12 @@ struct Option
 	/// A switch on a game's own page: its value when the game's settings name none, if this gives one
 	/// (Crux2's defaults for one game, such as accurate floating point), instead of the shared value.
 	std::function<std::optional<bool>()> gameDefault;
+	/// Set when the settings' words are put on the row (bp_settings_words.cpp): its entry in the baked
+	/// table of settings-text.yaml (an index into settingsText; -1: none), and the label the code gave it
+	/// when the table's took its place. The row's id is made from the code's label, so that it stays the
+	/// same when its words change.
+	int textRow = -1;
+	std::string codeLabel;
 };
 
 /// A page of the settings made by the Backend (the controllers, the memory cards, the patches a
@@ -237,6 +243,8 @@ enum Store
 	Shared = 0, // the settings of every game
 	Own = 1,    // the game opened with Backend::openGame: only what it has of its own
 };
+
+class TexturePackShelf; // (below: the texture pack manager's)
 
 class Backend
 {
@@ -424,6 +432,8 @@ public:
 		double secondsLeft = -1;      // below 0: not known
 	};
 	virtual DownloadBar texturePackBar() { return {}; }
+	/// The texture pack manager's packs and places (bp_textures.cpp); null where there is none.
+	virtual TexturePackShelf* texturePackShelf() { return nullptr; }
 	/// An interface sound (Cue below). Returns at once.
 	virtual void cue(int which) {}
 	/// What was typed on a keyboard (a USB one, or the phone's) since the last call: the text, and
@@ -441,6 +451,10 @@ public:
 	virtual void makeImage(const GameInfo& game) {}
 	/// An image of a disc is being made.
 	virtual bool imageBusy() { return false; }
+	/// A screenshot of the running game's picture, without the menus over it, as the hotkey "Save
+	/// Screenshot" takes one (the quick menu's tile); what came of it is said in a toast. False when
+	/// there is no such thing here.
+	virtual bool screenshot() { return false; }
 };
 
 /// The interface's sounds (Backend::cue).
@@ -586,6 +600,81 @@ void newCard(CardShelf* shelf);
 /// or brought in, and the emulator's own two under System; the saves of the card in focus on the
 /// right. It is over whatever screen opened it, until Circle closes it.
 void openCardManager(CardShelf* shelf);
+
+// ------------------------------------------------------------------------- HD texture packs
+//
+// The texture pack manager (bp_textures.cpp): the packs on the console, the USB drives and the
+// shares, by game; what the collection has for the library's games; downloads one after another;
+// moves and deletes. Whatever is asked for returns at once and runs on a thread of its own; what
+// came of it is said in a toast or a message, and packsGeneration() moves.
+
+/// A place packs can be on.
+struct PackPlace
+{
+	std::string name;        // "This console", "USB drive 1", "Share: games"
+	std::string where;       // its textures folder, as shown
+	int kind = 0;            // 0 the console, 1 a USB drive, 2 a share
+	bool writable = true;    // a pack can be moved here
+	bool downloads = true;   // and downloaded here (not to a share)
+	int64_t freeBytes = -1;  // -1: not known (the console tells a title nothing of it)
+};
+
+/// A pack found on a place.
+struct InstalledPack
+{
+	enum State { Whole, Moving, Deleting };
+	std::string serial;
+	std::string path;        // its folder, or its ZIP
+	int place = 0;           // in packPlaces()
+	bool zip = false;
+	State state = Whole;     // Moving: an unfinished move's copy; Deleting: what a stopped delete left
+	bool read = false;       // the one the game reads
+	bool measured = false;   // files and bytes are known
+	uint64_t files = 0, bytes = 0;
+};
+
+/// A pack the collection has.
+struct OfferedPack
+{
+	std::string file, title;
+	uint64_t size = 0;       // of its archive
+	std::vector<std::string> serials;
+};
+
+class TexturePackShelf
+{
+public:
+	virtual ~TexturePackShelf() = default;
+	/// Bumped whenever anything below would answer otherwise.
+	virtual unsigned packsGeneration() = 0;
+	virtual std::vector<PackPlace> packPlaces() = 0;
+	virtual std::vector<InstalledPack> installedPacks() = 0;
+	/// The places looked into again (a drive may have come or gone). `all`: every pack measured
+	/// anew and the collection's list fetched anew; otherwise only packs not measured before, and
+	/// the list only when it was not fetched yet (what opening the manager asks).
+	virtual void lookAgain(bool all) = 0;
+	/// How many packs are still being measured (0 when none is).
+	virtual int measuring() = 0;
+	/// The collection's list: 0 not asked for yet, 1 being fetched, 2 there, 3 not to be had (`collectionError`).
+	virtual int collectionState() = 0;
+	virtual std::string collectionError() = 0;
+	virtual std::vector<OfferedPack> collectionPacks() = 0;
+	/// Why the pack cannot be moved or deleted now ("The game that runs reads it."); empty when it can.
+	virtual std::string packBusy(const InstalledPack& pack) = 0;
+	virtual void deletePack(const InstalledPack& pack) = 0;
+	virtual void movePack(const InstalledPack& pack, int place) = 0;
+	/// The move or delete that runs, as a line ("Moving SLUS-21376 to USB drive 1: 40%"); empty when none.
+	virtual std::string packJob() = 0;
+	virtual void stopPackJob() = 0;
+	/// A download put in the queue (started at once when none runs).
+	virtual void queueDownload(const OfferedPack& pack, int place) = 0;
+	/// What waits, as lines ("<title> to USB drive 1"), in order.
+	virtual std::vector<std::string> queuedDownloads() = 0;
+	virtual void unqueueDownload(int index) = 0;
+};
+
+/// Opens the texture pack manager over whatever screen is on; with a serial, on that game.
+void openTexturePacks(TexturePackShelf* shelf, const std::string& serial = std::string());
 
 // ----------------------------------------------------------------------------------- the front
 

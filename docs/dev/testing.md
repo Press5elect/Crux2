@@ -27,6 +27,7 @@ the host memory test. CI has neither, so it skips those two.
 | letter jumps | `ps5_letter_jump.h`: order, groups, L2/R2 landings |
 | quick menu entries | `bp_quick_layout.h`: shown, hidden, ordered |
 | frame generation's figures | `ps5_pacing.h` (FrameGenFigures) |
+| the performance overlay | `ps5_osd_logic.h`: the levels (white, amber, red) at their thresholds, the sizes' presets, Custom after a switch changes (`tests/osd`) |
 | PlayStation Move | `ps5_move_logic.h` and the loopback stream, against a stand-in producer |
 | profile folding, profiler | `ps5_profile_fold.h`, `ps5_profiler.cpp` (plain, ASan, TSan) |
 | thread times | `PS5ThreadTimes.h` under TSan |
@@ -35,15 +36,19 @@ the host memory test. CI has neither, so it skips those two.
 | host memory | `PS5HostSys.cpp` over `mock_platform.cpp`, 16 KiB pages (needs the SDK fork) |
 | virtual file layer | a held read (a share that stops answering), shares woken; the full VFS test needs libsmb2 |
 | boot log in memory | `ps5_logs.h` (memory_log_test) |
+| texture pack manager | `ps5_texture_pack_store.cpp`: packs found, measured, moved (stopped, failing, begun again: the source kept), deleted, the queue |
 | game fixes from GitHub | `ps5_fixes_fetch` (fetch, unchanged, tampered, unsafe paths, no network) |
 | HDR and debanding | the last passes before the screen (`tests/hdr`) |
+| downsampling and SMAA | `ps5_aa.h`'s decisions; `ps5_aa.glsl`'s passes on lavapipe against double precision, SMAA on staircases (`tests/aa`) |
 | settings lock | `check-settings-lock.py`: no setting read through Host while the settings' lock is held |
+| settings: nothing lost | `bigpicture/inventory/run-inventory-test.sh`: the console's settings rows made on the PC against the baseline and `settings-text.yaml` ([`settings-inventory.md`](settings-inventory.md)) |
 
 ## The interface: `ps5/tests/bigpicture/run-bigpicture-tests.sh`
 
 ```bash
-ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row changed every way, 2 x 60,000 random steps
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row of every section (all games' and a game's, at Everything) changed every way, the settings' home and search, 2 x 60,000 random steps
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp shots   # a PNG of each screen in /tmp/crux2-bp/shots
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp inventory   # the no-loss test of the settings (settings-inventory.md)
 ```
 
 The first argument is the work folder: give a path outside the repository (a bare `crawl` makes a

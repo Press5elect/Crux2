@@ -15,6 +15,7 @@
 #include "ps5_platform.h"
 #include "ps5_pgo.h"
 #include "ps5_keyboard.h"
+#include "ps5_osd_logic.h"
 #include "ps5_services.h"
 #include "ps5_fixes_fetch.h"
 #include "ps5_launch.h"
@@ -395,6 +396,17 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "ThreadedRecording", true);
 	b("PS5", "UpdateAtStart", true);
 	b("PS5", "FixesAtStart", true);
+	// The anti-aliasing row (one for FXAA, SMAA and SSAA): a settings file from before it says what was chosen in
+	// the keys the row now sets, so it reads them back once.
+	if (!si.ContainsValue("PS5", "AntiAliasing"))
+	{
+		const bool fxaa = si.GetBoolValue("EmuCore/GS", "fxaa", false);
+		const bool smaa = si.GetBoolValue("PS5", "SMAA", false);
+		const int down = si.GetIntValue("PS5", "Downsample", 0);
+		si.SetIntValue("PS5", "AntiAliasing", (down > 0) ? (smaa ? 4 : 3) : smaa ? 2 : fxaa ? 1 : 0);
+		if (down > 0 && !si.ContainsValue("PS5", "SSAAFilter"))
+			si.SetIntValue("PS5", "SSAAFilter", down);
+	}
 	// Care for the screen (the interface's own section).
 	i("PS5UI", "IdleDim", 3);
 	b("PS5UI", "ScreenSaver", true);
@@ -691,6 +703,18 @@ bool PS5Host::InitializeConfig()
 		if (!s_state.base_settings->Save(&error))
 			ps5px_log("settings: cannot save: %s", error.GetDescription().c_str());
 		ps5px_log("settings: hardcore mode switched off (Crux2 does not offer it)");
+	}
+	// The performance overlay's size (ps5_osd_logic.h), once: Compact for a new user (nothing is shown
+	// until the FPS counter is switched on); a settings file from before it gets the size its
+	// switches make (Custom when they make none), so the row says what is drawn.
+	if (!si.ContainsValue("PS5", "OsdSize"))
+	{
+		PS5OsdLogic::Switches now;
+		for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
+			now.*k.field = si.GetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, false);
+		si.SetIntValue("PS5", "OsdSize", PS5OsdLogic::InitialSize(now));
+		if (!s_state.base_settings->Save(&error))
+			ps5px_log("settings: cannot save: %s", error.GetDescription().c_str());
 	}
 	PS5Platform::MakePublic(s_state.base_settings->GetFileName().c_str(), false);
 
