@@ -26,6 +26,11 @@
 
 #include "bp.h"
 #include "bp_internal.h" // the screen that is on, for the checks
+#include "bp_settings_model.h" // the settings' state, for the checks of the review fixes
+namespace bp
+{
+bool toastShown(const std::string& line); // bp_draw.cpp: a hook for the checks
+}
 #include "ps5_mc.h"      // the memory cards the card manager is shown: true ones, held in memory
 #include "ps5_osd_draw.h" // the performance overlay, pictured with made-up figures
 
@@ -1994,6 +1999,19 @@ public:
 		listenKey = option.section + "/" + option.key;
 	}
 	float listening() override { return listenLeft; }
+	// What a test types on a keyboard: text and keys (1 Enter, 2 Backspace, 4 Escape), given once.
+	std::string typedText;
+	unsigned typedKeys = 0;
+	bool typed(std::string& text, unsigned& keys) override
+	{
+		if (typedText.empty() && typedKeys == 0)
+			return false;
+		text = std::move(typedText);
+		keys = typedKeys;
+		typedText.clear();
+		typedKeys = 0;
+		return true;
+	}
 	void cancelListen() override { listenLeft = 0; }
 	void clearBinding(int, const bp::Option& option) override { bindings.erase(option.section + "/" + option.key); }
 
@@ -4420,6 +4438,206 @@ void crawl(Harness& h, unsigned seed)
 {
 	PreviewBackend& b = h.backend;
 	h.wait(200);
+
+	// ---- the frontend review's fixes in the library (bp_library.cpp): a Wall view kept as a quick
+	// view comes back as one, the disc toast with the drives changed, the Disc tab's More rows, the
+	// place a disc is chosen from not kept.
+	{
+		using P = bp::Pad;
+		h.wait(300); // (the start-up plays first)
+		b.setBool(0, "PS5UI", "QuickViewsMade", true);
+		b.setString(0, "PS5UI", "QuickView1", "Walls|0|8|0|0|0|0|0|.|.");
+		b.setInt(0, "PS5UI", "View", 0);
+		// (The quick views are read the first time one is asked for: R3 in the library.)
+		for (int i = 0; i < 8 && bp::screen != bp::Screen::Library; i++)
+			h.press(P::Circle, 12);
+		bp::goToGame(b.list.front(), false);
+		h.wait(40);
+		h.press(P::R3, 30);
+		g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 8, "a quick view kept in the Wall view comes back in it");
+		h.press(P::R3, 30);
+		g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 0, "and after it the view from before");
+		// A view chosen by hand leaves the quick view: R3 starts again from the first.
+		h.press(P::R3, 30);
+		h.press(P::TouchPad, 30);
+		g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 9, "the touch pad goes on from the quick view's Wall");
+		h.press(P::R3, 30);
+		g_check.expect(b.getInt(0, "PS5UI", "View").value_or(-1) == 8, "R3 after a view chosen by hand starts again at the first quick view");
+		h.press(P::R3, 30);
+		b.setInt(0, "PS5UI", "View", 0);
+		h.wait(10);
+		// Two discs came, and one is gone before it is said: no crash, and what is said is true.
+		b.putDisc(3);
+		h.wait(30);
+		g_check.expect(bp::toastShown("2 discs are in the drives: Lantern Bay, Pocket Orbit"), "two discs in the drives are said as two");
+		b.putDisc(1);
+		h.wait(30);
+		// The Disc tab's page: Favourite, Hide and Rename are not offered (the Backend keeps none).
+		bp::GameInfo inDrive = b.drive.games.front();
+		inDrive.source = bp::DiscDrive;
+		bp::goToGame(inDrive, true);
+		h.wait(40);
+		g_check.expect(bp::librarySource() == bp::DiscDrive, "the disc in the drive is on the Disc tab");
+		const int fetched = b.picturesFetched, imaged = b.imagesAsked;
+		h.press(P::Square, 20);
+		for (int i = 0; i < 3; i++)
+			h.press(P::Down, 4);
+		h.press(P::Cross, 20);
+		g_check.expect(b.imagesAsked == imaged + 1 && b.picturesFetched == fetched, "More on a disc in the drive has four rows: start, collections, pictures, an image");
+		for (int i = 0; i < 4 && bp::dialogOpen(); i++)
+			h.press(P::Circle, 12);
+		for (int i = 0; i < 4 && bp::screen == bp::Screen::Library && bp::dialogOpen(); i++)
+			h.press(P::Circle, 12);
+		b.putDisc(0);
+		h.wait(30);
+	}
+
+	// ---- the frontend review's fixes (settings: ids of the ports' rows, the row above 12x, the
+	// search's "Changed from Default")
+	{
+		// Two ports' rows have their own ids, and a port's action its own words.
+		{
+			const auto row = [](bp::Page& page, const char* heading, const char* section) {
+				bp::Option head;
+				head.kind = bp::Option::Heading;
+				head.label = heading;
+				page.rows.push_back(head);
+				bp::Option type;
+				type.kind = bp::Option::StringList;
+				type.label = "Controller";
+				type.section = section;
+				type.key = "Type";
+				type.strings = {"None"};
+				type.names = {"None"};
+				page.rows.push_back(type);
+				bp::Option map;
+				map.kind = bp::Option::Action;
+				map.label = "Map it to a controller of the console";
+				map.desc = "Every button of this port goes on the console's controller 7 (the first one, if there are fewer)";
+				page.rows.push_back(map);
+				bp::Option up;
+				up.kind = bp::Option::Bind;
+				up.label = "Up";
+				up.section = section;
+				up.key = "Up";
+				page.rows.push_back(up);
+			};
+			bp::Page page{"", "Controllers", {}};
+			row(page, "CONTROLLER PORT 1", "Pad1");
+			row(page, "CONTROLLER PORT 2", "Pad2");
+			row(page, "CONTROLLER PORT 3", "Pad3");
+			bp::applySettingsText(page);
+			std::set<std::string> ids;
+			size_t focusable = 0;
+			for (const bp::Option& o : page.rows)
+			{
+				if (o.kind == bp::Option::Heading)
+					continue;
+				focusable++;
+				ids.insert(bp::settingsIdOf(o));
+			}
+			g_check.expect(ids.size() == focusable, "the rows of two ports have ids of their own");
+			g_check.expect(bp::settingsIdOf(page.rows[6]) != bp::settingsIdOf(page.rows[2]) && bp::settingsIdOf(page.rows[10]) != bp::settingsIdOf(page.rows[2]),
+				"a port's Map action has its own id");
+			g_check.expect(page.rows[6].desc.find("controller 7") != std::string::npos, "a later port's Map action keeps its own description");
+		}
+		// "Internal resolution above 12x" at 6x: Left stays, Right goes to 13x, and it is not changed.
+		{
+			b.setBool(bp::Shared, "EmuCore/GS", "ExtendedUpscalingMultipliers", true);
+			b.setFloat(bp::Shared, "EmuCore/GS", "upscale_multiplier", 6.f);
+			bp::Option above;
+			bool found = false;
+			for (const bp::Page& page : bp::settingsPages(false))
+			{
+				for (const bp::Option& o : page.rows)
+				{
+					if (o.label == "Internal resolution above 12x" || o.codeLabel == "Internal resolution above 12x")
+					{
+						above = o;
+						found = true;
+					}
+				}
+			}
+			g_check.expect(found, "the row above 12x is there");
+			if (found)
+			{
+				g_check.expect(!bp::settings::differsFromDefault(above), "the row above 12x is not changed at 6x");
+				bp::settings::change(above, -1, 0);
+				g_check.expect(std::fabs(b.getFloat(bp::Shared, "EmuCore/GS", "upscale_multiplier").value_or(0) - 6.f) < 0.01f, "Left on the row above 12x at 6x leaves 6x");
+				bp::settings::change(above, 1, 0);
+				g_check.expect(std::fabs(b.getFloat(bp::Shared, "EmuCore/GS", "upscale_multiplier").value_or(0) - 13.f) < 0.01f, "Right on the row above 12x at 6x goes to 13x");
+				g_check.expect(bp::settings::differsFromDefault(above), "the row above 12x is changed at 13x");
+			}
+			b.setFloat(bp::Shared, "EmuCore/GS", "upscale_multiplier", 4.f);
+			b.setBool(bp::Shared, "EmuCore/GS", "ExtendedUpscalingMultipliers", false);
+		}
+		// "Changed from Default": the row in focus stays when it reaches its default.
+		{
+			b.setBool(bp::Shared, "EmuCore/GS", "OsdShowCPU", true);
+			b.setBool(bp::Shared, "EmuCore/GS", "OsdShowGPU", true);
+			bp::openSettings(nullptr, bp::Screen::Library);
+			h.wait(40);
+			bp::settingsSearchFor("", 3);
+			h.wait(40);
+			bp::settings::State& st = bp::settings::state();
+			int index = -1, seen = 0;
+			for (const bp::settings::Item& it : st.all)
+			{
+				if (!it.changed || it.o.kind == bp::Option::Heading)
+					continue;
+				if (it.o.section == "EmuCore/GS" && it.o.key == "OsdShowCPU")
+					index = seen;
+				seen++;
+			}
+			g_check.expect(index >= 0 && st.view == bp::settings::View::Search, "the changed list has the changed row");
+			if (index >= 0)
+			{
+				st.result = index;
+				h.wait(2);
+				b.setBool(bp::Shared, "EmuCore/GS", "OsdShowCPU", false); // reached its default
+				h.wait(70);                                                  // (the list is looked at again)
+				h.press(P::Right, 3);                                        // the focused row is still the CPU row
+				g_check.expect(b.getBool(bp::Shared, "EmuCore/GS", "OsdShowCPU").value_or(false), "the focus stays on the row that reached its default");
+				g_check.expect(b.getBool(bp::Shared, "EmuCore/GS", "OsdShowGPU").value_or(false), "the following setting is not changed");
+			}
+			b.setBool(bp::Shared, "EmuCore/GS", "OsdShowCPU", false);
+			b.setBool(bp::Shared, "EmuCore/GS", "OsdShowGPU", false);
+			bp::settings::leave();
+			h.wait(10);
+		}
+	}
+
+	// Text: the keyboard's Delete and its full field take whole characters (a multibyte one is two
+	// bytes or more), fit() cuts the same way, and an expired toast does not count against the cap.
+	{
+		const auto typeAndEnter = [&](const std::string& typed, unsigned keys, int most) {
+			std::string got = "(not entered)";
+			bp::editText("Test", "", false, [&got](const std::string& value) { got = value; }, most);
+			h.wait(30);
+			b.typedText = typed;
+			b.typedKeys = keys | 1u;
+			h.wait(3);
+			h.wait(30);
+			return got;
+		};
+		g_check.expect(typeAndEnter("\xc3\xa9" "2", 2u, 64) == "\xc3\xa9", "Delete after a multibyte character and an ASCII one leaves the multibyte one");
+		g_check.expect(typeAndEnter("a\xc3\xa9", 2u, 64) == "a", "Delete takes a multibyte character whole");
+		g_check.expect(typeAndEnter("\xc3\xa9\xc3\xa9", 0u, 1) == "\xc3\xa9", "A full field refuses a multibyte character whole");
+
+		ImFont* const font = bp::regular();
+		const std::string cut = "Caf\xc3\xa9";
+		const float room = bp::textSize(font, 26, (cut + "...").c_str()).x + 0.5f;
+		g_check.expect(bp::fit(font, 26, cut + "2zzzz", room) == cut + "...", "fit() cuts an ASCII character after an accented one alone");
+		g_check.expect(bp::fit(font, 26, cut + "2zzzz\n", room) == cut + "...", "fit() of a text with a line break cuts the same way");
+
+		bp::toast("kept toast", 60.f);
+		bp::toast("gone one", 0.2f);
+		bp::toast("gone two", 0.2f);
+		bp::toast("gone three", 0.2f);
+		h.wait(90);
+		bp::toast("fresh toast", 3.f);
+		g_check.expect(bp::toastShown("kept toast") && bp::toastShown("fresh toast"), "expired toasts do not push a live one out at the cap");
+	}
 
 	// (A walk's step may have left the settings: a game started by a row is put away, and the
 	// settings are opened again, of all games or of the game.)

@@ -151,6 +151,8 @@ std::vector<std::string> s_told_toasts;
 std::vector<std::pair<std::string, std::string>> s_told_messages;
 // Bumped by whoever knows the game list is another one now.
 std::atomic_uint s_games_generation{1};
+// A scan ended (PS5UI::SetScanning): the covers it brought in are looked for again.
+std::atomic_bool s_scan_ended{false};
 // The settings of every game were written to: they are to be saved, and (apply) the emulator
 // is to take them. Set by the graphics thread and by the emulation thread (a button was bound);
 // whoever sets both sets apply first.
@@ -939,6 +941,8 @@ public:
 
 	bp::Texture cover(const bp::GameInfo& game) override
 	{
+		if (s_scan_ended.exchange(false, std::memory_order_acq_rel))
+			m_cover_paths.clear();
 		auto it = m_cover_paths.find(game.path);
 		if (it == m_cover_paths.end() && game.source == 3)
 		{
@@ -1651,7 +1655,37 @@ public:
 			return;
 		}
 		else
+		{
 			m_game_si->DeleteValue(section, key);
+			// The SingStar and light gun choices wrote USB keys in this layer (Changed): the game
+			// follows every game's choice again, so those go too (Changed would write "None").
+			const std::string_view where = section, what = key;
+			if (where == "PS5" && (what == "SingStar" || what == "LightGun"))
+			{
+				const bool gun = what == "LightGun";
+				const std::string_view prefix = gun ? "guncon2_" : "singstar_";
+				{
+					const auto lock = Host::GetSettingsLock();
+					for (u32 port = gun ? 0u : 1u; port < 2u; port++)
+					{
+						const std::string usb = USB::GetConfigSection(static_cast<int>(port));
+						// (The light gun's Type is one of its own only while it is a GunCon 2.)
+						if (!gun || m_game_si->GetStringValue(usb.c_str(), "Type", "None") == "guncon2")
+						{
+							if (gun || m_game_si->GetStringValue(usb.c_str(), "Type", "None") != "guncon2")
+								m_game_si->DeleteValue(usb.c_str(), "Type");
+							for (const auto& [name, value] : m_game_si->GetKeyValueList(usb.c_str()))
+							{
+								if (std::string_view(name).substr(0, prefix.size()) == prefix)
+									m_game_si->DeleteValue(usb.c_str(), name.c_str());
+							}
+						}
+					}
+				}
+				m_own_changed = true;
+				return;
+			}
+		}
 		Changed(layer, section, key);
 	}
 
@@ -2103,9 +2137,19 @@ public:
 			bp::Option manager = Action("Open the card manager",
 				"Manage memory cards and saves: copy, delete, import and export saves, and create, format or rename cards.",
 				[this] { bp::openCardManager(this); }, bp::Option::AllGames);
+			// (Counting lists the folder and opens every card: at most every two seconds, not each
+			// frame the row is drawn. A card made or removed in the manager shows soon after.)
 			manager.info = [] {
-				const size_t n = FileMcd_GetAvailableCards(true).size();
-				return n == 1 ? std::string("1 card") : fmt::format("{} cards", n);
+				static std::string text;
+				static std::chrono::steady_clock::time_point counted;
+				const auto now = std::chrono::steady_clock::now();
+				if (text.empty() || now - counted >= std::chrono::seconds(2))
+				{
+					const size_t cards = FileMcd_GetAvailableCards(true).size();
+					text = cards == 1 ? std::string("1 card") : fmt::format("{} cards", cards);
+					counted = now;
+				}
+				return text;
 			};
 			page.rows.push_back(std::move(manager));
 		}
@@ -6509,6 +6553,12 @@ private:
 				{
 					base->SetIntValue("EmuCore/GS", "OsdPerformancePos", 3);
 					m_pages++;
+					// (From a game's own options this wrote the shared layer: saved and applied too.)
+					if (layer == bp::Own)
+					{
+						s_shared_apply.store(true, std::memory_order_release);
+						s_shared_changed.store(true, std::memory_order_release);
+					}
 				}
 			}
 		}
@@ -6793,7 +6843,7 @@ private:
 				});
 				return;
 			}
-			const std::string device = devices[std::min<size_t>(port, devices.size() - 1)].first;
+			const std::string device = devices[port < devices.size() ? port : 0].first;
 			bool mapped = false;
 			{
 				const auto lock = Host::GetSettingsLock();
@@ -7068,7 +7118,10 @@ void PS5UI::SetScanning(bool scanning)
 	s_scanning.store(scanning, std::memory_order_release);
 	// A scan that ended has found what it found.
 	if (!scanning)
+	{
+		s_scan_ended.store(true, std::memory_order_release);
 		s_games_generation.fetch_add(1, std::memory_order_acq_rel);
+	}
 }
 
 void PS5UI::ControllerChanged(int difference)

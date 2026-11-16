@@ -289,15 +289,48 @@ int main(int argc, char** argv)
 		const fs::path dest = share / "Crux2" / "textures" / "SLUS-80006" / "replacements";
 		Expect(!stopped.ok && Tree(src) == before, "a move to a share stopped leaves the source as it was");
 		Expect(fs::exists(dest) && !fs::exists(dest.string() + MOVING), "on a share the copy is made in its place");
+		Expect(fs::is_directory(dest.string() + COPYING), "marked as not whole");
+		{
+			std::vector<Pack> packs = Find(files, places);
+			const Pack* half = FindPack(packs, "SLUS-80006", 2, Pack::Moving);
+			Expect(half && !half->read && !FindPack(packs, "SLUS-80006", 2), "the half copy on the share is found as unfinished, not as a pack");
+		}
 		files.stopAfter = -1;
 		files.copies = 0;
 		const Outcome again = Move(files, pack, places[2].target, nullptr, nullptr);
 		Expect(again.ok && files.copies == 20 - 7, "and goes on from where it stopped: " + again.error);
 		Expect(Tree(dest) == before && !fs::exists(src), "the pack is whole on the share, gone from the console");
+		Expect(!fs::exists(dest.string() + COPYING), "and its mark is gone");
 		// And back from the share (it cannot be renamed away there: deleted in place).
 		Pack back = *FindPack(Find(files, places), "SLUS-80006", 2);
 		const Outcome home = Move(files, back, places[0].target, nullptr, nullptr);
 		Expect(home.ok && Tree(src) == before && !fs::exists(share / "Crux2" / "textures" / "SLUS-80006"), "and moved back from the share");
+	}
+
+	// ---- a move onto a share that has a pack of the serial is refused (not merged); an unfinished
+	// copy there is deleted with its mark
+	MakePack(console / "SLUS-80008" / "replacements", 6, 'i');
+	MakePack(share / "Crux2" / "textures" / "SLUS-80008" / "replacements", 3, 'j');
+	{
+		TestFiles files;
+		files.noRename = share.string();
+		const fs::path src = console / "SLUS-80008" / "replacements";
+		const fs::path there = share / "Crux2" / "textures" / "SLUS-80008" / "replacements";
+		const auto before = Tree(src);
+		const auto thereBefore = Tree(there);
+		Pack pack = *FindPack(Find(files, places), "SLUS-80008", 0);
+		const Outcome o = Move(files, pack, places[2].target, nullptr, nullptr);
+		Expect(!o.ok && o.error.find("there already") != std::string::npos, "a move onto a share's pack is refused");
+		Expect(Tree(src) == before && Tree(there) == thereBefore && !fs::exists(there.string() + COPYING), "and changes nothing");
+		fs::remove_all(there);
+		files.stopAfter = 2;
+		Expect(!Move(files, pack, places[2].target, files.Stopper(), nullptr).ok, "a move to the share stopped");
+		const std::vector<Pack> found = Find(files, places);
+		const Pack* half = FindPack(found, "SLUS-80008", 2, Pack::Moving);
+		Expect(half && Delete(files, *half, nullptr, nullptr).ok && !fs::exists(share / "Crux2" / "textures" / "SLUS-80008"),
+			"its unfinished copy is deleted, mark and all");
+		Expect(Tree(src) == before, "the source as it was");
+		fs::remove_all(console / "SLUS-80008");
 	}
 
 	// ---- a ZIP moved, and deleted

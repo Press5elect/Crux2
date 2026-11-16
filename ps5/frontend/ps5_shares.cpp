@@ -14,9 +14,11 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 
@@ -235,9 +237,13 @@ bool writeShares(const std::string &file, const ShareFile &in, std::string *erro
 	}
 	const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
 	const bool closed = std::fclose(f) == 0;
-	if (!ok || !closed || std::rename(tmp.c_str(), file.c_str()) != 0) {
+	/* never renamed onto the old file (on exFAT a rename onto a file can report success and keep
+	   the old one): the old one goes first, and the new one is looked at in its place */
+	struct stat st{};
+	const bool placed = ok && closed && (std::remove(file.c_str()) == 0 || errno == ENOENT) && std::rename(tmp.c_str(), file.c_str()) == 0;
+	if (!placed || stat(tmp.c_str(), &st) == 0 || stat(file.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != text.size()) {
 		if (error) {
-			*error = std::strerror(errno);
+			*error = placed ? std::string("the file was not put in its place") : std::string(std::strerror(errno));
 		}
 		std::remove(tmp.c_str());
 		return false;
@@ -401,8 +407,14 @@ std::vector<uint32_t> answering(uint32_t net, uint32_t me, int port)
 		for (const auto &s : socks) {
 			pfd.push_back({ s.first, POLLOUT, 0 });
 		}
-		for (int waited = 0; waited < 400 && !pfd.empty(); waited += 50) {
-			if (poll(pfd.data(), pfd.size(), 50) <= 0) {
+		/* 400 ms by the clock (a poll that wakes for an answer is not 50 ms gone) */
+		const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+		while (!pfd.empty()) {
+			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(until - std::chrono::steady_clock::now()).count();
+			if (left <= 0) {
+				break;
+			}
+			if (poll(pfd.data(), pfd.size(), static_cast<int>(std::min<long long>(left, 50))) <= 0) {
 				continue;
 			}
 			for (size_t i = 0; i < pfd.size(); i++) {
@@ -489,9 +501,14 @@ std::vector<FoundServer> findServers()
 			a.sin_addr.s_addr = htonl(ip);
 			sendto(udp, q, sizeof(q), 0, reinterpret_cast<sockaddr *>(&a), sizeof(a));
 		}
-		for (int waited = 0; waited < 500; waited += 50) {
+		const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+		for (;;) {
+			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(until - std::chrono::steady_clock::now()).count();
+			if (left <= 0) {
+				break;
+			}
 			pollfd p{ udp, POLLIN, 0 };
-			if (poll(&p, 1, 50) <= 0) {
+			if (poll(&p, 1, static_cast<int>(std::min<long long>(left, 50))) <= 0) {
 				continue;
 			}
 			uint8_t b[1500];

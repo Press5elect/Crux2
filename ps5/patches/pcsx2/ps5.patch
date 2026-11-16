@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 0ab00c49b157be667a8a2f0bf4cda83f75a9198e.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 79929f01750fdc8185810968c934bd3923d099a7.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -733,7 +733,7 @@ index 24eddeb..d8b5728 100644
  
  	return S_ISLNK(sysStatData.st_mode);
 diff --git a/common/HTTPDownloaderCurl.cpp b/common/HTTPDownloaderCurl.cpp
-index 078d5d3..fa7f999 100644
+index 078d5d3..f9b1b9b 100644
 --- a/common/HTTPDownloaderCurl.cpp
 +++ b/common/HTTPDownloaderCurl.cpp
 @@ -14,6 +14,10 @@
@@ -747,7 +747,16 @@ index 078d5d3..fa7f999 100644
  HTTPDownloaderCurl::HTTPDownloaderCurl()
  	: HTTPDownloader()
  {
-@@ -172,6 +176,11 @@ bool HTTPDownloaderCurl::StartRequest(HTTPDownloader::Request* request)
+@@ -153,6 +157,8 @@ void HTTPDownloaderCurl::InternalPollRequests()
+ 		else
+ 		{
+ 			Console.Error(fmt::format("Request for '{}' returned error {}", req->url, static_cast<int>(msg->data.result)));
++			// Crux2: no answer is an error, not a status of 0 (read as "the server said no").
++			req->status_code = HTTP_STATUS_ERROR;
+ 		}
+ 
+ 		req->state.store(Request::State::Complete, std::memory_order_release);
+@@ -172,6 +178,11 @@ bool HTTPDownloaderCurl::StartRequest(HTTPDownloader::Request* request)
  	curl_easy_setopt(req->handle, CURLOPT_NOSIGNAL, 1L);
  	curl_easy_setopt(req->handle, CURLOPT_PRIVATE, req);
  	curl_easy_setopt(req->handle, CURLOPT_FOLLOWLOCATION, 1L);

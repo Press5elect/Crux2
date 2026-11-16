@@ -15,6 +15,7 @@
 
 #include "Config.h"
 #include "GS/GS.h"
+#include "Host.h"
 #include "MTGS.h"
 #include "VMManager.h"
 
@@ -98,15 +99,9 @@ void Write(std::string serial, uint32_t width, uint32_t height, std::vector<uint
 		PS5UI::Toast("The screenshot could not be saved.");
 	s_busy.store(false, std::memory_order_release);
 }
-} // namespace
 
-void Take()
+void TakeOnCPUThread(std::string serial)
 {
-	if (!VMManager::HasValidVM())
-		return;
-	if (s_busy.exchange(true, std::memory_order_acq_rel))
-		return; // (the one before is still being written)
-	std::string serial = VMManager::GetDiscSerial();
 	MTGS::RunOnGSThread([serial = std::move(serial)]() mutable {
 		uint32_t width = 0, height = 0;
 		std::vector<uint32_t> pixels;
@@ -120,6 +115,23 @@ void Take()
 			return;
 		}
 		std::thread(Write, std::move(serial), width, height, std::move(pixels)).detach();
+	});
+}
+} // namespace
+
+void Take()
+{
+	if (s_busy.exchange(true, std::memory_order_acq_rel))
+		return; // (the one before is still being written)
+	// From any thread (the quick menu calls it from the graphics thread): the graphics thread's queue
+	// has one writer, the emulation thread, so the request goes by it.
+	Host::RunOnCPUThread([]() {
+		if (!VMManager::HasValidVM() || !MTGS::IsOpen())
+		{
+			s_busy.store(false, std::memory_order_release);
+			return;
+		}
+		TakeOnCPUThread(VMManager::GetDiscSerial());
 	});
 }
 } // namespace PS5Shots

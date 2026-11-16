@@ -454,8 +454,11 @@ void addSoftFloatRows(std::vector<Option>& rows, unsigned flags)
 	const bool oneGame = (flags & Option::OneGame) != 0;
 	// On a game's own page, the FPU and VU0 switches show Crux2's default for the games known to
 	// need them (on) when the game's settings name none.
-	const auto crux2Default = [] () -> std::optional<bool> {
-		if (be->softFloatGame(settingsGame().serial))
+	// (The game the rows are made for, taken now: the quick menu's pins are made for the running game, and
+	// asked later, when the settings' own game may be another.)
+	const std::string serial = settingsGame().serial;
+	const auto crux2Default = [serial]() -> std::optional<bool> {
+		if (be->softFloatGame(serial))
 			return true;
 		return std::nullopt;
 	};
@@ -514,7 +517,7 @@ Page emulationPage(int layer, bool forGame)
 		o.section = "PS5";
 		o.key = "ThreadLayout";
 		o.names = {"Anywhere", "Pinned (PCSX2)", "Cores of their own (Crux2)"};
-		o.parts = {{CORE, "EnableThreadPinning", false}, {"PS5", "ThreadLayout", false}};
+		o.parts = {{CORE, "EnableThreadPinning", false}, {"PS5", "ThreadLayout", true}}; // (as the first start writes it, ps5_host.cpp)
 		o.combos = {{0, 0}, {1, 0}, {0, 1}};
 		o.flags = Option::AllGames | Option::NextStart;
 		o.flags |= Option::Advanced;
@@ -950,9 +953,9 @@ Page graphicsPage(int layer, bool forGame)
 		Option o = action("HD texture packs",
 			"Opens the texture pack manager: the packs on this console, the USB drives and the shares, by game. Download packs from "
 			"the Internet Archive, one after another, and move or delete them. Packs can be several GB.",
-			[] {
+			[serial = settingsGame().serial] {
 				if (TexturePackShelf* shelf = be->texturePackShelf())
-					openTexturePacks(shelf, settingsGame().serial);
+					openTexturePacks(shelf, serial);
 				else
 					be->findTexturePacks();
 			});
@@ -1143,7 +1146,7 @@ Page osdPage()
 	rows.push_back(adv(toggle("Patches", "Shows the amount of currently active patches/cheats in the bottom-right corner of the display.", GS, "OsdshowPatches", false, A)));
 	rows.push_back(adv(toggle("Inputs", "Shows the current controller state of the system in the bottom-left corner of the display.", GS, "OsdShowInputs", false, A)));
 	rows.push_back(adv(toggle("Texture replacements", "Shows the status of the number of dumped and loaded texture replacements in the top-right corner of the "
-		"display.", GS, "OsdShowTextureReplacements", true, A)));
+		"display.", GS, "OsdShowTextureReplacements", false, A)));
 	rows.push_back(toggle("Crux2 version", "Shows the current Crux2 version.", GS,
 		"OsdShowVersion", false, A));
 	return page;

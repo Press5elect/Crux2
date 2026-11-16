@@ -66,7 +66,7 @@ Where each pin lives, and its value on this branch (the v1.0.18 tree plus b075fe
 
 | Source | Pinned in | Pin |
 | --- | --- | --- |
-| PCSX2 | `ps5/tools/fetch-pcsx2.sh` (`revision=`) | `0ab00c49b157` (master of 2026-11-14, after v2.9.179; was v2.9.150) |
+| PCSX2 | `ps5/tools/fetch-pcsx2.sh` (`revision=`) | `79929f01750f` (master of 2026-11-16, after v2.9.179; `0ab00c49b157` before, two commits behind it) |
 | Payload SDK fork | `ps5/tools/setup-sdk.sh` (`sdk_revision=`) | `3345cde` (over upstream's v0.45 release; was `b5efad5`, over v0.42) |
 | PS5_Vulkan | `ps5/tools/bootstrap.sh` (`vulkan_revision=`); the checkout beside this repository is checked against it | `7f492b4` (v1.0.18 was built with `f410e67`) |
 | PS5 Mesa | PS5_Vulkan's `tools/build-radv.sh` (`mesa_revision=`) | `1ba9874` (at PS5_Vulkan `f410e67` and `ace98a9`) |

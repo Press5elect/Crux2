@@ -188,13 +188,35 @@ bool ReadFile(const std::string& path, std::string* data)
 	return true;
 }
 
-// The file holds exactly these bytes afterwards, or the one that was there is as it was.
+// The file holds exactly these bytes afterwards, or the one that was there is as it was. The new
+// one is written beside it and flushed, the old one renamed aside (on an exFAT drive a rename onto
+// a file can report success and keep the old one: never renamed onto), the new one put in its place
+// and checked, and only then the old one deleted. A stop between the two renames leaves the old
+// one as "<name>.old", put back by the next write of it.
 bool WriteFile(const std::string& path, const std::string& data)
 {
 	if (IsVirtual(path))
 		return ps5vfs_store(path.c_str(), data.data(), data.size()) == 0;
 
 	const std::string part = path + ".part";
+	const std::string old = path + ".old";
+	const auto fail = [&part](int error) {
+		unlink(part.c_str());
+		errno = error;
+		return false;
+	};
+	const auto size_of = [](const std::string& file, off_t* size) {
+		struct stat st;
+		if (stat(file.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+			return false;
+		*size = st.st_size;
+		return true;
+	};
+	off_t size = 0;
+	// What a write stopped between its renames left: the old file back first.
+	if (!size_of(path, &size) && size_of(old, &size))
+		rename(old.c_str(), path.c_str());
+
 	const int fd = open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (fd < 0)
 		return false;
@@ -208,20 +230,62 @@ bool WriteFile(const std::string& path, const std::string& data)
 		{
 			const int error = (result < 0) ? errno : EIO;
 			close(fd);
-			unlink(part.c_str());
-			errno = error;
-			return false;
+			return fail(error);
 		}
 		written += static_cast<size_t>(result);
 	}
-	// (The old file goes first: on an exFAT drive a rename onto a file can report success and
-	// keep the old one.)
-	if (close(fd) != 0 || (unlink(path.c_str()) != 0 && errno != ENOENT) || rename(part.c_str(), path.c_str()) != 0)
+	if (fsync(fd) != 0)
 	{
 		const int error = errno;
-		unlink(part.c_str());
-		errno = error;
-		return false;
+		close(fd);
+		return fail(error);
+	}
+	if (close(fd) != 0)
+		return fail(errno);
+	if (!size_of(part, &size) || static_cast<uint64_t>(size) != data.size())
+		return fail(EIO);
+
+	// The old one aside (not onto anything: a stale one from before goes first).
+	const bool had_old = size_of(path, &size);
+	if (had_old)
+	{
+		if (unlink(old.c_str()) != 0 && errno != ENOENT)
+			return fail(errno);
+		if (rename(path.c_str(), old.c_str()) != 0)
+			return fail(errno);
+		off_t moved = 0;
+		if (size_of(path, &moved) || !size_of(old, &moved) || moved != size)
+		{
+			if (!size_of(path, &moved))
+				rename(old.c_str(), path.c_str());
+			return fail(EIO);
+		}
+	}
+	// The new one in its place, checked there.
+	off_t placed = 0;
+	const bool renamed = rename(part.c_str(), path.c_str()) == 0;
+	const int error = renamed ? EIO : errno;
+	if (!renamed || size_of(part, &placed) || !size_of(path, &placed) || static_cast<uint64_t>(placed) != data.size())
+	{
+		// (The old one back: what came out wrong goes first.)
+		if (had_old)
+		{
+			if (renamed)
+				unlink(path.c_str());
+			rename(old.c_str(), path.c_str());
+		}
+		return fail(error);
+	}
+	if (had_old)
+		unlink(old.c_str());
+	// The folder's entries on the storage too.
+	const size_t slash = path.rfind('/');
+	const std::string folder = (slash == std::string::npos) ? std::string(".") : (slash == 0) ? std::string("/") : path.substr(0, slash);
+	const int dir = open(folder.c_str(), O_RDONLY | O_DIRECTORY);
+	if (dir >= 0)
+	{
+		fsync(dir);
+		close(dir);
 	}
 	return true;
 }
@@ -564,7 +628,10 @@ Result Backup(const Folders& folders, const std::string& place, bool states, boo
 	std::string made = base;
 	for (int i = 0; i < total; i++)
 	{
-		if (watch.stop && watch.stop())
+		// The memory cards are one set: a stop (a game started) is honoured before the first of them
+		// and once they are all written, never between two of them (they take a moment); the saved
+		// states after them are each whole by itself.
+		if ((i == 0 || i >= card_files) && watch.stop && watch.stop())
 		{
 			RemoveTree(base);
 			result.message = "The backup was stopped: a game was started. Nothing of it was kept.";
@@ -745,7 +812,10 @@ Result Restore(const Folders& folders, const Snapshot& snapshot, const Watch& wa
 	std::string data;
 	for (int i = 0; i < total; i++)
 	{
-		if (watch.stop && watch.stop())
+		// The memory cards are one set: a stop (a game started) is honoured before the first of them
+		// and once they are all written, never between two of them (they take a moment); the saved
+		// states after them are each whole by itself.
+		if ((i == 0 || i >= card_files) && watch.stop && watch.stop())
 		{
 			result.message = "The restore was stopped after " + Count(result.files, "file", "files") + ": a game was started.";
 			return result;

@@ -1123,6 +1123,31 @@ namespace PS5Covers
 		return size > 64 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
 	}
 
+	/// Whether a file of the covers folder is a cover picture by its name (png, jpg, jpeg, webp, any
+	/// case): what "Share the covers" copies, never the downloads' notes (no-cover.txt,
+	/// download-running.txt) or a file half written.
+	inline bool IsCoverFileName(std::string_view name)
+	{
+		const size_t dot = name.rfind('.');
+		if (dot == std::string_view::npos || dot == 0)
+			return false;
+		const std::string_view extension = name.substr(dot + 1);
+		for (const char* const picture : {"png", "jpg", "jpeg", "webp"})
+		{
+			if (detail::EqualNoCase(extension, picture))
+				return true;
+		}
+		return false;
+	}
+
+	/// Whether a server's answer says the picture is not there (and is to be remembered as such):
+	/// only "not found". No answer, a refusal, too many asked, the server's own trouble are tried
+	/// again another time.
+	inline bool IsNotThere(int status)
+	{
+		return status == 404;
+	}
+
 	/// The line of no-cover.txt for a game the second collection (covers by serial) has no cover
 	/// for either: apart from NoMatchLine's, which has a tab.
 	inline std::string NoSerialCoverLine(std::string_view serial)

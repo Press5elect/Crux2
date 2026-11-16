@@ -8,6 +8,16 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Changed: built on PCSX2 master of 2026-11-16 (`79929f0`: two commits after v1.0.21's, a newer
+  controller database). Save states are not affected.
+- Fixed: about fifty bugs found by a review of the interface's code. Among them: the quick
+  menu's Screenshot and a texture pack download ending during a game could stop the picture;
+  without a connection every game was noted as having no cover and never asked for again; a
+  texture pack moved onto a share that had one for the game was mixed with it; a memory card
+  could be lost to a power cut while it was written; Delete on the keyboard took two characters
+  after an accented letter; controller ports 2 and up shared port 1's rows; "Internal resolution
+  above 12x" jumped to 25x; quick views kept in four of the views came back as Table. Not yet run
+  on a console.
 - Added: the recomp kit makes Crux2's native modules on Windows too (drop a game on
   "Crux2 Native.cmd"; they were made on Linux only). Checked on Linux with the same compiler
   switches; not yet run on Windows or a console.

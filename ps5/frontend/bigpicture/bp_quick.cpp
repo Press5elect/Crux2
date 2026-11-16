@@ -1152,6 +1152,9 @@ void quickScreen()
 				}
 				if (in.accept)
 				{
+					// (An action may open the settings, which open the game's own themselves.)
+					if (row.item.o.kind == Option::Action)
+						closeOwn();
 					settings::pinnedActivate(row);
 					pinChanged = true;
 				}
@@ -1203,6 +1206,8 @@ void quickScreen()
 		}
 	}
 	// A pinned setting the game takes at its start, changed here: Apply changes now comes, or goes.
+	if (pinChanged)
+		qm.patchesFor.clear(); // (a pinned patch or cheat may have been switched: counted again)
 	if (pinChanged && qm.snapFor == runId(running))
 		qm.applyPending = running.canSaveState && fingerprint() != qm.snapshot;
 	if (screen != Screen::Quick)

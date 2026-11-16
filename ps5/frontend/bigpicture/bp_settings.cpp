@@ -839,9 +839,15 @@ bool differsFromDefault(const Option& o)
 			return boolNow(o) != o.defBool;
 		case Option::IntList:
 		case Option::IntRange:
+			// (A list whose default is none of its choices, another row's: changed only by one of its own.)
+			if (o.kind == Option::IntList && std::find(o.ints.begin(), o.ints.end(), o.defInt) == o.ints.end())
+				return intNow(o) != o.defInt && choiceNow(o) >= 0;
 			return intNow(o) != o.defInt;
 		case Option::FloatList:
 		case Option::FloatRange:
+			if (o.kind == Option::FloatList &&
+				std::none_of(o.floats.begin(), o.floats.end(), [&o](float f) { return std::fabs(f - o.defFloat) < 0.0005f; }))
+				return std::fabs(floatNow(o) - o.defFloat) > 0.0005f && choiceNow(o) >= 0;
 			return std::fabs(floatNow(o) - o.defFloat) > 0.0005f;
 		case Option::StringList:
 			return stringNow(o) != o.defString;
@@ -876,7 +882,34 @@ void change(Option& o, int dir, int repeats)
 			if (n == 0)
 				return;
 			const int now = choiceNow(o);
-			const int next = (now < 0) ? (dir > 0 ? 0 : n - 1) : std::clamp(now + dir, 0, n - 1);
+			int next = (now < 0) ? (dir > 0 ? 0 : n - 1) : std::clamp(now + dir, 0, n - 1);
+			if (now < 0 && (o.kind == Option::IntList || o.kind == Option::FloatList))
+			{
+				// A value that is none of the choices (a number set elsewhere): to the choice next to it in
+				// the direction pressed, when the choices rise; none beyond the last.
+				const double v = (o.kind == Option::IntList) ? intNow(o) : floatNow(o);
+				const size_t count = (o.kind == Option::IntList) ? o.ints.size() : o.floats.size();
+				const auto at = [&o](size_t i) { return (o.kind == Option::IntList) ? static_cast<double>(o.ints[i]) : static_cast<double>(o.floats[i]); };
+				bool rising = true;
+				for (size_t i = 1; i < count; i++)
+					rising = rising && at(i) > at(i - 1);
+				if (rising && count == static_cast<size_t>(n))
+				{
+					next = -1;
+					for (size_t i = 0; i < count; i++)
+					{
+						if (dir > 0 && at(i) > v)
+						{
+							next = static_cast<int>(i);
+							break;
+						}
+						if (dir < 0 && at(i) < v)
+							next = static_cast<int>(i);
+					}
+					if (next < 0)
+						return;
+				}
+			}
 			if (next == now)
 				return;
 			setChoice(o, next);
@@ -959,7 +992,8 @@ void activate(Option& o)
 
 void reset(Option& o)
 {
-	if (!usable(o))
+	// (A game's own value goes whatever `enabled` says: the row may be unusable only because of another.)
+	if (o.kind == Option::Bind && !usable(o))
 		return;
 	if (o.kind == Option::Bind)
 	{
@@ -1137,7 +1171,7 @@ void refreshChanged()
 		if (!isSetting(o) || o.kind == Option::Bind)
 			return st.forGame && o.kind == Option::Bind && hasOwn(o);
 		if (st.forGame)
-			return !(o.flags & Option::OneGame) && hasOwn(o);
+			return (o.flags & Option::OneGame) ? (o.kind == Option::Bool && be->getBool(Own, sec(o), key(o)).value_or(false)) : hasOwn(o);
 		return differsFromDefault(o);
 	};
 	for (Item& it : st.all)
@@ -1202,7 +1236,10 @@ void goTo(int area, int section, const std::string& id)
 	for (size_t r = 0; r < s.rows.size(); r++)
 	{
 		if (focusable(s.rows[r].o) && settingsIdOf(s.rows[r].o) == id)
-			st.row = static_cast<int>(r);
+		{
+			st.row = static_cast<int>(r); // (the first, as findItem and placeOf find)
+			break;
+		}
 	}
 }
 
@@ -1301,7 +1338,12 @@ std::vector<PinnedRow> pinnedRows(const GameInfo* game)
 	const GameInfo gameWas = st.game;
 	const std::string titleWas = st.gameTitle;
 	std::vector<Item> own, shared;
-	if (game != nullptr)
+	if (game == nullptr)
+	{
+		st.game = GameInfo();
+		st.gameTitle.clear();
+	}
+	else
 	{
 		st.forGame = st.gameOpen = true;
 		st.game = *game;

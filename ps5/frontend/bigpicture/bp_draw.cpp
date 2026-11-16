@@ -155,11 +155,15 @@ static std::string fitByMeasuring(ImFont* font, float size, const std::string& s
 	while (!out.empty() && textSize(font, size, (out + "...").c_str()).x > width)
 	{
 		// (Not half of a character of several bytes.)
-		do
-			out.pop_back();
-		while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xc0) == 0x80);
-		if (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xc0) == 0xc0)
-			out.pop_back();
+		const bool inside = (static_cast<unsigned char>(out.back()) & 0xc0) == 0x80;
+		out.pop_back();
+		if (inside)
+		{
+			while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xc0) == 0x80)
+				out.pop_back();
+			if (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xc0) == 0xc0)
+				out.pop_back();
+		}
 	}
 	while (!out.empty() && out.back() == ' ')
 		out.pop_back();
@@ -211,11 +215,15 @@ std::string fit(ImFont* font, float size, const std::string& s, float width)
 	while (length > 0 && tooWide())
 	{
 		// (Not half of a character of several bytes.)
-		do
-			length--;
-		while (length > 0 && (byte(length - 1) & 0xc0) == 0x80);
-		if (length > 0 && (byte(length - 1) & 0xc0) == 0xc0)
-			length--;
+		const bool inside = (byte(length - 1) & 0xc0) == 0x80;
+		length--;
+		if (inside)
+		{
+			while (length > 0 && (byte(length - 1) & 0xc0) == 0x80)
+				length--;
+			if (length > 0 && (byte(length - 1) & 0xc0) == 0xc0)
+				length--;
+		}
 	}
 	while (length > 0 && s[length - 1] == ' ')
 		length--;
@@ -1865,10 +1873,14 @@ void dropLast(std::string& text)
 {
 	if (text.empty())
 		return;
+	const bool inside = (static_cast<unsigned char>(text.back()) & 0xc0) == 0x80;
 	text.pop_back();
+	// (Only when what went was a later byte of a character: the first byte of that character goes
+	// too. An ASCII character after a multibyte one takes nothing more.)
+	if (!inside)
+		return;
 	while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xc0) == 0x80)
 		text.pop_back();
-	// (The first byte of the character that the bytes just taken belonged to.)
 	if (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xc0) == 0xc0)
 		text.pop_back();
 }
@@ -2011,6 +2023,12 @@ void showCode(const std::string& title, const std::string& body, std::vector<uin
 	holdInput();
 }
 
+static void dropExpiredToasts()
+{
+	s_toasts.erase(std::remove_if(s_toasts.begin(), s_toasts.end(), [](const Toast& t) { return timeNow > t.until + 0.3; }),
+		s_toasts.end());
+}
+
 void toast(const std::string& line, float seconds)
 {
 	if (line.empty())
@@ -2026,9 +2044,22 @@ void toast(const std::string& line, float seconds)
 			return;
 		}
 	}
+	// (Those gone from the screen first: they do not count against the cap.)
+	dropExpiredToasts();
 	if (s_toasts.size() >= 4)
 		s_toasts.pop_front();
 	s_toasts.push_back({line, timeNow + seconds, 0.f});
+}
+
+// (For the preview's checks: whether a toast with this line is held.)
+bool toastShown(const std::string& line)
+{
+	for (const Toast& t : s_toasts)
+	{
+		if (t.text == line)
+			return true;
+	}
+	return false;
 }
 
 // A list or a question belongs to the screen that asked: when another screen comes on, it goes
@@ -2085,6 +2116,8 @@ void dialogInput()
 	{
 		case Dialog::Code:
 		case Dialog::Message:
+			// (A body taller than the sheet scrolls with Up / Down; the draw keeps it in range.)
+			d.scroll = std::max(0.f, d.scroll + ((now.down ? 52.f : 0.f) - (now.up ? 52.f : 0.f)));
 			if (now.accept || now.back)
 			{
 				auto done = std::move(d.done);
@@ -2096,6 +2129,7 @@ void dialogInput()
 			break;
 
 		case Dialog::Confirm:
+			d.scroll = std::max(0.f, d.scroll + ((now.down ? 52.f : 0.f) - (now.up ? 52.f : 0.f)));
 			if (now.left || now.right)
 				d.focus = now.left ? 0 : 1;
 			if (now.accept || now.back)
@@ -2197,12 +2231,24 @@ void dialogInput()
 				unsigned keys = 0;
 				if (be != nullptr && be->typed(typed, keys))
 				{
+					bool taking = false; // (the character whose bytes come: its first byte was taken)
 					for (const char c : typed)
 					{
-						if (static_cast<unsigned char>(c) >= 0x20 || (static_cast<unsigned char>(c) & 0x80))
+						const unsigned char u = static_cast<unsigned char>(c);
+						if (u >= 0x20 || (u & 0x80))
 						{
-							if (characters(d.value) < d.most || (static_cast<unsigned char>(c) & 0xc0) == 0x80)
-								d.value.push_back(c);
+							if ((u & 0xc0) == 0x80)
+							{
+								// (The rest of a character is taken only after its first byte.)
+								if (taking)
+									d.value.push_back(c);
+							}
+							else
+							{
+								taking = characters(d.value) < d.most;
+								if (taking)
+									d.value.push_back(c);
+							}
 						}
 					}
 					if (keys & 2u)
@@ -2249,8 +2295,14 @@ void dialogInput()
 				d.page = (d.page == 1) ? 0 : 1;
 			if (now.r1)
 				d.page = (d.page == 2) ? 0 : 2;
-			if (now.l2 && d.secret)
-				d.reveal = !d.reveal;
+			{
+				// (L2 repeats while it is held: Show / Hide goes on the press only.)
+				static bool l2Was = false;
+				const bool l2Down = (s_held & Pad::L2) != 0;
+				if (l2Down && !l2Was && d.secret)
+					d.reveal = !d.reveal;
+				l2Was = l2Down;
+			}
 			if (done)
 			{
 				const std::string value = d.value;
@@ -2383,12 +2435,14 @@ float drawDownloadBar(ImDrawList* dl)
 	return (h + 12) * a;
 }
 
-void drawToasts(ImDrawList* dl)
+// `bar`: the texture pack's download bar goes with them (not over a running game, nor over a
+// manager or a dialog, which have the foot of the screen).
+void drawToasts(ImDrawList* dl, bool bar = true)
 {
-	while (!s_toasts.empty() && timeNow > s_toasts.front().until + 0.3)
-		s_toasts.pop_front();
+	dropExpiredToasts();
 	// (The texture pack's download bar stays above the hints, where it always was.)
-	drawDownloadBar(dl);
+	if (bar)
+		drawDownloadBar(dl);
 	// In the top right corner, where the console's own notices come: over the clock and the pads,
 	// never over the hints at the foot or what a screen shows (the newest at the top, a little
 	// lower each one before it). A long one goes over several lines: nothing of it is cut.
@@ -2443,7 +2497,7 @@ void dialogDraw(ImDrawList* dl)
 		char left[64];
 		std::snprintf(left, sizeof(left), "Left as it is in %d s", static_cast<int>(std::ceil(listening)));
 		text(dl, regular(), 22, x + 56, y + h - 64, col::faint, left);
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
@@ -2469,7 +2523,7 @@ void dialogDraw(ImDrawList* dl)
 
 	if (s_dialogs.empty())
 	{
-		drawToasts(dl);
+		drawToasts(dl, !cardManagerOpen() && !texturePacksOpen());
 		return;
 	}
 
@@ -2506,7 +2560,7 @@ void dialogDraw(ImDrawList* dl)
 		const float hy = y + h + 34;
 		hx += glyph(dl, Glyph::Circle, hx, hy, 30) + 10;
 		text(dl, regular(), 22, hx, hy - 13, alpha(col::text, t), "Close");
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
@@ -2556,7 +2610,7 @@ void dialogDraw(ImDrawList* dl)
 		};
 		hint(Glyph::Cross, "Choose");
 		hint(Glyph::Circle, "Back");
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
@@ -2565,11 +2619,12 @@ void dialogDraw(ImDrawList* dl)
 		const float w = TEXT_W, h = TEXT_H;
 		const float x = (W - w) / 2, y = (H - h) / 2 - 20 + (1 - t) * 30;
 		// The lines as they fit the sheet, made once (and again when the screen's size changes).
-		if (d.shownFor != S)
+		// (Wrapped for the size they are drawn at: the screen's and the chosen text size.)
+		const float wrapKey = readingSize(TEXT_SIZE) * S;
+		if (d.shownFor != wrapKey)
 		{
-			d.shownFor = S;
+			d.shownFor = wrapKey;
 			d.shown.clear();
-			ImFont* const font = regular();
 			const float room = (w - 110) * S;
 			for (const std::string& line : d.names)
 			{
@@ -2584,7 +2639,9 @@ void dialogDraw(ImDrawList* dl)
 				bool first = true;
 				while (at < end)
 				{
-					const char* cut = font->CalcWordWrapPosition(TEXT_SIZE * S, at, end, first ? room : room - 60 * S);
+					// (A heading's first piece is drawn bold.)
+					ImFont* const font = (first && !mark.empty() && mark[0] == '\x01') ? bold() : regular();
+					const char* cut = font->CalcWordWrapPosition(readingSize(TEXT_SIZE) * S, at, end, first ? room : room - 60 * S);
 					if (cut <= at)
 					{
 						// (Not a letter fits, or nothing was cut: one character at least, a whole one.)
@@ -2668,7 +2725,7 @@ void dialogDraw(ImDrawList* dl)
 		hint(Glyph::L1R1, "Page");
 		hint(Glyph::L2R2, "Start / End");
 		hint(Glyph::Circle, "Close");
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
@@ -2759,7 +2816,7 @@ void dialogDraw(ImDrawList* dl)
 			hint(Glyph::L2, d.reveal ? "Hide" : "Show");
 		hint(Glyph::Options, "Done");
 		hint(Glyph::Circle, "Cancel");
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
@@ -2807,20 +2864,21 @@ void dialogDraw(ImDrawList* dl)
 		hint(Glyph::Cross, "Accept");
 		hint(Glyph::Square, "Not set");
 		hint(Glyph::Circle, "Cancel");
-		drawToasts(dl);
+		drawToasts(dl, false);
 		return;
 	}
 
 	const float w = 1040;
 	const ImVec2 bodySize = textSize(regular(), 26, d.body.c_str(), w - 112);
 	const float bodyH = std::min(bodySize.y, 520.f);
+	d.scroll = std::clamp(d.scroll, 0.f, std::max(0.f, bodySize.y - bodyH));
 	const float h = 124 + bodyH + 132;
 	const float x = (W - w) / 2, y = (H - h) / 2 + (1 - t) * 30;
 	glow(dl, x, y, w, h, 24, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
 	rect(dl, x, y, w, h, alpha(col::panel, t), 24);
 	textIn(dl, bold(), 36, x + 56, y + 44, alpha(col::text, t), d.title, w - 112, true);
 	dl->PushClipRect(V(x + 56, y + 112), V(x + w - 56, y + 112 + bodyH), true);
-	text(dl, regular(), 26, x + 56, y + 112, alpha(col::dim, t), d.body.c_str(), w - 112);
+	text(dl, regular(), 26, x + 56, y + 112 - d.scroll, alpha(col::dim, t), d.body.c_str(), w - 112);
 	dl->PopClipRect();
 	const float by = y + h - 96;
 	if (d.kind == Dialog::Message)
@@ -2833,7 +2891,7 @@ void dialogDraw(ImDrawList* dl)
 		bx += dialogButton(dl, bx, by, d.yes.c_str(), d.focus == 0, t) + 20;
 		dialogButton(dl, bx, by, d.no.c_str(), d.focus == 1, t);
 	}
-	drawToasts(dl);
+	drawToasts(dl, false);
 }
 
 // ---------------------------------------------------------------- the rest
@@ -2906,7 +2964,7 @@ void drawOverGame()
 	}
 	measure();
 	applySkin();
-	drawToasts(ImGui::GetForegroundDrawList());
+	drawToasts(ImGui::GetForegroundDrawList(), false);
 }
 
 void holdInput()

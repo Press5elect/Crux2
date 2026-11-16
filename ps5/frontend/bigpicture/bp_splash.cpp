@@ -351,7 +351,7 @@ bool slash(ImDrawList* dl, float t)
 	// The wipe: a band along the broad bar's own direction, from the top left to the bottom
 	// right. Behind it is the library; ahead of it, what was.
 	const float wipe = span(t, 4.1f, 4.95f);
-	const float edge = lerp(-340, 3340, inOutCubic(wipe)), band = 300;
+	const float edge = lerp(-340, W + H + 340, inOutCubic(wipe)), band = 300;
 	if (wipe >= 1)
 		return true;
 	if (wipe <= 0)

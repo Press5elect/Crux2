@@ -446,6 +446,8 @@ struct HomeGame
 	const GameInfo* info;
 	std::string title;    // as the library shows it
 	size_t index = 0;     // the library's own entry (good until its games are made again)
+	time_t lastPlayed = 0;    // of a set: on any of its discs
+	time_t playedSeconds = 0; // of a set: on all of them
 };
 /// A game of Home's lists drawn as the library draws its cover (no search by its path).
 void drawHomeCover(ImDrawList* dl, const HomeGame& game, float x, float y, float w, float h, float r, float lift);

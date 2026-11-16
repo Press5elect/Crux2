@@ -202,6 +202,11 @@ const std::vector<Result>& results()
 	// (Changed from default: looked at again now and then, the values may have changed.)
 	if (k == s_search.key && !(st.chip == 3 && frameNow - s_search.at > 30))
 		return s_search.results;
+	// (Looked at again with the same words: the row in focus stays, even when it has reached its
+	// default, until the focus moves; the focus follows it.)
+	int keep = -1;
+	if (st.chip == 3 && k == s_search.key && st.result >= 0 && st.result < static_cast<int>(s_search.results.size()))
+		keep = s_search.results[static_cast<size_t>(st.result)].item;
 	s_search.key = k;
 	s_search.at = frameNow;
 	s_search.results.clear();
@@ -215,13 +220,17 @@ const std::vector<Result>& results()
 			const Item& it = st.all[i];
 			if (it.o.kind == Option::Heading)
 				continue;
-			if (st.chip == 3 && !it.changed)
+			if (st.chip == 3 && !it.changed && static_cast<int>(i) != keep)
 				continue;
 			std::string hay = it.o.label + " " + it.o.codeLabel + " " + it.o.desc + " " + pathOf(it.o);
 			for (const std::string& n : it.o.names)
 				hay += " " + n;
 			if (matches(lower(hay), needles))
+			{
+				if (static_cast<int>(i) == keep)
+					st.result = static_cast<int>(s_search.results.size());
 				s_search.results.push_back({static_cast<int>(i), GameInfo()});
+			}
 		}
 	}
 	if (gamesToo)

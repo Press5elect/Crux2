@@ -59,6 +59,21 @@ int main(int argc, char** argv)
 			std::printf("FAILED: NoSerialCoverLine\n");
 			return 1;
 		}
+		// "Share the covers" copies pictures only; only "not found" is remembered as not there.
+		if (!PS5Covers::IsCoverFileName("SLUS-29001.png") || !PS5Covers::IsCoverFileName("SLUS-29001.JPG") ||
+			!PS5Covers::IsCoverFileName("a.jpeg") || !PS5Covers::IsCoverFileName("a.webp") || PS5Covers::IsCoverFileName("no-cover.txt") ||
+			PS5Covers::IsCoverFileName("download-running.txt") || PS5Covers::IsCoverFileName("SLUS-29001.png.part") ||
+			PS5Covers::IsCoverFileName(".png") || PS5Covers::IsCoverFileName("png"))
+		{
+			std::printf("FAILED: IsCoverFileName\n");
+			return 1;
+		}
+		if (!PS5Covers::IsNotThere(404) || PS5Covers::IsNotThere(-1) || PS5Covers::IsNotThere(0) || PS5Covers::IsNotThere(200) ||
+			PS5Covers::IsNotThere(403) || PS5Covers::IsNotThere(429) || PS5Covers::IsNotThere(503))
+		{
+			std::printf("FAILED: IsNotThere\n");
+			return 1;
+		}
 	}
 	std::ifstream list(argv[1]);
 	std::stringstream text;

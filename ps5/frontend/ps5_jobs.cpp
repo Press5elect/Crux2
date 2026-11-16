@@ -9,6 +9,7 @@
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "ps5_jobs.h"
 
+#include "ps5_covers_match.h"
 #include "ps5_online.h"
 #include "ps5_platform.h"
 #include "ps5_ui.h"
@@ -167,8 +168,11 @@ void FindSaveFiles(std::function<void(std::vector<FoundSave>)> then)
 				found.push_back({std::move(file.path), std::move(file.name), (&place == &places.front()) ? std::string("saves folder") : place.name, file.size});
 		}
 		ps5px_log("cards: %zu save file(s) found in %zu place(s)", found.size(), places.size());
-		if (MTGS::IsOpen())
-			MTGS::RunOnGSThread([then, found = std::move(found)]() { then(found); });
+		// (By the emulation thread: the graphics thread's queue has that one writer.)
+		Host::RunOnCPUThread([then, found = std::move(found)]() mutable {
+			if (MTGS::IsOpen())
+				MTGS::RunOnGSThread([then, found = std::move(found)]() { then(found); });
+		});
 	});
 	if (!started)
 		then({});
@@ -297,8 +301,11 @@ std::vector<CardSource> CardSources()
 void FindIn(const CardSource& source, std::function<void(std::vector<CardThing>, std::string why)> then)
 {
 	const auto hand_back = [then](std::vector<CardThing> things, std::string why) {
-		if (MTGS::IsOpen())
-			MTGS::RunOnGSThread([then, things = std::move(things), why = std::move(why)]() { then(things, why); });
+		// (By the emulation thread: the graphics thread's queue has that one writer.)
+		Host::RunOnCPUThread([then, things = std::move(things), why = std::move(why)]() mutable {
+			if (MTGS::IsOpen())
+				MTGS::RunOnGSThread([then, things = std::move(things), why = std::move(why)]() { then(things, why); });
+		});
 	};
 	const bool started = RunDetached([source, hand_back] {
 		std::vector<CardThing> things;
@@ -927,13 +934,24 @@ void ShareCovers()
 	const std::string local = EmuFolders::Covers;
 	const std::string remote = place.path + "/Crux2/covers";
 	const bool started = RunDetached([local, remote, name = place.name] {
+		// (A download writes into the folder meanwhile: a half-written picture is not shared.)
+		if (PS5Covers::Downloading())
+		{
+			PS5UI::Toast("The covers are being downloaded: share them when that is done.");
+			return;
+		}
 		PS5UI::SetBackgroundNote("Sharing the covers");
+		// The pictures only, never the downloads' notes (no-cover.txt, download-running.txt).
 		const auto names = [](const std::string& folder) {
 			FileSystem::FindResultsArray found;
 			FileSystem::FindFiles(folder.c_str(), "*", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES, &found);
 			std::vector<std::string> out;
 			for (const FILESYSTEM_FIND_DATA& f : found)
-				out.push_back(std::string(Path::GetFileName(f.FileName)));
+			{
+				const std::string_view file = Path::GetFileName(f.FileName);
+				if (PS5Covers::IsCoverFileName(file))
+					out.push_back(std::string(file));
+			}
 			std::sort(out.begin(), out.end());
 			return out;
 		};

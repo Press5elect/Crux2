@@ -261,6 +261,34 @@ static void Round(const std::string& work, const std::string& place, const std::
 		kept = Tree(folders.replaced);
 		CHECK(kept["memcards/Mcd002.ps2"] == small);
 		CHECK(Get(folders.memcards + "/Mcd002.ps2") == cards_then.at("Mcd002.ps2"));
+
+		// A restore stopped (a game started) after its first file: the memory cards are finished as a
+		// set, the stop honoured before the saved states.
+		Put(folders.memcards + "/Mcd001.ps2", 2048);
+		Put(folders.memcards + "/Mcd002.ps2", 2048);
+		size_t card_files = 0;
+		for (const auto& [name, bytes] : cards_then)
+			card_files += (name.find(".part") == std::string::npos) ? 1 : 0;
+		int asked = 0;
+		Watch game;
+		game.stop = [&asked] { return ++asked > 1; };
+		const Result stopped = Restore(folders, snapshots[1], game);
+		CHECK(!stopped.ok && stopped.files == static_cast<int>(card_files) && card_files >= 2);
+		cards_now = Tree(folders.memcards);
+		CHECK(cards_now["Mcd001.ps2"] == cards_then.at("Mcd001.ps2") && cards_now["Mcd002.ps2"] == cards_then.at("Mcd002.ps2"));
+	}
+
+	// ---- a whole file written over another: in place, nothing left beside it; and what a write
+	// stopped between its two renames left ("<name>.old") put back first
+	{
+		const std::string file = work + "/whole.bin";
+		CHECK(WriteWholeFile(file, std::string(5000, 'a')));
+		CHECK(WriteWholeFile(file, std::string(300, 'b')) && Get(file) == std::string(300, 'b'));
+		CHECK(access((file + ".old").c_str(), F_OK) != 0 && access((file + ".part").c_str(), F_OK) != 0);
+		CHECK(rename(file.c_str(), (file + ".old").c_str()) == 0);
+		CHECK(WriteWholeFile(file, std::string(70, 'c')) && Get(file) == std::string(70, 'c'));
+		CHECK(access((file + ".old").c_str(), F_OK) != 0);
+		unlink(file.c_str());
 	}
 
 	// ---- a backup that is stopped leaves nothing

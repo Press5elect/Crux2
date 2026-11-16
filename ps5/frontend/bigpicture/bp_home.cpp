@@ -296,7 +296,7 @@ void homeInput(const std::vector<HomeGame>& row, const HomeGame* hero, bool anyG
 		else if (focused != nullptr)
 		{
 			// A game of the row: from its newest state, as Resume, when it has one (they were played).
-			if (hs.row == 1 && focused->lastPlayed > 0)
+			if (hs.row == 1 && !row.empty() && row[static_cast<size_t>(std::clamp(hs.cover, 0, static_cast<int>(row.size()) - 1))].lastPlayed > 0)
 				resumeFromNewest(*focused);
 			else
 				goToGame(*focused, true);
@@ -380,8 +380,8 @@ void drawHero(ImDrawList* dl, const HomeGame* hero, float x, float y, float w, f
 	textIn(dl, bold(), 66, x + pad, y + 80, p.text, hero->title, w - pad * 2, true);
 	StateInfo state;
 	const bool saved = savedState(g, state);
-	const std::string played = formatPlayed(g.playedSeconds);
-	const std::string meta = joined({saved ? "Saved " + ago(state.when) : "Last played " + ago(g.lastPlayed), played.empty() ? std::string() : "Played " + played, g.serial});
+	const std::string played = formatPlayed(hero->playedSeconds);
+	const std::string meta = joined({saved ? "Saved " + ago(state.when) : "Last played " + ago(hero->lastPlayed), played.empty() ? std::string() : "Played " + played, g.serial});
 	textIn(dl, regular(), 24, x + pad, y + 172, p.secondary, meta, w - pad * 2, false);
 	const float by = y + h - pad - 70;
 	const float rw = button(dl, x + pad, by, saved ? ICON_FA_PLAY "   Resume" : ICON_FA_PLAY "   Play", true, hs.row == 0 && hs.button == 0);
@@ -466,9 +466,9 @@ void homeFrame(ImDrawList* dl)
 		open = savedState(*hero->info, state) ? "Resume" : "Play";
 	else if (hs.row == 1 && !row.empty())
 	{
-		const GameInfo& g = *row[static_cast<size_t>(std::clamp(hs.cover, 0, static_cast<int>(row.size()) - 1))].info;
-		if (g.lastPlayed > 0)
-			open = savedState(g, state) ? "Resume" : "Play";
+		const HomeGame& h = row[static_cast<size_t>(std::clamp(hs.cover, 0, static_cast<int>(row.size()) - 1))];
+		if (h.lastPlayed > 0)
+			open = savedState(*h.info, state) ? "Resume" : "Play";
 	}
 	std::vector<Hint> hints{{Glyph::Circle, "Quit"}, {Glyph::L1R1, "Sections"}, {Glyph::Options, "Settings"}};
 	// (Square and Triangle act on the game in focus: the hero's, or a cover of the row.)
