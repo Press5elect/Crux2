@@ -25,6 +25,7 @@ Start with [`../CLAUDE.md`](../CLAUDE.md): the rules that always apply, the comm
 | [`dev/patches.md`](dev/patches.md) | Changing PCSX2 (`ps5.patch`, `--export`), the Mesa series, paraLLEl-GS and PS2Recomp |
 | [`dev/testing.md`](dev/testing.md) | The host tests, the interface crawl and shots, CI, the other suites |
 | [`dev/settings-inventory.md`](dev/settings-inventory.md) | The settings inventory, the no-loss test (and blessing its baseline), `settings-text.yaml` |
+| [`dev/interface-revamp.md`](dev/interface-revamp.md) | Before a large interface change: the revamp playbook (mockups, no-loss inventory, PCSX2's words, workers, review, polish, checks) |
 | [`dev/debugging.md`](dev/debugging.md) | Reading a boot log; klog; crashes and hangs; test runs and the profiler |
 | [`dev/releasing.md`](dev/releasing.md) | Making a release (only when the owner asks) |
 | [`dev/open-work.md`](dev/open-work.md) | What is untested on a console, unfinished, or known broken; decisions on record |

@@ -44,6 +44,7 @@ These are the owner's standing rules. They hold for every session and every agen
    tab. Storage (console, USB, the share) is a filter in the library, never a tab; tools such as
    the texture pack manager are reached from Settings, a game's page and the library, never from
    the top bar. Keep like things with like, and don't give one thing two doors that look alike.
+   A large interface change follows [`interface-revamp.md`](interface-revamp.md).
 
 ## The loop for a change
 
