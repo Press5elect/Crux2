@@ -6463,15 +6463,22 @@ private:
 				for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
 					now.*k.field = si->GetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, false);
 				const int size = si->GetIntValue("PS5", "OsdSize", PS5OsdLogic::DEFAULT_SIZE);
-				bool apply = false;
 				int keep = size;
+				PS5OsdLogic::Switches write = now;
 				if (what == "OsdSize")
-					apply = PS5OsdLogic::IsPreset(size);
-				else
-					keep = PS5OsdLogic::SizeAfterSwitch(size, now, what == "OsdShowFPS" && now.fps, apply);
-				if (apply)
 				{
-					now = PS5OsdLogic::Preset(keep);
+					if (PS5OsdLogic::IsPreset(size))
+						write = PS5OsdLogic::Preset(size);
+				}
+				else
+				{
+					const PS5OsdLogic::FpsSwitch fps = (what != "OsdShowFPS") ? PS5OsdLogic::FpsSwitch::Other :
+						now.fps ? PS5OsdLogic::FpsSwitch::On : PS5OsdLogic::FpsSwitch::Off;
+					keep = PS5OsdLogic::SizeAfterSwitch(size, now, fps, write);
+				}
+				if (!(write == now))
+				{
+					now = write;
 					for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
 						si->SetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, now.*k.field);
 				}

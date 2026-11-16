@@ -52,6 +52,7 @@ static void Levels()
 	CHECK(LoadLevel(-5.0f) == Level::Fine);
 
 	// Speed against the target: 98 % of it and above fine; 90 up to 98 close; under 90 over.
+	CHECK(SpeedLevel(0.0f, 1.0f) == Level::Fine); // not measured yet: not red at a game's start
 	CHECK(SpeedLevel(100.0f, 1.0f) == Level::Fine);
 	CHECK(SpeedLevel(98.0f, 1.0f) == Level::Fine);
 	CHECK(SpeedLevel(97.9f, 1.0f) == Level::Near);
@@ -148,31 +149,47 @@ static void Sizes()
 	CHECK(EffectiveSize(Custom, Preset(Compact)) == Custom); // Custom chosen stays Custom
 	CHECK(EffectiveSize(9, Preset(Compact)) == Custom);
 
-	bool apply = true;
-	// A switch changed in a preset: Custom.
+	Switches w;
+	const FpsSwitch Other = FpsSwitch::Other, On = FpsSwitch::On, Off = FpsSwitch::Off;
+	// A switch changed in a preset: Custom, nothing else written.
 	Switches s = Preset(Compact);
 	s.frame_times = true;
-	CHECK(SizeAfterSwitch(Compact, s, false, apply) == Custom && !apply);
+	CHECK(SizeAfterSwitch(Compact, s, Other, w) == Custom && w == s);
 	s = Preset(Full);
 	s.hardware = false;
-	CHECK(SizeAfterSwitch(Full, s, false, apply) == Custom && !apply);
-	// Custom stays Custom whatever is switched.
-	CHECK(SizeAfterSwitch(Custom, Preset(Compact), false, apply) == Custom && !apply);
-	CHECK(SizeAfterSwitch(Custom, minimal_only(), true, apply) == Custom && !apply);
+	CHECK(SizeAfterSwitch(Full, s, Other, w) == Custom && w == s);
+	// Custom: the switches decide; a preset's own switches are that preset again.
+	CHECK(SizeAfterSwitch(Custom, Preset(Compact), Other, w) == Compact && w == Preset(Compact));
+	CHECK(SizeAfterSwitch(Custom, minimal_only(), On, w) == Minimal && w == minimal_only());
+	s.vps = true;
+	CHECK(SizeAfterSwitch(Custom, s, Other, w) == Custom && w == s);
+	// Custom and the FPS counter off: only it goes (the user's own set is theirs).
+	s = Preset(Full);
+	s.fps = false;
+	CHECK(SizeAfterSwitch(Custom, s, Off, w) == Custom && w == s);
 	// Everything off: the size is kept for next time.
-	CHECK(SizeAfterSwitch(Full, Switches{}, false, apply) == Full && !apply);
+	CHECK(SizeAfterSwitch(Full, Switches{}, Other, w) == Full && w == Switches{});
 	// The FPS counter switched on with nothing else shown: the size's figures (a new user: Compact).
-	CHECK(SizeAfterSwitch(Compact, minimal_only(), true, apply) == Compact && apply);
-	CHECK(SizeAfterSwitch(Full, minimal_only(), true, apply) == Full && apply);
-	CHECK(SizeAfterSwitch(Minimal, minimal_only(), true, apply) == Minimal && !apply); // already as Minimal sets it
-	// ...but only for the FPS switch turned on: another switch leaving the FPS alone makes it Custom.
-	CHECK(SizeAfterSwitch(Compact, minimal_only(), false, apply) == Custom && !apply);
+	CHECK(SizeAfterSwitch(Compact, minimal_only(), On, w) == Compact && w == Preset(Compact));
+	CHECK(SizeAfterSwitch(Full, minimal_only(), On, w) == Full && w == Preset(Full));
+	CHECK(SizeAfterSwitch(Minimal, minimal_only(), On, w) == Minimal && w == minimal_only());
+	// Another switch leaving only the FPS: that is Minimal's set.
+	CHECK(SizeAfterSwitch(Compact, minimal_only(), Other, w) == Minimal && w == minimal_only());
 	// The FPS switched on with another figure already on: Custom (nothing overwritten).
 	Switches fps_gpu;
 	fps_gpu.fps = fps_gpu.gpu = true;
-	CHECK(SizeAfterSwitch(Compact, fps_gpu, true, apply) == Custom && !apply);
+	CHECK(SizeAfterSwitch(Compact, fps_gpu, On, w) == Custom && w == fps_gpu);
 	// A switch put back as the preset has it: the preset again.
-	CHECK(SizeAfterSwitch(Compact, Preset(Compact), false, apply) == Compact && !apply);
+	CHECK(SizeAfterSwitch(Compact, Preset(Compact), Other, w) == Compact && w == Preset(Compact));
+	// The FPS counter as the overlay's main switch, with a preset: off takes every figure with it
+	// and keeps the size; on again brings the same size back (the reviewer's two steps).
+	for (int z = Minimal; z <= Full; z++)
+	{
+		Switches after_off = Preset(z);
+		after_off.fps = false;
+		CHECK(SizeAfterSwitch(z, after_off, Off, w) == z && w == Switches{});
+		CHECK(SizeAfterSwitch(z, minimal_only(), On, w) == z && w == Preset(z));
+	}
 
 	// A settings file's first size: nothing shown, the default; a preset's switches, that preset;
 	// anything else, Custom.

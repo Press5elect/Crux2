@@ -64,7 +64,8 @@ namespace PS5OsdLogic
 	/// that runs at 30 FPS by design is at 100 % speed, so it is fine.
 	constexpr Level SpeedLevel(float speed_percent, float target_speed)
 	{
-		if (!(target_speed > 0.0f))
+		// (0: not measured yet, the first half second of a game and after each reset: not slow.)
+		if (!(target_speed > 0.0f) || !(speed_percent > 0.0f))
 			return Level::Fine;
 		const float ratio = speed_percent / (100.0f * target_speed);
 		return ratio < SPEED_OVER ? Level::Over : ratio < SPEED_NEAR ? Level::Near : Level::Fine;
@@ -180,27 +181,47 @@ namespace PS5OsdLogic
 		return (IsPreset(setting) && Preset(setting) == now) ? static_cast<Size>(setting) : Custom;
 	}
 
+	/// Which change to the switches it was: the FPS counter turned on or off, or another switch.
+	enum class FpsSwitch { Other, On, Off };
+
 	/// The size the settings keep after the user changed one of the switches (now: all of them after
-	/// the change; fps_switched_on: the change was OsdShowFPS turned on). Turning the FPS counter on
-	/// with nothing else shown brings the chosen size's figures back (the default size, Compact, for
-	/// a new user); with everything off the size is kept for next time; otherwise a preset that is no
-	/// longer as it set the switches becomes Custom. `apply` is set when the preset's switches are to
-	/// be written.
-	constexpr int SizeAfterSwitch(int setting, const Switches& now, bool fps_switched_on, bool& apply)
+	/// the change). `write` is set to the switches as they are to be from here (the caller writes
+	/// those that differ from `now`). The FPS counter is the overlay's main switch:
+	/// - turned off with a preset chosen: every figure goes with it and the size is kept, so turning
+	///   it on again brings the same size back;
+	/// - turned on with nothing else shown: the chosen size's figures come back (the default size,
+	///   Compact, for a new user);
+	/// - everything off: the size is kept for next time;
+	/// - otherwise the switches as they are decide: a preset's own switches are that preset (from
+	///   Custom too), anything else is Custom.
+	constexpr int SizeAfterSwitch(int setting, const Switches& now, FpsSwitch fps, Switches& write)
 	{
-		apply = false;
-		if (!IsPreset(setting))
-			return Custom;
-		if (!now.Any())
-			return setting;
-		Switches fps_only;
-		fps_only.fps = true;
-		if (fps_switched_on && now == fps_only)
+		write = now;
+		if (IsPreset(setting))
 		{
-			apply = !(Preset(setting) == now);
-			return setting;
+			if (fps == FpsSwitch::Off)
+			{
+				write = Switches{};
+				return setting;
+			}
+			if (!now.Any())
+				return setting;
+			Switches fps_only;
+			fps_only.fps = true;
+			if (fps == FpsSwitch::On && now == fps_only)
+			{
+				write = Preset(setting);
+				return setting;
+			}
+			if (Preset(setting) == now)
+				return setting;
 		}
-		return Preset(setting) == now ? setting : Custom;
+		for (int s = Minimal; s <= Full; s++)
+		{
+			if (Preset(s) == now)
+				return s;
+		}
+		return Custom;
 	}
 
 	/// The size for a settings file that has none (written once): the preset its switches match,

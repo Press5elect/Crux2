@@ -227,8 +227,8 @@ namespace PS5Osd
 			{
 				if (pgs)
 				{
-					const float period_ms = target > 0.0f ? 1000.0f / (target * 60.0f) : 16.7f;
-					Load("GPU", pf.gpu_ms > 0.0f ? 100.0f * pf.gpu_ms / period_ms : 0.0f);
+					// (Against the game's own rate: a PAL game's frame is 20 ms, not 16.7.)
+					Load("GPU", pf.gpu_ms > 0.0f ? 100.0f * pf.gpu_ms / o.budget_ms : 0.0f);
 					if (custom)
 					{
 						Stat("GPU time", Number(pf.gpu_ms, 1), "ms");
