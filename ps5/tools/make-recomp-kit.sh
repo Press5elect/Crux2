@@ -113,6 +113,33 @@ printf '%s\r\n' \
 	'if errorlevel 1 (echo Not everything was made: the lines above say why.) else (echo The folders are in %KIT%output)' \
 	'pause' > "$stage/Crux2 Recomp.cmd"
 
+# Windows: the same for Crux2's own native modules.
+printf '%s\r\n' \
+	'@echo off' \
+	'rem Crux2 recomp kit - by Press5elect. Drop a PS2 disc image (.chd, .iso, .cue, .cso), its executable,' \
+	'rem or a folder of disc images on this file: each becomes a native module for Crux2 (SERIAL.crux2native) in "output".' \
+	'setlocal' \
+	'set "KIT=%~dp0"' \
+	'cd /d "%KIT%"' \
+	'set "PY="' \
+	'where py >nul 2>nul && set "PY=py -3"' \
+	'if not defined PY where python >nul 2>nul && set "PY=python"' \
+	'if not defined PY (' \
+	'  echo Python 3 is not installed. Get it from https://www.python.org/downloads/ and tick "Add python.exe to PATH".' \
+	'  pause' \
+	'  exit /b 1' \
+	')' \
+	'if "%~1"=="" (' \
+	'  echo Drop a disc image ^(.chd, .iso, .cue, .cso^), a game'"'"'s executable or a folder of disc images on this file.' \
+	'  echo Or from a command prompt: %PY% recomp\tools\recomp-game.py --help' \
+	'  pause' \
+	'  exit /b 1' \
+	')' \
+	'%PY% "%KIT%recomp\tools\recomp-game.py" --for crux2 --out "%KIT%output" %*' \
+	'echo.' \
+	'if errorlevel 1 (echo Not everything was made: the lines above say why.) else (echo The modules are in %KIT%output: copy them to /data/crux2/native/ on the console)' \
+	'pause' > "$stage/Crux2 Native.cmd"
+
 cat > "$stage/README.txt" <<EOF
 Crux2 recomp kit $version - by Press5elect
 ==========================================
@@ -132,8 +159,13 @@ Windows (Crux2 Recomp)
 
 From a command prompt, recomp\\tools\\recomp-game.py --help lists the options (--ghidra, --jobs,
 --iso no, ...). The work folder is %LOCALAPPDATA%\\Crux2\\recomp; a second run only redoes what changed.
-PS2Recomp's converter comes built for Windows in recomp\\bin\\windows-x64. Crux2's native modules
-(--for crux2) are made on Linux for now.
+PS2Recomp's converter comes built for Windows in recomp\\bin\\windows-x64.
+
+Windows (a native module for Crux2)
+-----------------------------------
+Drop the game's disc image or its executable on "Crux2 Native.cmd". When it is done, output holds
+<executable>.crux2native (SLUS_213.76.crux2native): copy it to /data/crux2/native/ on the console
+and start the game in Crux2. Its boot log says "native: SLUS_213.76.crux2native loaded".
 
 Linux (Mint or Ubuntu)
 ----------------------

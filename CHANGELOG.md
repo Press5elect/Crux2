@@ -6,6 +6,12 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## Unreleased
+
+- Added: the recomp kit makes Crux2's native modules on Windows too (drop a game on
+  "Crux2 Native.cmd"; they were made on Linux only). Checked on Linux with the same compiler
+  switches; not yet run on Windows or a console.
+
 ## v1.0.21 (2026-11-16)
 
 - Changed: the interface asks the emulator for less when a screen comes up. The quick menu with
