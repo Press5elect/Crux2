@@ -6,21 +6,21 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
-## Unreleased
+## v1.0.21 (2026-11-16)
 
 - Changed: the interface asks the emulator for less when a screen comes up. The quick menu with
   pinned settings made the settings' pages five times as it opened (two now), and the Settings and
   the quick menu read the whole game list, with a look into the saved states, cheats and textures
   folders, each time (the library's list is used now). A long title is cut to its width in one
-  pass; discs off the screen's side are not drawn. Measured on a PC only
-  (`run-bigpicture-tests.sh <folder> bench`); not yet run on a console.
+  pass; discs off the screen's side are not drawn. Measured on a PC
+  (`run-bigpicture-tests.sh <folder> bench`).
 - Fixed: a game's own settings (Square on Home, a game's page) could take seconds to open with many
   cheat files on the console (Download Cheats for All Games): looking for one game's files asked
   the console about every file in the folder, four times. The name is looked at first now. The boot
-  log says when opening them still takes 50 ms or more. Not yet run on a console.
+  log says when opening them still takes 50 ms or more.
 - Added: a second place covers are downloaded from. A game libretro's collection has no box art
   for is asked for by its serial in the ps2-covers collection (xlenore/ps2-covers on GitHub). Games
-  found missing from libretro's before are tried there too. Not yet run on a console.
+  found missing from libretro's before are tried there too.
 
 ## v1.0.20 (2026-11-16)
 
