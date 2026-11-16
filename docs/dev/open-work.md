@@ -172,6 +172,35 @@ Not reviewed: `ps5_covers_match.h`'s matching, `ps5_aim_logic.h`, `ps5_input_sou
 `ps5_texture_packs_extract.cpp`, `ps5_services.cpp`, `ps5_card_sync.*`, `ps5_osd_draw.h`'s layout.
 Known and left: a cover run where every answer was a 403 or 5xx still says "no connection".
 
+## The graphics thread at 100%: texture creation (measured 2026-11-16, in progress)
+
+A console profile (SCES-53247, 6x, blending basic, the threaded driver on; `profile all`) showed the
+graphics thread on a processor 100% of the time with **47% of it under `GSDevice::FetchSurface` →
+`GSDeviceVK::CreateSurface` → VMA `AllocateDedicatedMemory` → `radv_ps5_buffer_create`**: 28% in
+the kernel's mapping calls and 18.7% in `radv_ps5_cpu_flush` (a `clflushopt` per line of a ~41 MB
+target). The same share shows in light scenes (49% of a thread 55% busy), so it is a cost of every
+frame, about 8 ms. The GIF and vertex handlers are about 20%; the recorder thread is 30% busy.
+
+- Why it costs: `GSTextureVK.cpp:243` asks for a dedicated allocation for every target of 512x448
+  and more; the winsys zeroes each new buffer and flushes it (`radv_ps5_bo.c:136`); the pool
+  (`GSDevice.cpp:685`) reuses only an exact size and format.
+- **Not known yet: who creates a target every frame.** The profile's stack list stopped one line
+  short. The build after this note logs `graphics: N surfaces created in S s (M MB): target WxH
+  format F xCOUNT from +offset; ...` (offsets from the program's base, in `symbols.txt`) and lists
+  40 functions on the stack. Candidates: `GSRendererHW.cpp:8913` (the draw's copy),
+  `GSTextureCache.cpp:6639`, `:6329`, `GSRendererHW.cpp:4386`, `:5127`, `:10879`.
+- Switches to compare on the console, both off: `[EmuCore/GS] PS5SharedTargetMemory` (no dedicated
+  allocation, VMA blocks of 512 MiB) and `[PS5] StreamZero` (`RADV_PS5_STREAM_ZERO=1`, Mesa patch
+  0021: non-temporal zeroing in place of memset and the flush).
+- To do after the caller is known: keep or round that caller's texture so the pool finds it. A
+  follow-up in the driver: no zeroing at all for application memory that did not ask for it.
+- Smaller candidates from the same study (each about 1% or less here): `Target::Update` unswizzles
+  twice (`GSTextureCache.cpp:8290`); `GSGetRGBA8AlphaMinMax` and the CLUT loops with 256-bit
+  vectors; adjacent blocks in one XXH3 update (`:9327`); the descriptor builder made only when
+  textures changed (`GSDeviceVK.cpp:6430`); the last pipeline remembered (`:5718`).
+- The menus: the thread is 55% busy without a game; the present path's fence waits spin for
+  `GpuWaitSpinUs` (1500 µs) at 120 Hz. Not settled.
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,

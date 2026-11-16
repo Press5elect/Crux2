@@ -1060,6 +1060,10 @@ Page graphicsPage(int layer, bool forGame)
 		"Reuses copies of the screen for glow and blur effects when nothing has changed. Turn off if an effect looks a "
 			"frame behind. Takes effect the next time a game starts.",
 		GS, "PS5ReuseRTCopies", true, Option::NextStart))));
+	rows.push_back(expert(hw(toggle("Shared Render Target Memory",
+		"Allocates render targets from shared memory blocks instead of one allocation each. Reduces the time spent creating "
+			"textures at high internal resolutions.",
+		GS, "PS5SharedTargetMemory", false, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Keep the ordered view's render passes",
 		"Keeps draws that use the rasterizer ordered view in the same render pass. Much less CPU work in scenes with "
 			"many lights. Takes effect the next time a game starts.",

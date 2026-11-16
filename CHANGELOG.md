@@ -8,6 +8,12 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: two switches against the graphics thread's time spent creating textures (Settings, the
+  Everything level; both off): **Shared Render Target Memory** (render targets share memory
+  blocks; they had one allocation each) and **Streamed Memory Clearing** (the driver clears new
+  memory in one pass, without flushing it line by line). The boot log names what creates surfaces
+  and at what sizes (`graphics: N surfaces created ...`), and a profile lists 40 functions on the
+  stack (12 before). Not yet run on a console.
 - Changed: built on PCSX2 master of 2026-11-16 (`79929f0`: two commits after v1.0.21's, a newer
   controller database). Save states are not affected.
 - Fixed: about fifty bugs found by a review of the interface's code. Among them: the quick

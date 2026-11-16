@@ -160,7 +160,7 @@ private:
 /// functions the thread ran in most, the instructions it was interrupted at most are listed too.
 inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const PS5ProfileSymbols& symbols, uint64_t base,
 	double seconds, const char* prefix, std::vector<std::string>& lines, size_t sent = 0, uint64_t cpu_before = 0,
-	unsigned self_top = 25, unsigned stack_top = 12, unsigned caller_top = 8, unsigned spot_functions = 8)
+	unsigned self_top = 25, unsigned stack_top = 40, unsigned caller_top = 8, unsigned spot_functions = 8)
 {
 	char text[320];
 	if (count == 0)
