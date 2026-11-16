@@ -49,7 +49,35 @@ the host memory test. CI has neither, so it skips those two.
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row of every section (all games' and a game's, at Everything) changed every way, the settings' home and search, 2 x 60,000 random steps
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp shots   # a PNG of each screen in /tmp/crux2-bp/shots
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp inventory   # the no-loss test of the settings (settings-inventory.md)
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp bench   # what a frame of each screen costs; kept in /tmp/crux2-bp/bench.txt
 ```
+
+`bench` (optimised, no sanitizers, `-DBP_BENCH`) runs each main screen for 300 frames
+(`BENCH_FRAMES`), with the preview's usual 33 games and with 3,033 (console, USB and share;
+favourites, play times, saved states, sets of discs, six collections). It times the interface's
+own code only (ImGui's NewFrame, the screens, Render: the draw lists made, nothing rasterised).
+
+- `bench <fixture> <screen>`: average, median and worst microseconds of processor time a frame;
+  vertices, indices and draw commands a frame; heap allocations a frame (operator new and ImGui's
+  allocator, counted); settings read from the Backend a frame; and its heavy calls a frame (the
+  game list, a game's states, a page of rows, the cards, the packs, a game's settings opened).
+- `trans <fixture> <change>`: a change of screen (Home to a game's settings, to its page, the
+  Settings, the quick menu with pins, and back): the worst single frame and which one, the first
+  ten frames together, the allocations of the worst, the frames until the screen is all there, and
+  what the first ten frames asked of the Backend (game lists, settings opened, states, pages,
+  settings read).
+
+The times are this PC's: compare a run with another on the same machine (they vary by a quarter
+between runs on a busy one), never with the console. The counts (vertices, allocations, what is
+asked of the Backend) are the same everywhere, and the Backend's are what the console pays most
+for: there each is a lock, a walk through the game list or a look into a folder, which the
+preview's Backend does not do. For a profile: build with `-DBP_BENCH -DBP_CALLGRIND` and run
+`valgrind --tool=callgrind --instr-atstart=no preview bench <fonts> large 40 <part of a name>`,
+which looks at the measured frames of the screens so named only.
+
+The shots show the clock, so two runs differ there: to compare the pictures of two versions, hold
+the time still (an `LD_PRELOAD` of `time()`) and compare the PPMs; then they are the same byte for
+byte when nothing changed.
 
 The first argument is the work folder: give a path outside the repository (a bare `crawl` makes a
 `crawl/` folder wherever you are). It needs `vendor/pcsx2` (ImGui, fonts). Look at the shots after

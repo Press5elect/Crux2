@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <ctime>
 #include <functional>
+#include <deque>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -232,6 +233,9 @@ namespace
 	// libretro's own server has the same pictures and also answers without TLS: tried when
 	// GitHub cannot be reached at all.
 	constexpr const char* PLAIN_BASE = "http://thumbnails.libretro.com/Sony%20-%20PlayStation%202/Named_Boxarts/";
+	// A second collection, asked by serial for the games libretro's has no box art for (xlenore's
+	// ps2-covers, the one PCSX2's users commonly name as their cover address): <serial>.jpg.
+	constexpr const char* SERIAL_BASE = "https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/";
 
 	std::mutex s_index_mutex;
 	Index* s_index = nullptr;
@@ -340,9 +344,66 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 	// Three games asked for at a time; what came for each is handled as it comes, as it was when
 	// they were asked for one by one.
 	Pool pool(http.get(), progress, RAW_BASE, PLAIN_BASE, "covers", true);
+	// The games libretro's collection has nothing for are asked for by serial in the second one.
+	Pool by_serial(http.get(), progress, SERIAL_BASE, SERIAL_BASE, "covers by serial", true);
+	std::deque<size_t> second;
+	int saved_by_serial = 0;
+	const auto lostConnection = [&](s32 status) {
+		// No connection: three in a row, and the rest is left for the next time (the games asked
+		// for already are let finish).
+		failed++;
+		if (++unreachable >= 3 && !lost)
+		{
+			ps5px_log("covers: stopping: %s, three times in a row", StatusText(status));
+			s_unreachable_at = std::time(nullptr);
+			lost = true;
+		}
+	};
 	size_t next = 0;
 	while (true)
 	{
+		while (!by_serial.Full() && !second.empty() && !progress->IsCancelled() && !lost)
+		{
+			const size_t i = second.front();
+			second.pop_front();
+			const std::string none_line = NoSerialCoverLine(missing[i].serial);
+			if (none.count(none_line) != 0)
+			{
+				skipped++;
+				continue;
+			}
+			by_serial.Start(std::string(), missing[i].serial + ".jpg", [&, i, none_line](s32 status, std::vector<u8>& body) {
+				const Missing& m = missing[i];
+				if (progress->IsCancelled())
+					return;
+				if (status == 200 && IsJPEG(body.data(), body.size()))
+				{
+					const std::string path = Path::Combine(EmuFolders::Covers, m.serial + ".jpg");
+					if (FileSystem::WriteBinaryFile(path.c_str(), body.data(), body.size()))
+					{
+						PS5Platform::MakePublic(path.c_str(), false);
+						saved++;
+						saved_by_serial++;
+						unreachable = 0;
+					}
+					else
+					{
+						ps5px_log("covers: %s could not be written", path.c_str());
+						failed++;
+					}
+				}
+				else if (status < 0)
+				{
+					lostConnection(status);
+				}
+				else
+				{
+					// Neither collection has it: not asked for again.
+					unmatched++;
+					none_new += none_line + "\n";
+				}
+			});
+		}
 		while (!pool.Full() && next < missing.size() && !progress->IsCancelled() && !lost)
 		{
 			const size_t i = next++;
@@ -351,7 +412,8 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 			const std::string none_line = NoMatchLine(m.serial, m.stem);
 			if (none.count(none_line) != 0)
 			{
-				skipped++;
+				// (Found missing from libretro's before: the second collection may have it.)
+				second.push_back(i);
 				continue;
 			}
 			Game game;
@@ -362,8 +424,8 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 			const Match match = index->Find(game);
 			if (match.index < 0)
 			{
-				unmatched++;
 				none_new += none_line + "\n";
+				second.push_back(i);
 				continue;
 			}
 			pool.Start(std::string(), index->Name(match.index) + ".png", [&, i, none_line](s32 status, std::vector<u8>& body) {
@@ -387,28 +449,25 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 				}
 				else if (status < 0)
 				{
-					// No connection: three in a row, and the rest is left for the next time (the
-					// games asked for already are let finish).
-					failed++;
-					if (++unreachable >= 3 && !lost)
-					{
-						ps5px_log("covers: stopping: %s, three times in a row", StatusText(status));
-						s_unreachable_at = std::time(nullptr);
-						lost = true;
-					}
+					lostConnection(status);
 				}
 				else
 				{
-					// The list names a picture the server does not have (any more): not asked for again.
+					// The list names a picture the server does not have (any more): not asked for
+					// there again, and asked for by serial.
 					ps5px_log("covers: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
-					failed++;
 					none_new += none_line + "\n";
+					second.push_back(i);
 				}
 			});
 		}
-		if (pool.Active() == 0)
+		const bool more = !second.empty() && !progress->IsCancelled() && !lost;
+		if (pool.Active() == 0 && by_serial.Active() == 0 && !more)
 			break;
-		pool.Poll();
+		if (pool.Active() != 0)
+			pool.Poll();
+		if (by_serial.Active() != 0)
+			by_serial.Poll();
 	}
 	if (!none_new.empty() || again)
 	{
@@ -418,15 +477,15 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 		PS5Platform::MakePublic(none_path.c_str(), false);
 	}
 	FileSystem::DeleteFilePath(running_path.c_str());
-	ps5px_log("covers: %zu game(s) without a cover: %d saved, %d not in libretro's collection, %d not asked for again, %d failed%s", missing.size(), saved,
-		unmatched, skipped, failed, progress->IsCancelled() ? " (stopped: a scan or a game took over)" : "");
+	ps5px_log("covers: %zu game(s) without a cover: %d saved (%d of them by serial), %d in neither collection, %d not asked for again, %d failed%s",
+		missing.size(), saved, saved_by_serial, unmatched, skipped, failed, progress->IsCancelled() ? " (stopped: a scan or a game took over)" : "");
 	if (lost || (saved == 0 && failed > 0 && unmatched + skipped == 0))
 		*summary = saved > 0 ? fmt::format("{} cover(s) downloaded; then the connection was lost.", saved) :
 							   std::string("The covers could not be downloaded: no connection (crux2-boot.log has the reason).");
 	else if (saved > 0)
-		*summary = fmt::format("{} cover(s) downloaded{}.", saved, unmatched + failed > 0 ? fmt::format("; {} game(s) have none in libretro's collection", unmatched + failed) : "");
+		*summary = fmt::format("{} cover(s) downloaded{}.", saved, unmatched + skipped > 0 ? fmt::format("; {} game(s) have none in either collection", unmatched + skipped) : "");
 	else
-		*summary = fmt::format("No new covers: {} game(s) have none in libretro's collection.", unmatched + skipped + failed);
+		*summary = fmt::format("No new covers: {} game(s) have none in either collection.", unmatched + skipped + failed);
 	return saved;
 }
 

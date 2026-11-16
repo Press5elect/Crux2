@@ -118,6 +118,7 @@ struct QuickState
 	// pages, the pins).
 	std::vector<settings::PinnedRow> pinned;
 	std::string pinnedFor;
+	int pinnedAt = -1; // the frame they were last made in
 	// How many of the game's patches and cheats are on (More says it), and for which game.
 	int patchesOn = 0;
 	std::string patchesFor;
@@ -203,7 +204,10 @@ GameInfo runningGame(const Running& running, bool fromDisc)
 bool openOwn(const Running& running)
 {
 	if (!qm.ownOpen && running.valid && running.crc != 0)
+	{
 		qm.ownOpen = be->openGame(runningGame(running, false));
+		ownSettingsChanged();
+	}
 	return qm.ownOpen;
 }
 
@@ -214,6 +218,7 @@ void closeOwn()
 		return;
 	qm.ownOpen = false;
 	be->closeGame();
+	ownSettingsChanged();
 }
 
 std::vector<ValuePart> partsOf(const Option& o, bool own)
@@ -506,7 +511,7 @@ void makeOptions(const Running& running)
 		return;
 	qm.optsFor = key;
 	qm.opts.clear();
-	for (const Page& page : settingsPages(true))
+	for (const Page& page : settingsPagesNow(true))
 	{
 		for (const Option& o : page.rows)
 		{
@@ -547,14 +552,14 @@ void collectNextStart()
 				same->own = same->own || p.own;
 		}
 	};
-	for (const Page& page : settingsPages(false))
+	for (const Page& page : settingsPagesNow(false))
 	{
 		for (const Option& o : page.rows)
 			add(o, false);
 	}
 	if (qm.ownOpen)
 	{
-		for (const Page& page : settingsPages(true))
+		for (const Page& page : settingsPagesNow(true))
 		{
 			for (const Option& o : page.rows)
 				add(o, true);
@@ -698,6 +703,7 @@ void quickScreen()
 		if (key != qm.pinnedFor)
 		{
 			qm.pinnedFor = key;
+			qm.pinnedAt = frameNow;
 			const GameInfo game = runningGame(running, false);
 			qm.pinned = pinsLine.empty() ? std::vector<settings::PinnedRow>() : settings::pinnedRows(qm.ownOpen ? &game : nullptr);
 		}
@@ -707,7 +713,9 @@ void quickScreen()
 	{
 		qm.entered = false;
 		checkApply(running);
-		qm.pinnedFor.clear();
+		// (Made anew as the menu comes up; not twice in the frame it opens in.)
+		if (qm.pinnedAt != frameNow)
+			qm.pinnedFor.clear();
 		qm.patchesFor.clear();
 		prepare();
 	}
@@ -721,7 +729,7 @@ void quickScreen()
 		{
 			if (page == 1 && !cheats)
 				continue;
-			for (const Option& o : be->patchesPage(page == 1).rows)
+			for (const Option& o : backendPageNow(page == 1 ? MadePage::Cheats : MadePage::Patches).rows)
 			{
 				if (o.kind == Option::Bool && (o.flags & Option::OneGame) && be->getBool(Own, o.section.c_str(), o.key.c_str()).value_or(false))
 					qm.patchesOn++;

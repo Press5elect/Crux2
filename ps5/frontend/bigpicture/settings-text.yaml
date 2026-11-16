@@ -583,7 +583,7 @@ pages:
         rows:
           - id: "PS5.AutoCovers"
             label: "Download Covers Automatically"
-            desc: "Downloads missing covers from libretro's thumbnail collection after each scan."
+            desc: "Downloads missing covers from libretro's thumbnail collection after each scan, and from the ps2-covers collection for games it has none for."
             kind: "toggle"
             area: "Games and saves"
             section: "Game List"

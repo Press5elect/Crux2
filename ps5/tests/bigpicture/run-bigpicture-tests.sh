@@ -4,7 +4,7 @@
 # Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
 # Crux2 - the interface on a PC (ps5/tests/bigpicture/preview.cpp).
 #
-#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|all]
+#   ps5/tests/bigpicture/run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|bench|all]
 #
 # Builds the interface's screens with PCSX2's own ImGui (and FreeType, as the title has it) and
 # the preview's Backend. "crawl" (the default): with the address and undefined-behaviour
@@ -12,13 +12,16 @@
 # all screens, twice with different seeds. "shots": optimised, a picture of each screen (PNG, in
 # <work folder>/shots), which is what one looks at after a change to a screen. "inventory": the
 # no-loss test of the settings (inventory/run-inventory-test.sh: every option of the baseline still
-# there, settings-text.yaml complete). "all": the three.
+# there, settings-text.yaml complete). "all": the three. "bench": optimised and without the
+# sanitizers, what a frame of each main screen costs (processor time, vertices, draw commands, heap
+# allocations), with the preview's usual library and with one of 3,000 games; the figures are
+# printed and kept in <work folder>/bench.txt (BENCH_FRAMES: frames a screen, 300).
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ps5=$(cd "$here/../.." && pwd)
 root=$(cd "$ps5/.." && pwd)
-work=${1:?usage: run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|all]}
+work=${1:?usage: run-bigpicture-tests.sh <work folder> [crawl|shots|inventory|bench|all]}
 what=${2:-crawl}
 imgui="$root/vendor/pcsx2/3rdparty/imgui"
 front="$ps5/frontend/bigpicture"
@@ -84,5 +87,13 @@ for ppm in sorted(Path(sys.argv[1]).glob("*.ppm")):
     ppm.unlink()
 PY
     ls "$work/shots" | wc -l
+fi
+if [[ $what == bench ]]; then
+    echo "== what a frame costs (this PC's processor: compare runs, not machines)"
+    build bench -O2 -DBP_BENCH
+    : > "$work/bench.txt"
+    for fixture in small large; do
+        "$work/bench/preview" bench "$work/fonts" "$fixture" "${BENCH_FRAMES:-300}" | tee -a "$work/bench.txt" || status=1
+    done
 fi
 exit $status

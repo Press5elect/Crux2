@@ -28,6 +28,22 @@ item is done or something new is learned; delete what no longer applies.
   Clay, Gloss) on the new layout; how fast the home is drawn (what is changed is looked at again every
   half second: about 700 values, twice; see phase 5 for the PC's figure). The README names settings
   by their area, section and PCSX2-style labels since phase 5.
+- The interface's speed (`run-bigpicture-tests.sh <folder> bench`, [`testing.md`](testing.md)):
+  **PC figures only, nothing profiled on a console.** On the PC a frame of any screen is 25 to 200
+  microseconds of the interface's own code (4,000 to 22,000 vertices), with 33 games or 3,033: the
+  frames are not where time goes. The changes of screen are: opening the quick menu with pins asked
+  the Backend for its game list three times and for 64 pages of rows (0 and 19 now), the Settings
+  for the game list once (0 now). To check on a console: that the quick menu, the Settings and a
+  game's settings (Square on Home, a game's page) open quicker than before with a large library;
+  the Statistics page, the settings' search for games, the card manager's game names and the texture
+  pack manager's after a scan, a rename or a favourite (they read the library's list now, which is
+  asked for again only when `gamesGeneration()` moves); pinned settings in the quick menu (made once
+  as it opens, the rows of all games only when a pin is not one of the game's own); long titles cut
+  with "..." in every view. Left as it is: a game's page still opens the game's settings once to
+  read them and Its settings opens them again (one `openGame` each; a Backend that kept the last
+  game's patches would save the second); the Settings look at what is changed every half second
+  (about 600 values read); the library is drawn under an open game page; the first frame of a
+  screen with text of a new size makes its glyphs (FreeType) once.
 - The interface revamp, phase 4A (bp_home.cpp; the top bar, the library's filter row and strip in
   bp_library.cpp): checked on the PC only (crawl, shots). Not run on a console. To check there: Home
   after the start-up, its Resume (the newest state: the one made at closing or a slot) and Game page;
@@ -106,6 +122,21 @@ item is done or something new is learned; delete what no longer applies.
 - PS Move: whether the console's own libSceMove gives a payload process Move data is unknown; the
   probe in [`../../ps5/probes/move/`](../../ps5/probes/move/README.md) (built, never run) calls it with
   the PS4's signatures and logs to `/data/crux2-move-probe.log`. Nothing in the title uses it yet.
+
+## To do (the owner's list)
+
+- **Restore the sandbox helper's reference-count fix** (`fd0a129`, 2026-11-05, from OGBox 0.0.2).
+  The helper for USB drives (`ps5/elevation/payload/main.cpp`) writes the console's root vnode into
+  the title's `fd_rdir` and `fd_jdir` without references: every elevated run's exit releases two it
+  never took, and after many exits with USB drives on the console can go down. The fix was undone
+  by the revert to v1.0.18 (`883c832`) and is in neither v1.0.19 nor v1.0.20. It still applies
+  cleanly (`git diff fd0a129^ fd0a129 | git apply --check`): three files, the helper, its
+  `protocol.hpp` (protocol version 2, `ok_unbalanced`) and `ps5_platform.cpp`; keep v1.0.19's
+  "asked again for a few seconds" retry in `ps5_platform.cpp`. Kernel-side code that cannot be
+  tested on a PC: a test build for the owner before any release.
+- The profiler's sync-wait statistics (`b51d391`: `ps5_sync_stats.h`, hooks in PCSX2's `MTGS.cpp`,
+  `MTVU.cpp` and `Memory.cpp`, about 94 lines) were not brought back either; the owner left them
+  out on 2026-11-16.
 
 ## Known problems
 

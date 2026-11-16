@@ -17,6 +17,11 @@
 //                                               built with the sanitizers, so a read past an
 //                                               array or a use of something freed ends it
 //
+//   preview bench <fonts folder> [small|large] [frames] [only]
+//                                               what a frame of each main screen costs (see
+//                                               bench() below); built with -DBP_BENCH, which
+//                                               counts the heap allocations
+//
 // Every game title, serial and cover here is made up.
 
 #include "bp.h"
@@ -41,6 +46,59 @@
 #include <set>
 #include <string>
 #include <vector>
+
+// ---- the bench's counters: what a frame takes from the heap (operator new, and ImGui's own
+// allocator, which the bench points here), while g_benchCounting is set.
+bool g_benchCounting = false;
+unsigned long long g_benchAllocations = 0;
+#ifdef BP_BENCH
+#include <new>
+void* operator new(std::size_t size)
+{
+	if (g_benchCounting)
+		g_benchAllocations++;
+	void* p = std::malloc(size != 0 ? size : 1);
+	if (p == nullptr)
+		throw std::bad_alloc();
+	return p;
+}
+void* operator new[](std::size_t size)
+{
+	return operator new(size);
+}
+void operator delete(void* p) noexcept
+{
+	std::free(p);
+}
+void operator delete[](void* p) noexcept
+{
+	std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept
+{
+	std::free(p);
+}
+void operator delete[](void* p, std::size_t) noexcept
+{
+	std::free(p);
+}
+#endif
+
+// (For a profiler: built with -DBP_CALLGRIND, callgrind looks at the measured frames only:
+// valgrind --tool=callgrind --instr-atstart=no preview bench <fonts> large 100 <only>.)
+#ifdef BP_CALLGRIND
+#include <valgrind/callgrind.h>
+#define BENCH_COLLECT(on) \
+	do \
+	{ \
+		if (on) \
+			CALLGRIND_START_INSTRUMENTATION; \
+		else \
+			CALLGRIND_STOP_INSTRUMENTATION; \
+	} while (0)
+#else
+#define BENCH_COLLECT(on) (void)0
+#endif
 
 // Drawn over a frame when set (the on-screen display's panel, which the emulator draws over a game).
 std::function<void()> g_overlay;
@@ -428,6 +486,15 @@ public:
 	int picturesFetched = 0;
 	int corner = -1;
 
+	// What the screens asked of the Backend (the bench counts them: on the console each is a lock,
+	// a walk through the game list or a look into a folder, which no PC's clock shows): the game
+	// list, a game's settings opened, a setting read, a game's saved states, a page of rows made,
+	// the memory cards looked at, the texture packs listed.
+	struct Asked
+	{
+		unsigned long long games = 0, opens = 0, reads = 0, states = 0, pages = 0, cards = 0, packs = 0;
+	} asked;
+
 	static std::string k(const char* section, const char* key) { return std::string(section) + "\n" + key; }
 
 	void add(const char* file, const char* title, const char* serial, int source, bp::GameInfo::Kind kind = bp::GameInfo::PS2, int compat = 5,
@@ -538,9 +605,118 @@ public:
 		bindings["Hotkeys/OpenPauseMenu"] = "Options";
 	}
 
+	// A large library, for the bench: `count` more games across the console, a USB drive and the
+	// share, a seventh of them played, some favourites, saved states, sets of discs, and six
+	// collections. The covers are a few dozen pictures shared between them (a picture each would be
+	// a gigabyte), and one game in ten has none.
+	void populateLarge(int count)
+	{
+		static const char* const first[] = {"Amber", "Brass", "Cinder", "Dusk", "Ember", "Frost", "Glass", "Hollow", "Iron", "Jade", "Kite", "Lunar",
+			"Marble", "Neon", "Onyx", "Paper", "Quiet", "Rust", "Silver", "Tin", "Umbra", "Velvet", "Winter", "Zephyr", "Scarlet", "Cobalt",
+			"Gilded", "Ashen", "Salt", "Thunder"};
+		static const char* const second[] = {"Harbor", "Circuit", "Crown", "Lantern", "Meridian", "Orbit", "Rally", "Signal", "Tactics", "Tide",
+			"Garden", "Compass", "Engine", "Kingdoms", "Parade", "Derby", "Ferry", "Fields", "Alley", "Comet", "Detectives", "Legends",
+			"Odyssey", "Frontier", "Chronicle"};
+		static const char* const third[] = {"", "", "", " 2", " 3", " Zero", " Racing", ": Origins", ": The Long Road Home", " Championship Edition"};
+		const time_t now = 1790000000;
+		std::vector<Pixels*> coverPool, scenePool;
+		for (unsigned i = 0; i < 40; i++)
+			coverPool.push_back(inventCover(7000 + i * 13, 256, 364));
+		for (unsigned i = 0; i < 12; i++)
+			scenePool.push_back(inventScene(3000 + i * 29));
+		std::mt19937 random(20261116);
+		std::vector<std::string> members[6];
+		for (int i = 0; i < count; i++)
+		{
+			const unsigned r = random();
+			bp::GameInfo g;
+			const int source = (i % 5 < 3) ? 0 : (i % 5 == 3) ? 1 : 2;
+			const char* roots[3] = {"/data/homebrew/PPSA99249/games/", "/mnt/usb0/ps2/", "/smb/PS2/"};
+			char serial[24], title[128], file[192];
+			const int region = static_cast<int>(r % 7);
+			std::snprintf(serial, sizeof(serial), "%s-%05d", region < 4 ? "SLUS" : region < 6 ? "SLES" : "SLPS", 30000 + i);
+			std::snprintf(title, sizeof(title), "%s %s%s", first[(r >> 3) % 30], second[(r >> 9) % 25], third[(r >> 15) % 10]);
+			// (One in forty is the first of two discs; the next one is its second.)
+			const bool disc2 = i > 0 && (i - 1) % 40 == 7;
+			if (disc2)
+				std::snprintf(title, sizeof(title), "%s", list.back().title.c_str());
+			if (i % 40 == 7 || disc2)
+				std::snprintf(file, sizeof(file), "%s %d (%s) (Disc %d).chd", title, i - (disc2 ? 1 : 0), region < 4 ? "USA" : region < 6 ? "Europe" : "Japan", disc2 ? 2 : 1);
+			else
+				std::snprintf(file, sizeof(file), "%s %d (%s).chd", title, i, region < 4 ? "USA" : region < 6 ? "Europe" : "Japan");
+			g.path = std::string(roots[source]) + file;
+			g.fileName = file;
+			g.title = title;
+			g.serial = serial;
+			g.source = source;
+			g.kind = (i % 97 == 0) ? bp::GameInfo::PS1 : bp::GameInfo::PS2;
+			g.compatibility = static_cast<int>((r >> 20) % 7);
+			g.crc = static_cast<uint32_t>(std::hash<std::string>()(serial)) | 1u;
+			g.region = region < 4 ? "NTSC-U" : region < 6 ? "PAL-E" : "NTSC-J";
+			g.size = 700ull * 1024 * 1024 + ((r >> 4) % 3500) * 1024ull * 1024;
+			g.added = 1780000000 - static_cast<time_t>((r >> 2) % 9000000);
+			if (i % 7 == 3)
+			{
+				g.lastPlayed = now - 600 - static_cast<time_t>((r >> 5) % (400 * 86400));
+				g.playedSeconds = 300 + static_cast<time_t>((r >> 7) % (60 * 3600));
+			}
+			g.favourite = i % 23 == 5;
+			g.hasCheats = i % 3 == 0;
+			g.hasTextures = i % 5 == 0;
+			if (i % 10 != 9)
+				covers[g.path] = coverPool[(r >> 11) % coverPool.size()];
+			if (i % 6 == 0)
+			{
+				pictures[g.path + "\n0"] = scenePool[(r >> 13) % scenePool.size()];
+				pictures[g.path + "\n1"] = scenePool[(r >> 17) % scenePool.size()];
+			}
+			if (i % 14 == 3)
+			{
+				std::vector<bp::StateInfo>& out = savedStates[g.serial];
+				const int slots = 1 + static_cast<int>((r >> 8) % 4);
+				for (int slot = slots > 2 ? -1 : 1; slot <= slots; slot++)
+				{
+					if (slot == 0)
+						continue;
+					bp::StateInfo st;
+					st.slot = slot;
+					st.when = g.lastPlayed - 600 * (slot + 2);
+					st.path = "/states/" + g.serial + "." + std::to_string(slot);
+					statePictures[st.path] = scenePool[static_cast<size_t>(slot + 2) % scenePool.size()];
+					out.push_back(std::move(st));
+				}
+				g.hasStates = true;
+			}
+			for (int c = 0; c < 6; c++)
+			{
+				if (i % (11 + c * 9) == c)
+					members[c].push_back(g.serial);
+			}
+			ownTitles[g.path] = g.title;
+			list.push_back(std::move(g));
+		}
+		static const char* const names[6] = {"Racing", "With friends", "To finish", "Imports", "Short ones", "Classics"};
+		std::string all;
+		for (int c = 0; c < 6; c++)
+		{
+			all += (c ? "|" : "") + std::string(names[c]);
+			std::string line;
+			for (const std::string& m : members[c])
+				line += (line.empty() ? "" : "|") + m;
+			values[0][k("PS5UI", ("Collection" + std::to_string(c + 1)).c_str())] = line;
+		}
+		values[0][k("PS5UI", "Collections")] = all;
+		haveUsb = true;
+		generation++;
+	}
+
 	// ---- the library
 	unsigned gamesGeneration() override { return generation; }
-	std::vector<bp::GameInfo> games() override { return list; }
+	std::vector<bp::GameInfo> games() override
+	{
+		asked.games++;
+		return list;
+	}
 	bp::Texture cover(const bp::GameInfo& game) override
 	{
 		const auto it = covers.find(game.path);
@@ -786,6 +962,7 @@ public:
 	// ---- saved states
 	std::vector<bp::StateInfo> states(const std::string& serial, uint32_t, bool withBackups) override
 	{
+		asked.states++;
 		std::vector<bp::StateInfo> out;
 		const auto it = savedStates.find(serial);
 		if (it != savedStates.end())
@@ -827,6 +1004,7 @@ public:
 	// ---- settings
 	bool openGame(const bp::GameInfo& game) override
 	{
+		asked.opens++;
 		if (game.serial.empty() && game.crc == 0)
 			return false;
 		gameOpen = true;
@@ -850,21 +1028,25 @@ public:
 	}
 	std::optional<bool> getBool(int layer, const char* section, const char* key) override
 	{
+		asked.reads++;
 		const std::string* v = find(layer, section, key);
 		return v ? std::optional<bool>(*v == "true") : std::nullopt;
 	}
 	std::optional<int> getInt(int layer, const char* section, const char* key) override
 	{
+		asked.reads++;
 		const std::string* v = find(layer, section, key);
 		return v ? std::optional<int>(std::atoi(v->c_str())) : std::nullopt;
 	}
 	std::optional<float> getFloat(int layer, const char* section, const char* key) override
 	{
+		asked.reads++;
 		const std::string* v = find(layer, section, key);
 		return v ? std::optional<float>(static_cast<float>(std::atof(v->c_str()))) : std::nullopt;
 	}
 	std::optional<std::string> getString(int layer, const char* section, const char* key) override
 	{
+		asked.reads++;
 		const std::string* v = find(layer, section, key);
 		return v ? std::optional<std::string>(*v) : std::nullopt;
 	}
@@ -917,6 +1099,7 @@ public:
 	}
 	bp::Page controllersPage(int) override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x84\x9b", "Controllers", {}};
 		page.rows.push_back(head("CONTROLLER PORT 1"));
 		bp::Option type;
@@ -947,6 +1130,7 @@ public:
 	}
 	bp::Page hotkeysPage() override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x84\x9c", "Hotkeys", {}};
 		page.rows.push_back(head("GENERAL"));
 		page.rows.push_back(bind("Hotkeys", "OpenPauseMenu", "Open the quick menu"));
@@ -955,6 +1139,7 @@ public:
 	}
 	bp::Page memoryCardsPage(int) override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x9f\x82", "Memory cards", {}};
 		for (int slot = 1; slot <= 2; slot++)
 		{
@@ -1096,6 +1281,7 @@ public:
 
 	std::vector<std::string> cardNames() override
 	{
+		asked.cards++;
 		std::vector<std::string> names;
 		for (const auto& [name, image] : cardFiles)
 			names.push_back(name);
@@ -1103,6 +1289,7 @@ public:
 	}
 	bp::CardView lookAtCard(const std::string& name) override
 	{
+		asked.cards++;
 		bp::CardView view;
 		if (!cardFiles.count(name))
 		{
@@ -1386,6 +1573,7 @@ public:
 
 	bp::Page foldersPage() override
 	{
+		asked.pages++;
 		bp::Page page;
 		auto heading = [](const char* label) {
 			bp::Option o;
@@ -1424,6 +1612,7 @@ public:
 
 	bp::Page biosPage(int) override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x8b\x9b", "BIOS", {}};
 		bp::Option bios;
 		bios.kind = bp::Option::StringList;
@@ -1439,6 +1628,7 @@ public:
 	// The PlayStation 2's network adapter and hard drive, with invented values.
 	bp::Page networkPage(int) override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x9b\xbf", "Network", {}};
 		page.rows.push_back(head("NETWORK ADAPTER"));
 		bp::Option on;
@@ -1530,6 +1720,7 @@ public:
 	}
 	bp::Page patchesPage(bool cheats) override
 	{
+		asked.pages++;
 		bp::Page page{cheats ? "\xef\x83\xa7" : "\xef\x91\xa2", cheats ? "Cheats" : "Patches", {}};
 		for (const std::string& name : cheats ? cheatNames : patchNames)
 		{
@@ -1547,6 +1738,7 @@ public:
 	// Backups on an invented drive and share: one made by hand, one automatic, one cut short.
 	bp::Page backupPage() override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x83\xae", "Backup", {}};
 		page.rows.push_back(head("MEMORY CARDS AND SAVED STATES"));
 		bp::Option where;
@@ -1629,6 +1821,7 @@ public:
 	// The logs: an invented one, with long lines, warnings and the report of a crash.
 	bp::Page logPage() override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x85\x9c", "Log", {}};
 		page.rows.push_back(head("WHAT CRUX2 WROTE DOWN"));
 		bp::Option run;
@@ -1680,6 +1873,7 @@ public:
 	// RetroAchievements: an invented account, signed in to on the keyboard.
 	bp::Page achievementsPage() override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x82\x91", "Achievements", {}};
 		page.rows.push_back(head("RETROACHIEVEMENTS"));
 		bp::Option account;
@@ -1725,6 +1919,7 @@ public:
 	// What the database recommends for the open game: an invented change of its own setting.
 	std::vector<bp::Option> gameRows() override
 	{
+		asked.pages++;
 		std::vector<bp::Option> rows;
 		bp::Option row;
 		row.kind = bp::Option::Action;
@@ -1749,6 +1944,7 @@ public:
 	}
 	bp::Page aboutPage() override
 	{
+		asked.pages++;
 		bp::Page page{"\xef\x81\x9a", "About", {}};
 		const auto line = [&](const char* label, const char* value) {
 			bp::Option o;
@@ -1770,6 +1966,7 @@ public:
 	}
 	std::vector<bp::Option> portRows() override
 	{
+		asked.pages++;
 		std::vector<bp::Option> rows;
 		rows.push_back(head("PLAYSTATION 5"));
 		bp::Option usb;
@@ -1979,6 +2176,7 @@ public:
 	unsigned packsGeneration() override { return packsGen; }
 	std::vector<bp::PackPlace> packPlaces() override
 	{
+		asked.packs++;
 		std::vector<bp::PackPlace> places = packPlacesHeld;
 		// (Free space as a PC would know it; the console knows none.)
 		if (!places.empty())
@@ -1987,7 +2185,11 @@ public:
 			places[1].freeBytes = 2ll << 30;
 		return places;
 	}
-	std::vector<bp::InstalledPack> installedPacks() override { return packsHeld; }
+	std::vector<bp::InstalledPack> installedPacks() override
+	{
+		asked.packs++;
+		return packsHeld;
+	}
 	void lookAgain(bool all) override
 	{
 		packsLooked++;
@@ -2240,6 +2442,16 @@ struct Harness
 
 	bool optionsWas = false;
 	int over = 0, under = 0, nowhere = 0;
+	// The bench: the last frame's cost, and no rasteriser at all.
+	bool benchOnly = false;
+	double lastMicroseconds = 0;
+	unsigned long long lastAllocations = 0;
+	static double cpuMicroseconds()
+	{
+		timespec ts;
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+		return static_cast<double>(ts.tv_sec) * 1e6 + static_cast<double>(ts.tv_nsec) * 1e-3;
+	}
 
 	void frame(uint32_t held, Frame* target, bool validate)
 	{
@@ -2254,12 +2466,23 @@ struct Harness
 			backend.after(1, [] { bp::openQuickMenu(); });
 		optionsWas = optionsNow;
 		backend.tick(io.DeltaTime);
+		// (The bench's figures are of this part: the screens and ImGui's lists, not the tick before
+		// it nor the software rasteriser after it.)
+		const unsigned long long allocationsBefore = g_benchAllocations;
+		g_benchCounting = true;
+		const double before = cpuMicroseconds();
 		ImGui::NewFrame();
 		bp::render();
 		if (g_overlay)
 			g_overlay();
 		ImGui::Render();
-		rasterise(ImGui::GetDrawData(), target, validate);
+		lastMicroseconds = cpuMicroseconds() - before;
+		g_benchCounting = false;
+		lastAllocations = g_benchAllocations - allocationsBefore;
+		if (benchOnly)
+			serveTextures(ImGui::GetDrawData());
+		else
+			rasterise(ImGui::GetDrawData(), target, validate);
 		frames++;
 
 		// What must hold whatever was pressed, the machine's lag allowed for (half a second):
@@ -4457,13 +4680,321 @@ void crawl(Harness& h, unsigned seed)
 	g_check.expect(b.sounded[2], "the library opened, and said so");
 }
 
+// What a frame costs: each main screen held still (or scrolled, a direction held down) for
+// `frames` frames, and for each the processor time of a frame of the interface's own code (ImGui's
+// NewFrame, the screens, ImGui's Render: the draw lists made, nothing drawn), the vertices and
+// draw commands of its lists, and what it took from the heap. A line a screen:
+//   bench <fixture> <screen> avg <us> worst <us> vtx <n> idx <n> cmds <n> allocs <n per frame>
+// `only`: just the screens whose names have it in them (for a profiler).
+void bench(Harness& h, const char* fixture, int frames, const char* only)
+{
+	PreviewBackend& b = h.backend;
+	h.benchOnly = true;
+#ifdef BP_BENCH
+	ImGui::SetAllocatorFunctions(
+		[](size_t size, void*) -> void* {
+			if (g_benchCounting)
+				g_benchAllocations++;
+			return std::malloc(size);
+		},
+		[](void* p, void*) { std::free(p); });
+#endif
+	std::printf("# %s fixture: %zu games; %d frames a screen; microseconds of processor time a frame (this PC)\n", fixture, b.list.size(), frames);
+	std::printf("# reads/f: settings read from the Backend a frame; heavy/f: its lists asked for a frame (the games, a game's states,\n"
+				"# a page of rows, the cards, the packs, a game's settings opened)\n");
+	std::printf("# %-7s %-28s %9s %9s %9s %8s %8s %6s %9s %8s %8s\n", "fixture", "screen", "avg us", "median", "worst us", "vtx", "idx", "cmds", "allocs/f",
+		"reads/f", "heavy/f");
+	const auto heavy = [&b] { return b.asked.games + b.asked.opens + b.asked.states + b.asked.pages + b.asked.cards + b.asked.packs; };
+	const auto measure = [&](const char* name, uint32_t held = 0) {
+		if (only != nullptr && std::strstr(name, only) == nullptr)
+			return;
+		std::vector<double> times;
+		double sum = 0, worst = 0;
+		unsigned long long vtx = 0, idx = 0, cmds = 0, allocations = 0;
+		const unsigned long long readsBefore = b.asked.reads, heavyBefore = heavy();
+		for (int i = 0; i < frames; i++)
+		{
+			BENCH_COLLECT(true);
+			h.frame(held, nullptr, false);
+			BENCH_COLLECT(false);
+			times.push_back(h.lastMicroseconds);
+			sum += h.lastMicroseconds;
+			worst = std::max(worst, h.lastMicroseconds);
+			allocations += h.lastAllocations;
+			const ImDrawData* data = ImGui::GetDrawData();
+			vtx += static_cast<unsigned long long>(data->TotalVtxCount);
+			idx += static_cast<unsigned long long>(data->TotalIdxCount);
+			for (const ImDrawList* list : data->CmdLists)
+				cmds += static_cast<unsigned long long>(list->CmdBuffer.Size);
+		}
+		std::sort(times.begin(), times.end());
+		const double n = static_cast<double>(frames);
+		std::printf("bench %-7s %-28s %9.1f %9.1f %9.1f %8.0f %8.0f %6.1f %9.1f %8.1f %8.2f\n", fixture, name, sum / n, times[times.size() / 2], worst,
+			static_cast<double>(vtx) / n, static_cast<double>(idx) / n, static_cast<double>(cmds) / n, static_cast<double>(allocations) / n,
+			static_cast<double>(b.asked.reads - readsBefore) / n, static_cast<double>(heavy() - heavyBefore) / n);
+		std::fflush(stdout);
+	};
+	// A change of screen: the button pressed (or `act` run), then 90 frames. The worst frame and
+	// which one it was (1: the frame that read the press), what the first ten frames took together,
+	// how much the worst took from the heap, after how many frames the screen was all there (its
+	// lists within a fiftieth of the vertices they end with), and what the first ten frames asked
+	// of the Backend: the game list, a game's settings opened, a game's states, pages of rows (with
+	// the cards and the packs), settings read.
+	struct Change
+	{
+		std::string name;
+		double worst, first10;
+		int worstAt, settled;
+		unsigned long long allocations;
+		PreviewBackend::Asked asked;
+	};
+	std::vector<Change> changes;
+	const auto change = [&](const char* name, uint32_t button, const std::function<void()>& act = {}) {
+		const bool collect = only == nullptr || std::strstr(name, only) != nullptr;
+		h.wait(30);
+		if (act)
+			act();
+		const int window = 90;
+		Change c{name, 0, 0, 0, 0, 0, {}};
+		const PreviewBackend::Asked before = b.asked;
+		std::vector<int> vtx;
+		for (int i = 0; i < window; i++)
+		{
+			if (collect && i < 10)
+				BENCH_COLLECT(true);
+			h.frame(i < 2 ? button : 0, nullptr, false);
+			BENCH_COLLECT(false);
+			if (h.lastMicroseconds > c.worst)
+			{
+				c.worst = h.lastMicroseconds;
+				c.worstAt = i + 1;
+				c.allocations = h.lastAllocations;
+			}
+			if (i < 10)
+				c.first10 += h.lastMicroseconds;
+			if (i == 9)
+			{
+				c.asked.games = b.asked.games - before.games;
+				c.asked.opens = b.asked.opens - before.opens;
+				c.asked.states = b.asked.states - before.states;
+				c.asked.pages = b.asked.pages + b.asked.cards + b.asked.packs - before.pages - before.cards - before.packs;
+				c.asked.reads = b.asked.reads - before.reads;
+			}
+			vtx.push_back(ImGui::GetDrawData()->TotalVtxCount);
+		}
+		for (int i = 0; i < window; i++)
+		{
+			if (std::abs(vtx[static_cast<size_t>(i)] - vtx.back()) * 50 > vtx.back())
+				c.settled = i + 2;
+		}
+		if (collect)
+			changes.push_back(c);
+	};
+	const auto setView = [&](int view) {
+		b.setInt(0, "PS5UI", "View", view);
+		bp::loadOptions();
+		h.wait(60);
+	};
+	const auto game = [&](const char* serial) -> bp::GameInfo {
+		for (const bp::GameInfo& g : b.list)
+		{
+			if (g.serial == serial)
+				return g;
+		}
+		return b.list.front();
+	};
+
+	// The start-up plays out; then Home, and Home with its row of covers in focus.
+	h.wait(500);
+	b.wantUsb = true;
+	bp::showLibraryTab(bp::TabHome);
+	h.wait(60);
+	measure("home");
+	h.press(P::Down, 30);
+	h.press(P::Right, 30);
+	measure("home-covers-focused");
+
+	// The library on all places, in each of its ten views.
+	bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+	const int views[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+	const char* const viewNames[] = {"shelves", "grid", "list", "flow", "bookcase", "table", "showcase", "wheel", "wall", "discs"};
+	for (int i = 0; i < 10; i++)
+	{
+		setView(views[i]);
+		char name[48];
+		std::snprintf(name, sizeof(name), "library-%s", viewNames[i]);
+		measure(name);
+	}
+	// The filter row in focus, in the grid.
+	setView(1);
+	for (int i = 0; i < 40 && bp::libraryChip() < 0; i++)
+		h.press(P::Up, 8);
+	g_check.expect(bp::libraryChip() >= 0, "bench: Up from the grid's first row is on the filter row");
+	measure("library-grid-filter-row");
+	h.press(P::Down, 20);
+	// A direction held down: the list, the grid, the table, the wall (Down) and the shelves and the flow (Right).
+	measure("scroll-grid-down-held", P::Down);
+	setView(2);
+	measure("scroll-list-down-held", P::Down);
+	setView(5);
+	measure("scroll-table-down-held", P::Down);
+	setView(8);
+	measure("scroll-wall-down-held", P::Down);
+	setView(0);
+	measure("scroll-shelves-right-held", P::Right);
+	measure("scroll-shelves-down-held", P::Down);
+	setView(3);
+	measure("scroll-flow-right-held", P::Right);
+	h.wait(30);
+
+	// The library's search: the keyboard with a query typed ("ne"), and what it found, in the list
+	// and in the grid.
+	setView(2);
+	h.press(P::Square, 30);
+	h.press(P::Cross, 30);
+	{
+		const auto key = [&](int& kx, int& ky, int toX, int toY) {
+			for (; ky < toY; ky++)
+				h.press(P::Down, 3);
+			for (; ky > toY; ky--)
+				h.press(P::Up, 3);
+			for (; kx < toX; kx++)
+				h.press(P::Right, 3);
+			for (; kx > toX; kx--)
+				h.press(P::Left, 3);
+			h.press(P::Cross, 3);
+		};
+		int kx = 0, ky = 1;
+		key(kx, ky, 5, 3);
+		key(kx, ky, 2, 1);
+	}
+	h.wait(10);
+	measure("search-keyboard-typed");
+	h.press(P::Options, 40);
+	measure("search-found-list");
+	measure("search-found-list-down-held", P::Down);
+	setView(1);
+	measure("search-found-grid");
+	h.press(P::Circle, 40);
+	h.wait(20);
+	setView(0);
+
+	// A game's page, tab by tab (a game with saved states).
+	bp::goToGame(game("SLUS-29001"), true);
+	h.wait(40);
+	static const char* const tabs[] = {"game-page-tab1", "game-page-tab2", "game-page-tab3", "game-page-tab4", "game-page-tab5"};
+	for (int i = 0; i < 5; i++)
+	{
+		measure(tabs[i]);
+		h.press(P::R1, 30);
+	}
+	for (int i = 0; i < 12 && bp::dialogOpen(); i++)
+		h.press(P::Circle, 12);
+	h.press(P::Circle, 30);
+
+	// The settings: their home, a page of an area, and the search with a query typed.
+	h.press(P::Options, 40);
+	g_check.expect(bp::screen == bp::Screen::Settings, "bench: Options opens the settings");
+	measure("settings-home");
+	g_check.expect(bp::settingsFocus("Graphics"), "bench: the settings have Graphics");
+	h.wait(30);
+	measure("settings-graphics");
+	g_check.expect(bp::settingsFocus("Graphics", "Look (shader preset)"), "bench: Graphics has the shader preset");
+	h.wait(30);
+	measure("settings-graphics-page");
+	measure("settings-page-down-held", P::Down);
+	h.press(P::Circle, 20);
+	h.press(P::Circle, 20);
+	bp::settingsSearchFor("vsync", 0);
+	h.wait(20);
+	measure("settings-search-vsync");
+	bp::settingsSearchFor("e", 0);
+	h.wait(20);
+	measure("settings-search-e");
+	for (int i = 0; i < 6 && bp::screen == bp::Screen::Settings; i++)
+		h.press(P::Circle, 30);
+
+	// ---- the changes of screen
+	// Home, a game of its row of covers in focus: Square is that game's own settings (the settings'
+	// rows made for a game for the first time), OPTIONS leaves them; and once more, now that they
+	// were made once.
+	bp::showLibraryTab(bp::TabHome);
+	h.wait(60);
+	h.press(P::Down, 30);
+	h.press(P::Right, 30);
+	change("home>game-settings (1st)", P::Square);
+	g_check.expect(bp::screen == bp::Screen::Settings, "bench: Square on Home's covers opens the game's settings");
+	change("game-settings>home", P::Options);
+	g_check.expect(bp::screen == bp::Screen::Library && bp::libraryTab() == bp::TabHome, "bench: and OPTIONS is Home again");
+	change("home>game-settings (2nd)", P::Square);
+	change("game-settings>home (2nd)", P::Options);
+	// Home: Triangle is the game's page; on it, Its settings (the third tab); back to the page, and
+	// out of it.
+	change("home>game-page", P::Triangle);
+	h.press(P::R1, 30);
+	h.press(P::R1, 30);
+	h.press(P::Down, 20);
+	change("game-page>its-settings", P::Cross);
+	g_check.expect(bp::screen == bp::Screen::Settings, "bench: the game page's third tab opens the game's settings");
+	change("its-settings>game-page", P::Circle);
+	g_check.expect(bp::screen == bp::Screen::Library, "bench: and Circle is the page again");
+	for (int i = 0; i < 4 && bp::dialogOpen(); i++)
+		h.press(P::Circle, 12);
+	h.press(P::Up, 20);
+	change("game-page>library", P::Circle);
+	// The library (the grid): Triangle is the page, Circle the grid; OPTIONS the settings of all
+	// games and back.
+	bp::showLibraryTab(bp::TabLibrary, bp::SourceCount);
+	setView(1);
+	change("library>game-page", P::Triangle);
+	change("game-page>library (grid)", P::Circle);
+	change("library>settings", P::Options);
+	g_check.expect(bp::screen == bp::Screen::Settings, "bench: OPTIONS in the library opens the settings");
+	change("settings>library", P::Options);
+	change("library>settings (2nd)", P::Options);
+	change("settings>library (2nd)", P::Options);
+	setView(0);
+
+	// The quick menu over a game, with five settings pinned; and one of its pins in focus.
+	b.setString(0, "PS5UI", "Pins",
+		"EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar;EmuCore/GS.FrameGeneration;PS5UI.Look");
+	b.start(game("SLUS-29001"), INT_MIN, 0);
+	h.wait(360);
+	change("game>quick-menu (pins, 1st)", 0, [] { bp::openQuickMenu(); });
+	change("quick-menu>game", P::Circle);
+	g_check.expect(bp::screen == bp::Screen::None, "bench: Circle closes the quick menu");
+	change("game>quick-menu (pins, 2nd)", 0, [] { bp::openQuickMenu(); });
+	change("quick-menu>game (2nd)", P::Circle);
+	bp::openQuickMenu();
+	h.wait(40);
+	g_check.expect(bp::screen == bp::Screen::Quick, "bench: the quick menu is up over the game");
+	measure("quick-menu-pinned");
+	h.press(P::Down, 10);
+	h.press(P::Down, 20);
+	measure("quick-menu-pin-focused");
+	bp::quickFocus("load");
+	h.wait(20);
+	measure("quick-menu-load-state");
+	// The quick menu's "Game settings" (the settings over a paused game), and back.
+	bp::quickFocus("settings");
+	h.wait(10);
+	change("quick-menu>game-settings", P::Cross);
+	change("game-settings>quick-menu", P::Options);
+
+	std::printf("# %-7s %-30s %9s %3s %10s %12s %7s %5s %5s %6s %5s %6s\n", "fixture", "change of screen", "worst us", "at", "first10 us", "allocs-worst",
+		"settled", "games", "opens", "states", "pages", "reads");
+	for (const Change& c : changes)
+		std::printf("trans %-7s %-30s %9.1f %3d %10.1f %12llu %7d %5llu %5llu %6llu %5llu %6llu\n", fixture, c.name.c_str(), c.worst, c.worstAt, c.first10,
+			c.allocations, c.settled, c.asked.games, c.asked.opens, c.asked.states, c.asked.pages, c.asked.reads);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
 	if (argc < 3)
 	{
-		std::fprintf(stderr, "usage: %s shots <fonts folder> <out folder> | startup <fonts folder> <out folder> <1..4> | crawl <fonts folder> [seed]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s shots <fonts folder> <out folder> | startup <fonts folder> <out folder> <1..4> | crawl <fonts folder> [seed] | bench <fonts folder> [small|large] [frames] [only]\n", argv[0]);
 		return 2;
 	}
 	const std::string mode = argv[1];
@@ -4479,6 +5010,8 @@ int main(int argc, char** argv)
 
 	Harness h(1920, 1080);
 	h.backend.populate();
+	if (mode == "bench" && argc > 3 && std::strcmp(argv[3], "large") == 0)
+		h.backend.populateLarge(3000);
 	// Which start-up plays: the first unless told (the title itself plays another one each start).
 	{
 		int kind = 1;
@@ -4514,6 +5047,11 @@ int main(int argc, char** argv)
 			h.shot(name);
 		}
 		g_check.expect(h.backend.sounded[0] && !h.backend.sounded[1] && h.backend.sounded[2], "a start-up left alone begins and opens the library");
+	}
+	else if (mode == "bench")
+	{
+		// bench <fonts> [small|large] [frames] [only]
+		bench(h, argc > 3 ? argv[3] : "small", argc > 4 ? std::max(10, std::atoi(argv[4])) : 300, argc > 5 ? argv[5] : nullptr);
 	}
 	else
 	{

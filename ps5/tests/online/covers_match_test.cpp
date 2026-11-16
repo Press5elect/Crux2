@@ -41,6 +41,25 @@ int main(int argc, char** argv)
 {
 	if (argc < 3)
 		return 2;
+	{
+		// The second collection's covers (by serial) are JPEGs, and its "nothing there" line in
+		// no-cover.txt cannot be taken for libretro's (serial, a tab, the file's name).
+		unsigned char jpeg[80] = {0xFF, 0xD8, 0xFF, 0xE0};
+		unsigned char page[80] = {'<', 'h', 't', 'm', 'l'};
+		if (!PS5Covers::IsJPEG(jpeg, sizeof(jpeg)) || PS5Covers::IsJPEG(page, sizeof(page)) || PS5Covers::IsJPEG(jpeg, 8) ||
+			PS5Covers::IsPNG(jpeg, sizeof(jpeg)))
+		{
+			std::printf("FAILED: IsJPEG\n");
+			return 1;
+		}
+		const std::string by_serial = PS5Covers::NoSerialCoverLine("SLUS-29001");
+		if (by_serial != "by-serial SLUS-29001" || by_serial == PS5Covers::NoMatchLine("SLUS-29001", "") ||
+			by_serial.find('\t') != std::string::npos)
+		{
+			std::printf("FAILED: NoSerialCoverLine\n");
+			return 1;
+		}
+	}
 	std::ifstream list(argv[1]);
 	std::stringstream text;
 	text << list.rdbuf();

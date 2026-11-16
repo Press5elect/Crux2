@@ -580,7 +580,8 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
 - **Covers:** a picture named like the game's serial or title in `covers/` (`.jpg`, `.png` or
   `.webp`) is used as its cover. Missing covers are fetched after every scan from libretro's
   collection of box arts (`libretro-thumbnails/Sony_-_PlayStation_2`), its region's picture first,
-  and saved as `covers/<serial>.png`. Settings > Games and saves > Game List has **Download Covers
+  and saved as `covers/<serial>.png`. A game it has no box art for is asked for by its serial in a
+  second collection (`xlenore/ps2-covers`) and saved as `covers/<serial>.jpg`. Settings > Games and saves > Game List has **Download Covers
   Automatically** and **Download Missing Covers** (which also asks again for the games nothing was found
   for, remembered in `covers/no-cover.txt`). A `CoverURL` of your own under `[PS5]` in
   `inis/PCSX2.ini` is used instead. A game without a cover is shown as a card with its title.

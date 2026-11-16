@@ -6,7 +6,8 @@ stays at the repository's root because the build copies it into the title folder
 
 | Release | Published | Notes | Main points |
 | --- | --- | --- | --- |
-| v1.0.20 | pending | [`v1.0.20.md`](v1.0.20.md) | The interface laid out anew (Home, the library's filter row, a game's page, the quick menu, settings in eight areas, search and pins); anti-aliasing in one row; the HD texture pack manager; a performance overlay in three sizes. Not yet run on a console |
+| v1.0.21 | pending | [`v1.0.21.md`](v1.0.21.md) | A game's settings open at once with many cheat files; the interface asks the emulator for less when a screen opens; covers from a second collection, by serial |
+| v1.0.20 | 2026-11-16 | [`v1.0.20.md`](v1.0.20.md) | The interface laid out anew (Home, the library's filter row, a game's page, the quick menu, settings in eight areas, search and pins); anti-aliasing in one row; the HD texture pack manager; a performance overlay in three sizes. Not yet run on a console |
 | v1.0.19 | pending | [`v1.0.19.md`](v1.0.19.md) | HDR10; network shares set up on the console; light gun (GunCon 2 setup, steady aim, PlayStation Move); trophy pop-ups; texture packs over 10 connections; startup video; recomp kit with the release; PCSX2 v2.9.179 |
 | v1.0.18 | 2026-11-01 | [`v1.0.18.md`](v1.0.18.md) | Settings > Folders; accurate floating point (FPU, VU0, VU1); MihawkGen frame generation; Show the movement; frame generation fixes at 30 fps and 120 Hz |
 | v1.0.17 | 2026-10-31 | [`v1.0.17.md`](v1.0.17.md) | VRR (experimental); graphics driver on a core of its own; less GS-thread work; Mesa main of 2026-10-31; PCSX2 v2.9.150 (includes the unpublished v1.0.16) |

@@ -561,7 +561,7 @@ void rebuild()
 
 	// The library's games, by serial: a card's game is shown with its cover and the title the
 	// library gives it.
-	std::vector<GameInfo> games = be->games();
+	const std::vector<GameInfo>& games = knownGames();
 	const auto gameOf = [&games](const std::string& serial) -> const GameInfo* {
 		for (const GameInfo& g : games)
 		{
