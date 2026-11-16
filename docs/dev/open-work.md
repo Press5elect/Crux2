@@ -181,6 +181,13 @@ the kernel's mapping calls and 18.7% in `radv_ps5_cpu_flush` (a `clflushopt` per
 target). The same share shows in light scenes (49% of a thread 55% busy), so it is a cost of every
 frame, about 8 ms. The GIF and vertex handlers are about 20%; the recorder thread is 30% busy.
 
+- **Measured with both switches on (the owner, 2026-11-16, SLUS-21376, 6x):** the thread is on a
+  processor 30-60% of the time (100% before), the driver's share of it 1-3% (20%), nothing under
+  `CreateSurface` among the 40 functions on the stack, and 38% of the busy window is the wait for
+  the next image at present. The owner reports about 50% more speed. The surfaces still created
+  are small textures from `GSTextureCache::CreateSource` (+0xd97e6: 50 to 200 a second) and a few
+  from `Target::Create`, `Target::Update` and `Palette::Palette`. A run of the first game with
+  both switches off (the caller of the large targets there) was not made.
 - Why it costs: `GSTextureVK.cpp:243` asks for a dedicated allocation for every target of 512x448
   and more; the winsys zeroes each new buffer and flushes it (`radv_ps5_bo.c:136`); the pool
   (`GSDevice.cpp:685`) reuses only an exact size and format.
