@@ -146,10 +146,11 @@ ImVec2 text(ImDrawList* dl, ImFont* font, float size, float x, float y, ImU32 c,
 	return textSize(font, size, s, wrap);
 }
 
-std::string fit(ImFont* font, float size, const std::string& s, float width)
+// The text cut to a width, by measuring it again for every character taken off its end: what fit
+// does for a text it cannot walk through once (a line break in it, bytes that are no character, or
+// very long).
+static std::string fitByMeasuring(ImFont* font, float size, const std::string& s, float width)
 {
-	if (textSize(font, size, s.c_str()).x <= width)
-		return s;
 	std::string out = s;
 	while (!out.empty() && textSize(font, size, (out + "...").c_str()).x > width)
 	{
@@ -163,6 +164,62 @@ std::string fit(ImFont* font, float size, const std::string& s, float width)
 	while (!out.empty() && out.back() == ' ')
 		out.pop_back();
 	return out + "...";
+}
+
+std::string fit(ImFont* font, float size, const std::string& s, float width)
+{
+	if (textSize(font, size, s.c_str()).x <= width)
+		return s;
+	// The same answer as fitByMeasuring, with the text walked through once: ImGui's width of a line
+	// is its characters' advances added up from the left, so the width of every beginning of the
+	// text is known after one pass, and the three dots are three more additions. (Measuring anew for
+	// each character taken off was most of a frame of the bookcase, whose spines are narrow.)
+	constexpr int MOST = 384;
+	if (s.size() >= MOST || s.find_first_of(std::string("\n\r\0", 3)) != std::string::npos)
+		return fitByMeasuring(font, size, s, width);
+	const float px = readingSize(size) * S;
+	float upTo[MOST + 1]; // the width of the text's first n bytes, in pixels; < 0: n is inside a character
+	upTo[0] = 0;
+	const char* const begin = s.c_str();
+	const char* const end = begin + s.size();
+	float line = 0;
+	for (const char* at = begin; at < end;)
+	{
+		unsigned int c = static_cast<unsigned char>(*at);
+		const int bytes = (c < 0x80) ? 1 : ImTextCharFromUtf8(&c, at, end);
+		// (Bytes that are no character are read differently once the text is cut.)
+		if (c == IM_UNICODE_CODEPOINT_INVALID || bytes < 1)
+			return fitByMeasuring(font, size, s, width);
+		const char* const next = std::min(end, at + std::max(1, bytes));
+		line += font->CalcTextSizeA(px, FLT_MAX, 0.f, at, next).x;
+		for (const char* inside = at + 1; inside < next; inside++)
+			upTo[inside - begin] = -1;
+		upTo[next - begin] = line;
+		at = next;
+	}
+	const float dot = font->CalcTextSizeA(px, FLT_MAX, 0.f, ".").x;
+	size_t length = s.size();
+	const auto tooWide = [&] {
+		if (upTo[length] < 0)
+			return textSize(font, size, (s.substr(0, length) + "...").c_str()).x > width;
+		float w = upTo[length];
+		for (int i = 0; i < 3; i++)
+			w += dot;
+		return w / S > width;
+	};
+	const auto byte = [&](size_t i) { return static_cast<unsigned char>(s[i]); };
+	while (length > 0 && tooWide())
+	{
+		// (Not half of a character of several bytes.)
+		do
+			length--;
+		while (length > 0 && (byte(length - 1) & 0xc0) == 0x80);
+		if (length > 0 && (byte(length - 1) & 0xc0) == 0xc0)
+			length--;
+	}
+	while (length > 0 && s[length - 1] == ' ')
+		length--;
+	return s.substr(0, length) + "...";
 }
 
 namespace

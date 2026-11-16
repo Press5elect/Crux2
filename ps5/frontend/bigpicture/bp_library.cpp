@@ -175,6 +175,27 @@ bool hiddenDisc(const Game& g, bool selectDisc)
 	return grouping(selectDisc) && !g.set.empty() && !g.front;
 }
 
+// The Backend's games, asked for when its generation has moved and kept until it moves again
+// (knownGames: the library's list below is made from them, and so is whatever else needs the games).
+struct KnownGames
+{
+	const Backend* backend = nullptr;
+	unsigned generation = 0;
+	std::vector<GameInfo> list;
+} known;
+
+const std::vector<GameInfo>& gamesKnown()
+{
+	const unsigned generation = be->gamesGeneration();
+	if (known.backend != be || known.generation != generation)
+	{
+		known.list = be->games();
+		known.backend = be;
+		known.generation = generation;
+	}
+	return known.list;
+}
+
 // The games of every source, as the Backend has them. True when the list was made again.
 bool refreshGames()
 {
@@ -184,7 +205,7 @@ bool refreshGames()
 	shownGeneration = generation;
 	shownDrive = driveRevision;
 	games.clear();
-	std::vector<GameInfo> found = be->games();
+	std::vector<GameInfo> found = gamesKnown();
 	for (const GameInfo& disc : drive.games)
 	{
 		found.push_back(disc);
@@ -1465,8 +1486,9 @@ void lookUp(const Game& g, bool selectDisc)
 	// (A game's own settings are read with them open, and closed again at once.)
 	if (g.info.crc != 0 && !be->running().valid && be->openGame(g.info))
 	{
+		ownSettingsChanged();
 		f.own = true;
-		for (const Page& page : settingsPages(true))
+		for (const Page& page : settingsPagesNow(true))
 		{
 			if (page.name == "Patches" || page.name == "Cheats")
 				continue;
@@ -1480,7 +1502,7 @@ void lookUp(const Game& g, bool selectDisc)
 		}
 		for (int cheats = 0; cheats < 2; cheats++)
 		{
-			const Page page = be->patchesPage(cheats != 0);
+			const Page& page = backendPageNow(cheats ? MadePage::Cheats : MadePage::Patches);
 			for (const Option& o : page.rows)
 			{
 				if (o.kind != Option::Bool || !(o.flags & Option::OneGame))
@@ -1491,7 +1513,7 @@ void lookUp(const Game& g, bool selectDisc)
 			}
 		}
 		f.cheatsEnabled = be->getBool(Own, "EmuCore", "EnableCheats").value_or(be->getBool(Shared, "EmuCore", "EnableCheats").value_or(false));
-		const Page cards = be->memoryCardsPage(Own);
+		const Page& cards = backendPageNow(MadePage::CardsOwn);
 		for (const Option& o : cards.rows)
 		{
 			if (o.kind == Option::Info && o.label == "This game's card" && o.info)
@@ -1510,6 +1532,7 @@ void lookUp(const Game& g, bool selectDisc)
 			}
 		}
 		be->closeGame();
+		ownSettingsChanged();
 	}
 	if (TexturePackShelf* shelf = be->texturePackShelf(); shelf != nullptr && !g.info.serial.empty())
 	{
@@ -3470,6 +3493,10 @@ void drawDiscs(ImDrawList* dl, Game* focused)
 		const float x = mid + side * (a * first + std::max(0.f, away - 1) * spacing);
 		const float r = bigR + (smallR - bigR) * a;
 		const float fade = std::clamp(1.f - 0.12f * std::max(0.f, away - 1), 0.25f, 1.f);
+		// (A disc that is wholly off the screen's side is not drawn: with its shadow and its ring, and
+		// as far off as the screen's entrance slides it in from.)
+		if (x - r * 1.3f - 64 > W || x + r * 1.3f + 64 < 0)
+			continue;
 		const Game& g = games[lib.flat[static_cast<size_t>(i)]];
 		// The focused disc turns as in a drive; the others, slowly. Still, with motion off.
 		const float spin = (motion() == MotionOff) ? 0.f : (a < 0.5f ? t * 9.f : t * 0.8f + static_cast<float>(i));
@@ -3512,6 +3539,12 @@ const int LibraryViewCount = ViewCount;
 int librarySource()
 {
 	return lib.source;
+}
+
+const std::vector<GameInfo>& knownGames()
+{
+	static const std::vector<GameInfo> none;
+	return be != nullptr ? gamesKnown() : none;
 }
 
 const GameInfo* libraryGame(const std::string& path)

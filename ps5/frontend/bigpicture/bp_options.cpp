@@ -252,6 +252,10 @@ const std::vector<float> SPEED_VALUES = {0.02f, 0.10f, 0.25f, 0.50f, 0.75f, 0.90
 
 
 // A Backend page under a heading of its own, when it does not begin with one.
+// Counts a game's own settings being opened and closed (ownSettingsChanged): what was made for the
+// game that was open is not for the next one.
+unsigned s_ownChanges = 0;
+
 void addPageRows(std::vector<Option>& rows, const Page& page, const char* heading_text)
 {
 	if (page.rows.empty())
@@ -1219,7 +1223,7 @@ Page memoryCardsPageOf(int layer, bool forGame)
 {
 	Page page{ICON_FA_SD_CARD, "Memory Cards", {}};
 	auto& rows = page.rows;
-	addPageRows(rows, be->memoryCardsPage(layer), "MEMORY CARDS");
+	addPageRows(rows, backendPageNow(layer == Own ? MadePage::CardsOwn : MadePage::CardsShared), "MEMORY CARDS");
 	if (!forGame)
 		addPageRows(rows, be->backupPage(), "BACKUPS");
 	return page;
@@ -1400,7 +1404,9 @@ Page statisticsPage()
 {
 	Page page{ICON_FA_CHART_BAR, "Statistics", {}};
 	auto& rows = page.rows;
-	const std::vector<GameInfo> games = be->games();
+	// (The games as the library has them: asking the Backend anew for every making of the pages was
+	// most of what opening the Settings and the quick menu cost with a large library.)
+	const std::vector<GameInfo>& games = knownGames();
 	int kinds[3] = {}, sources[3] = {}, regions[4] = {}, runs[7] = {};
 	int played = 0, favourites = 0, hidden = 0, states = 0, cheats = 0, textures = 0;
 	uint64_t bytes = 0;
@@ -1487,10 +1493,10 @@ std::vector<Page> codePages(bool forGame)
 		pages.push_back(emulationPage(layer, true));
 		{
 			Page patches{ICON_FA_BANDAGE, "Patches", {}};
-			addPageRows(patches.rows, be->patchesPage(false), "PATCHES");
+			addPageRows(patches.rows, backendPageNow(MadePage::Patches), "PATCHES");
 			pages.push_back(std::move(patches));
 			Page cheats{ICON_FA_BOLT, "Cheats", {}};
-			addPageRows(cheats.rows, be->patchesPage(true), "CHEATS");
+			addPageRows(cheats.rows, backendPageNow(MadePage::Cheats), "CHEATS");
 			pages.push_back(std::move(cheats));
 		}
 		pages.push_back(gameFixesPage());
@@ -1554,6 +1560,76 @@ std::vector<Page> settingsPages(bool forGame)
 	std::vector<Page> pages = codePages(forGame);
 	applySettingsText(pages);
 	return pages;
+}
+
+namespace
+{
+// settingsPagesNow's pages: [0] of all games, [1] of the game whose settings are open.
+struct PagesMade
+{
+	bool made = false;
+	const Backend* backend = nullptr;
+	int frame = 0, level = 0;
+	unsigned pagesGeneration = 0, gamesGeneration = 0, own = 0;
+	std::vector<Page> pages;
+} s_pagesMade[2];
+} // namespace
+
+void ownSettingsChanged()
+{
+	s_ownChanges++;
+}
+
+const Page& backendPageNow(MadePage which)
+{
+	static struct
+	{
+		bool made = false;
+		const Backend* backend = nullptr;
+		int frame = 0;
+		unsigned pagesGeneration = 0, own = 0;
+		Page page;
+	} held[static_cast<int>(MadePage::Count)];
+	auto& m = held[static_cast<int>(which)];
+	const unsigned pagesGeneration = be->pagesGeneration();
+	if (m.made && m.backend == be && m.frame == frameNow && m.pagesGeneration == pagesGeneration && m.own == s_ownChanges)
+		return m.page;
+	m.made = false;
+	switch (which)
+	{
+		case MadePage::Patches:
+		case MadePage::Cheats:
+			m.page = be->patchesPage(which == MadePage::Cheats);
+			break;
+		default:
+			m.page = be->memoryCardsPage(which == MadePage::CardsOwn ? Own : Shared);
+			break;
+	}
+	m.backend = be;
+	m.frame = frameNow;
+	m.pagesGeneration = pagesGeneration;
+	m.own = s_ownChanges;
+	m.made = true;
+	return m.page;
+}
+
+const std::vector<Page>& settingsPagesNow(bool forGame)
+{
+	PagesMade& m = s_pagesMade[forGame ? 1 : 0];
+	const unsigned pagesGeneration = be->pagesGeneration(), gamesGeneration = be->gamesGeneration();
+	if (m.made && m.backend == be && m.frame == frameNow && m.level == options().level && m.pagesGeneration == pagesGeneration &&
+		m.gamesGeneration == gamesGeneration && m.own == s_ownChanges)
+		return m.pages;
+	m.made = false;
+	m.pages = settingsPages(forGame);
+	m.backend = be;
+	m.frame = frameNow;
+	m.level = options().level;
+	m.pagesGeneration = pagesGeneration;
+	m.gamesGeneration = gamesGeneration;
+	m.own = s_ownChanges;
+	m.made = true;
+	return m.pages;
 }
 
 } // namespace bp

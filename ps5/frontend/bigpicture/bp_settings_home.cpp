@@ -226,7 +226,7 @@ const std::vector<Result>& results()
 	}
 	if (gamesToo)
 	{
-		for (const GameInfo& g : be->games())
+		for (const GameInfo& g : knownGames())
 		{
 			if (!g.hidden && matches(lower(g.title + " " + g.serial), needles))
 				s_search.results.push_back({-1, g});
@@ -516,6 +516,7 @@ void searchScreen(ImDrawList* dl)
 				if (st.gameOpen)
 				{
 					be->closeGame();
+					ownSettingsChanged();
 					st.gameOpen = false;
 					st.forGame = false;
 				}

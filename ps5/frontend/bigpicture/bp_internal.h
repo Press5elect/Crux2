@@ -500,6 +500,26 @@ void settingsSearchFor(const std::string& query, int chip);
 /// The settings of all games, and of one game, as pages of options (bp_options.cpp), with the words
 /// and places of settings-text.yaml put on their rows (applySettingsText).
 std::vector<Page> settingsPages(bool forGame);
+/// The same pages, made once a frame at most: a screen that comes up asks for them several times in
+/// its first frame (the quick menu for its options, its pinned settings and what a game takes at its
+/// start), and each making asks the Backend for a dozen pages of its own. What is returned is good
+/// until the next call and no longer than the frame; it is made again when the frame, the Backend's
+/// pagesGeneration() or gamesGeneration(), the settings' level or the game whose settings are open
+/// (ownSettingsChanged) is another.
+const std::vector<Page>& settingsPagesNow(bool forGame);
+/// A page the Backend makes that several ask for in one frame (the pages above, a game's page, the
+/// quick menu): its patches or cheats (Backend::patchesPage), its memory cards (memoryCardsPage of a
+/// layer). Made once a frame at most, by settingsPagesNow's rule; good until the next call for it.
+enum class MadePage { Patches, Cheats, CardsShared, CardsOwn, Count };
+const Page& backendPageNow(MadePage which);
+/// Said by whoever opens or closes a game's own settings (Backend::openGame, closeGame): the pages
+/// of settingsPagesNow are of the game that was open when they were made.
+void ownSettingsChanged();
+/// The Backend's games as it last gave them: asked for again only when its gamesGeneration() has
+/// moved (bp_library.cpp, whose own list is made from this one). For whoever needs the games outside
+/// the library (the statistics, the settings' search, the card and texture pack managers): on the
+/// console Backend::games() looks into three folders and walks the whole game list.
+const std::vector<GameInfo>& knownGames();
 /// The pages' rows, their words and places from the baked table of settings-text.yaml
 /// (bp_settings_words.cpp): each row's label, description and choice names, and its entry.
 struct SettingsText;

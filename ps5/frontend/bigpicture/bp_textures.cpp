@@ -242,7 +242,7 @@ void rebuild()
 	m.installed = shelf->installedPacks();
 	m.offered = shelf->collectionPacks();
 	m.library.clear();
-	for (const GameInfo& g : be->games())
+	for (const GameInfo& g : knownGames())
 	{
 		if (!g.serial.empty() && g.kind == GameInfo::PS2 && m.library.count(g.serial) == 0)
 			m.library[g.serial] = g;

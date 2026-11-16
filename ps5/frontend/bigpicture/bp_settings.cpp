@@ -1210,7 +1210,10 @@ void leave()
 {
 	st.inRows = false;
 	if (st.gameOpen)
+	{
 		be->closeGame();
+		ownSettingsChanged();
+	}
 	st.gameOpen = false;
 	loadOptions();
 	const Screen back = (st.back == Screen::Quick && !be->running().valid) ? Screen::Library : st.back;
@@ -1305,16 +1308,13 @@ std::vector<PinnedRow> pinnedRows(const GameInfo* game)
 		st.gameTitle = game->title;
 		std::vector<Page> pages;
 		pages.push_back(summaryPage());
-		for (Page& page : settingsPages(true))
-			pages.push_back(std::move(page));
+		for (const Page& page : settingsPagesNow(true))
+			pages.push_back(page);
 		own = everyRow(pages);
 	}
-	st.forGame = st.gameOpen = false;
-	shared = everyRow(settingsPages(false));
-	st.forGame = forGameWas;
-	st.gameOpen = openWas;
-	st.game = gameWas;
-	st.gameTitle = titleWas;
+	// (The rows of all games are made only when a pin is not among the game's own: with a game open
+	// most pins are, and making them asks the Backend for another dozen pages.)
+	bool sharedMade = false;
 	std::vector<PinnedRow> out;
 	for (const std::string& id : ids)
 	{
@@ -1322,10 +1322,23 @@ std::vector<PinnedRow> pinnedRows(const GameInfo* game)
 			return std::find_if(rows.begin(), rows.end(), [&id](const Item& it) { return settingsIdOf(it.o) == id; });
 		};
 		if (const auto it = find(own); it != own.end())
+		{
 			out.push_back(PinnedRow{*it, true});
-		else if (const auto other = find(shared); other != shared.end())
+			continue;
+		}
+		if (!sharedMade)
+		{
+			st.forGame = st.gameOpen = false;
+			shared = everyRow(settingsPagesNow(false));
+			sharedMade = true;
+		}
+		if (const auto other = find(shared); other != shared.end())
 			out.push_back(PinnedRow{*other, false});
 	}
+	st.forGame = forGameWas;
+	st.gameOpen = openWas;
+	st.game = gameWas;
+	st.gameTitle = titleWas;
 	return out;
 }
 
@@ -2055,6 +2068,7 @@ void openSettings(const GameInfo* game, Screen back, const char* page)
 		toast("This game has no serial and no CRC to keep settings of its own under.");
 		return;
 	}
+	ownSettingsChanged();
 	st.forGame = forGame;
 	st.gameOpen = forGame;
 	st.game = forGame ? *game : GameInfo();
