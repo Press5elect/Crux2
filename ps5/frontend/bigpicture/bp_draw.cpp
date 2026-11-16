@@ -434,7 +434,7 @@ Options& options()
 	return s_options;
 }
 
-const char* const settingsLevelNames[3] = {"Normal", "Advanced", "Expert"};
+const char* const settingsLevelNames[3] = {"Essentials", "More", "Everything"};
 
 void setSettingsLevel(int level)
 {
@@ -1183,6 +1183,8 @@ float glyph(ImDrawList* dl, Glyph g, float x, float cy, float size)
 			return pair("L2", "R2");
 		case Glyph::R3:
 			return label("R3", size * 1.35f);
+		case Glyph::L3:
+			return label("L3", size * 1.35f);
 		case Glyph::Options:
 		{
 			rect(dl, x, cy - r * 0.8f, size * 1.1f, size * 0.8f, bg, r * 0.5f);

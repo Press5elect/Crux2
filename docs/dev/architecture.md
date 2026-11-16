@@ -63,8 +63,13 @@ sandbox) and leaves the sandbox only for USB drives, through the elevation helpe
 ## The interface (`ps5/frontend/bigpicture/`)
 
 The screens came from PSFlyCast's front end and have no PCSX2 in them (`bp_*.cpp`):
-`bp_library.cpp` (the library and its ten views), `bp_settings.cpp` and `bp_options.cpp` (the
-settings pages, grouped as PCSX2's settings window groups them), `bp_quick.cpp` and
+`bp_library.cpp` (the library and its ten views), `bp_options.cpp` (the settings' rows, as pages
+grouped as PCSX2's settings window groups them), `bp_settings_words.cpp` (puts each row's words, from
+`bp_settings_text.h`, baked from `settings-text.yaml`, on the rows, found by their ids), the settings'
+screens regrouped into eight areas and their sections by that file's `area` and `section`:
+`bp_settings.cpp` (the values, the model of areas and sections, an area's page, the description
+panel) and `bp_settings_home.cpp` (the settings' home, pins, changed lately, the search), sharing
+`bp_settings_model.h`, `bp_quick.cpp` and
 `bp_quick_layout.h` (the quick menu), `bp_splash.cpp` (start-ups and the video), `bp_care.cpp`
 (screen care), `bp_draw.cpp` (the mark, the name, the 36 skins; 30 of them generated into
 `bp_kit_skins.inc` by `make-kit-skins.py`), `bp_cards.cpp` (the card manager), `bp_textures.cpp` (the texture pack manager). `bp_pcsx2.cpp` is

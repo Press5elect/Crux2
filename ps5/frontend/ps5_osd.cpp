@@ -1,4 +1,4 @@
-// Crux2 - the on-screen display's figures as one panel: the runtime of ps5_osd.h.
+// Crux2 - the performance overlay: the runtime of ps5_osd.h.
 // SPDX-FileCopyrightText: 2026 Press5elect
 // SPDX-License-Identifier: GPL-3.0+
 // Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
@@ -7,10 +7,12 @@
 // the emulator's threads' loads, the memory in use, and - when the console's kernel has the calls,
 // found while the title runs - the processor's clock and temperature. The chip's clock, temperature
 // and power are not told to a title, so they are not shown (nothing here is made up). The drawing
-// is ps5_osd_draw.h, which the interface's PC preview pictures too.
+// is ps5_osd_draw.h, which the interface's PC preview pictures too; the levels (white, amber, red)
+// and the sizes are ps5_osd_logic.h's.
 
 #include "ps5_osd.h"
 #include "ps5_osd_draw.h"
+#include "ps5_osd_logic.h"
 #include "ps5_pacing.h"
 #include "ps5_pgs.h"
 #include "ps5_keyboard.h" // PS5SystemModules
@@ -44,10 +46,11 @@ namespace PS5Osd
 	{
 		using namespace PS5OsdDraw;
 
-		PS5OsdDraw::Panel s_panel; // made again ten times a second, kept while the game is paused
+		PS5OsdDraw::Overlay s_overlay; // made again ten times a second, kept while the game is paused
 		Common::Timer s_refresh(0.0);
 		Common::Timer s_style_check(0.0);
 		int s_style = 0;
+		int s_size = PS5OsdLogic::DEFAULT_SIZE; // [PS5] OsdSize
 
 		// The kernel's own figures, when it has the calls (looked up once).
 		using CpuTempFn = int (*)(int*);
@@ -63,22 +66,6 @@ namespace PS5Osd
 			s_kernel_looked = true;
 			s_cpu_temp = reinterpret_cast<CpuTempFn>(PS5SystemModules::FindFunction("libkernel", "sceKernelGetCpuTemperature", "qiL4fFObAxM"));
 			s_cpu_freq = reinterpret_cast<CpuFreqFn>(PS5SystemModules::FindFunction("libkernel", "sceKernelGetCpuFrequency", "iUohlUDiGac"));
-		}
-
-		void Add(const char* name, std::string value, const char* unit, ImU32 name_colour, ImU32 value_colour)
-		{
-			Row& r = s_panel.rows.emplace_back();
-			r.name = name;
-			r.value = std::move(value);
-			r.unit = unit;
-			r.name_colour = name_colour;
-			r.value_colour = value_colour;
-		}
-
-		void Section()
-		{
-			if (!s_panel.rows.empty())
-				s_panel.sections.push_back(s_panel.rows.size());
 		}
 
 		std::string Number(double v, int decimals)
@@ -137,35 +124,151 @@ namespace PS5Osd
 			return f;
 		}
 
+		using PS5OsdLogic::Level;
+
+		void Stat(const char* label, std::string value, const char* unit, Level level = Level::Fine)
+		{
+			s_overlay.stats.push_back({label, std::move(value), unit, level});
+		}
+
+		void Load(const char* label, float percent)
+		{
+			percent = std::clamp(percent, 0.0f, 100.0f);
+			s_overlay.meters.push_back({label, percent, Number(percent, 0), "%", PS5OsdLogic::LoadLevel(percent)});
+		}
+
+		PS5OsdLogic::Switches SwitchesNow()
+		{
+			PS5OsdLogic::Switches s;
+			s.fps = GSConfig.OsdShowFPS;
+			s.gpu = GSConfig.OsdShowGPU;
+			s.cpu = GSConfig.OsdShowCPU;
+			s.speed = GSConfig.OsdShowSpeed;
+			s.frame_times = GSConfig.OsdShowFrameTimes;
+			s.resolution = GSConfig.OsdShowResolution;
+			s.hardware = GSConfig.OsdShowHardwareInfo;
+			s.vps = GSConfig.OsdShowVPS;
+			s.gs_stats = GSConfig.OsdShowGSStats;
+			s.gpu_stats = GSConfig.OsdShowGPUStats;
+			s.version = GSConfig.OsdShowVersion;
+			return s;
+		}
+
 		void Refresh()
 		{
-			s_panel.rows.clear();
-			s_panel.sections.clear();
+			const PS5OsdLogic::Switches on = SwitchesNow();
+			const PS5OsdLogic::Size size = PS5OsdLogic::EffectiveSize(s_size, on);
+			const bool custom = size == PS5OsdLogic::Custom;
+			const bool card = size == PS5OsdLogic::Full || custom;
+			Overlay& o = s_overlay;
+			o = Overlay{};
+			o.size = size;
 			LookUpKernel();
 			const float speed = PerformanceMetrics::GetSpeed();
+			const float target = VMManager::GetTargetSpeed();
+			o.budget_ms = PS5OsdLogic::FrameBudgetMs(VMManager::GetFrameRate(), target);
+
+			// ---- the frames: the game's rate (and with frame generation running, the screen's),
+			// coloured by the speed against the speed asked for.
+			const Level speed_level = PS5OsdLogic::SpeedLevel(speed, target);
+			if (on.fps)
+			{
+				o.fps = true;
+				o.game_fps = PerformanceMetrics::GetInternalFPS();
+				o.fps_level = speed_level;
+				// Frame generation: the pictures a second the screen is given (counted where they are
+				// presented, over the last half second).
+				if (const float given = PS5Pacing::FrameGenShownPerSecond(); given > 0.5f)
+				{
+					o.screen_fps = given;
+					if (custom)
+						Stat("made", Number(PS5Pacing::FrameGenMadePerSecond(), 0), "FPS");
+				}
+				else if (const float shown = PS5Pacing::ShownPerSecond(); custom && shown > o.game_fps + 2.0f)
+					Stat("shown", Number(shown, 0), "FPS");
+			}
+			if (card && on.speed)
+			{
+				o.speed = true;
+				o.speed_percent = speed;
+				o.speed_level = speed_level;
+			}
+			if (card && on.vps)
+			{
+				o.vps = true;
+				o.vps_value = PerformanceMetrics::GetFPS();
+			}
+			if (card && on.frame_times)
+			{
+				const FrameFigures f = Figures();
+				o.graph = true;
+				if (f.any)
+				{
+					o.frame_ms = true;
+					o.last_ms = static_cast<float>(f.last_ms);
+					o.frame_level = PS5OsdLogic::FrameLevel(o.last_ms, o.budget_ms);
+					o.low1_fps = static_cast<float>(f.low1_fps);
+					o.low01_fps = static_cast<float>(f.low01_fps);
+					if (custom)
+					{
+						Stat("max", Number(f.max_fps, 0), "FPS");
+						Stat("average", Number(f.avg_fps, 0), "FPS");
+						Stat("min", Number(f.min_fps, 0), "FPS");
+					}
+				}
+			}
 
 			// ---- the graphics chip (paraLLEl-GS drawing: its own device's time, from its timestamps,
 			// against the frame's period; PCSX2's GPU figures see only PCSX2's device, which then does
 			// little)
 			const bool pgs = PS5PGS::Active();
 			const PS5PGS::Figures pf = pgs ? PS5PGS::GetFigures() : PS5PGS::Figures{};
-			if (GSConfig.OsdShowGPU)
+			if (on.gpu)
 			{
-				Section();
 				if (pgs)
 				{
-					const float target = VMManager::GetTargetSpeed();
 					const float period_ms = target > 0.0f ? 1000.0f / (target * 60.0f) : 16.7f;
-					const float percent = pf.gpu_ms > 0.0f ? std::min(100.0f, 100.0f * pf.gpu_ms / period_ms) : 0.0f;
-					Add("GPU", Number(percent, 0), "%", GPU_NAME, HOT_VALUE);
-					Add("time", Number(pf.gpu_ms, 1), "ms", GPU_NAME, HOT_VALUE);
-					Add("shading", Number(pf.gpu_shading_ms, 1), "ms", GPU_NAME, HOT_VALUE);
-					Add("samples", Number(pf.samples, 0), "", GPU_NAME, HOT_VALUE);
+					Load("GPU", pf.gpu_ms > 0.0f ? 100.0f * pf.gpu_ms / period_ms : 0.0f);
+					if (custom)
+					{
+						Stat("GPU time", Number(pf.gpu_ms, 1), "ms");
+						Stat("shading", Number(pf.gpu_shading_ms, 1), "ms");
+						Stat("samples", Number(pf.samples, 0), "");
+					}
 				}
 				else
 				{
-					Add("GPU", Number(std::min(100.0f, PerformanceMetrics::GetGPUUsage()), 0), "%", GPU_NAME, HOT_VALUE);
-					Add("time", Number(PerformanceMetrics::GetGPUAverageTime(), 1), "ms", GPU_NAME, HOT_VALUE);
+					Load("GPU", PerformanceMetrics::GetGPUUsage());
+					if (custom)
+						Stat("GPU time", Number(PerformanceMetrics::GetGPUAverageTime(), 1), "ms");
+				}
+			}
+
+			// ---- the processor: the emulator's threads
+			if (on.cpu)
+			{
+				Load("EE", static_cast<float>(PerformanceMetrics::GetCPUThreadUsage()));
+				Load("GS", PerformanceMetrics::GetGSThreadUsage());
+				if (THREAD_VU1)
+					Load("VU", PerformanceMetrics::GetVUThreadUsage());
+				if (card && pgs)
+				{
+					Load("PGS", pf.thread_percent);
+					if (custom)
+					{
+						Stat("GS wait", Number(pf.wait_ms, 1), "ms"); // the GS thread's, for the graphics card
+						if (pf.readbacks > 0.0f) // the game reads its picture back: what that stall costs a frame
+							Stat("reads", Number(pf.readback_wait_ms, 1), "ms", Level::Near);
+					}
+				}
+				if (card)
+				{
+					const u32 sw = PerformanceMetrics::GetGSSWThreadCount();
+					for (u32 t = 0; t < sw; t++)
+					{
+						const float percent = std::clamp(static_cast<float>(PerformanceMetrics::GetGSSWThreadUsage(t)), 0.0f, 100.0f);
+						s_overlay.meters.push_back({fmt::format("SW{}", t), percent, Number(percent, 0), "%", PS5OsdLogic::LoadLevel(percent)});
+					}
 				}
 			}
 
@@ -173,173 +276,104 @@ namespace PS5Osd
 			// own counters, averaged over its windows of 32 frames (GSRenderer::VSync). Refresh runs on
 			// the GS thread (ImGuiManager::RenderOSD from GSRenderer::EndPresentFrame), whose state
 			// g_perfmon is.
-			if (GSConfig.OsdShowGSStats && GSGetCurrentRenderer() != GSRendererType::Null)
+			if (card && on.gs_stats && GSGetCurrentRenderer() != GSRendererType::Null)
 			{
-				Section();
 				GSPerfMon& pm = g_perfmon;
 				const auto count = [](GSPerfMon::counter_t c) { return Number(std::ceil(g_perfmon.Get(c)), 0); };
+				const auto flagged = [&pm](GSPerfMon::counter_t c) { return pm.Get(c) > 0.0 ? Level::Near : Level::Fine; };
+				Stat("prims", Number(pm.Get(GSPerfMon::Prim), 0), "");
+				Stat("draws", Number(pm.Get(GSPerfMon::Draw), 0), "");
 				if (GSGetCurrentRenderer() == GSRendererType::SW)
-				{
-					Add("prims", Number(pm.Get(GSPerfMon::Prim), 0), "", GPU_NAME, COOL_VALUE);
-					Add("draws", Number(pm.Get(GSPerfMon::Draw), 0), "", GPU_NAME, COOL_VALUE);
-					Add("syncs", count(GSPerfMon::SyncPoint), "", GPU_NAME, COOL_VALUE);
-				}
+					Stat("syncs", count(GSPerfMon::SyncPoint), "");
 				else
 				{
-					Add("prims", Number(pm.Get(GSPerfMon::Prim), 0), "", GPU_NAME, COOL_VALUE);
-					Add("draws", Number(pm.Get(GSPerfMon::Draw), 0), "", GPU_NAME, COOL_VALUE);
-					Add("calls", count(GSPerfMon::DrawCalls), "", GPU_NAME, COOL_VALUE);
-					Add("barriers", count(GSPerfMon::Barriers), "", GPU_NAME, COOL_VALUE);
-					Add("passes", count(GSPerfMon::RenderPasses), "", GPU_NAME, COOL_VALUE);
-					Add("copies", count(GSPerfMon::TextureCopies), "", GPU_NAME, COOL_VALUE);
-					Add("uploads", count(GSPerfMon::TextureUploads), "", GPU_NAME, COOL_VALUE);
-					Add("readbacks", count(GSPerfMon::Readbacks), "", GPU_NAME, pm.Get(GSPerfMon::Readbacks) > 0.0 ? HOT_VALUE : COOL_VALUE);
+					Stat("calls", count(GSPerfMon::DrawCalls), "");
+					Stat("barriers", count(GSPerfMon::Barriers), "");
+					Stat("passes", count(GSPerfMon::RenderPasses), "");
+					Stat("copies", count(GSPerfMon::TextureCopies), "");
+					Stat("uploads", count(GSPerfMon::TextureUploads), "");
+					Stat("readbacks", count(GSPerfMon::Readbacks), "", flagged(GSPerfMon::Readbacks));
 					// Crux2's own: passes ended for a barrier on sampling the target (0 here unless
 					// framebuffer fetch is on), colour targets moved to the feedback loop layout (DCC
 					// decompressed), primitive ID DATE setups, copies of a target the draw reads; then the
 					// barriers left out because nothing wrote the target since the last one, and the copies
 					// reused because their source was not written since (neither is in "barriers"/"RT copies").
-					Add("pass splits", count(GSPerfMon::BarriersExternal), "", GPU_NAME,
-						pm.Get(GSPerfMon::BarriersExternal) > 0.0 ? HOT_VALUE : COOL_VALUE);
-					Add("decompress", count(GSPerfMon::FeedbackDecompress), "", GPU_NAME,
-						pm.Get(GSPerfMon::FeedbackDecompress) > 0.0 ? HOT_VALUE : COOL_VALUE);
-					Add("DATE setup", count(GSPerfMon::DatePrimID), "", GPU_NAME, COOL_VALUE);
-					Add("RT copies", count(GSPerfMon::RTCopies), "", GPU_NAME, COOL_VALUE);
-					Add("barriers skipped", count(GSPerfMon::BarriersSkipped), "", GPU_NAME, COOL_VALUE);
-					Add("copies reused", count(GSPerfMon::RTCopiesReused), "", GPU_NAME, COOL_VALUE);
+					Stat("pass splits", count(GSPerfMon::BarriersExternal), "", flagged(GSPerfMon::BarriersExternal));
+					Stat("decompress", count(GSPerfMon::FeedbackDecompress), "", flagged(GSPerfMon::FeedbackDecompress));
+					Stat("DATE setup", count(GSPerfMon::DatePrimID), "");
+					Stat("RT copies", count(GSPerfMon::RTCopies), "");
+					Stat("barr. skipped", count(GSPerfMon::BarriersSkipped), "");
+					Stat("copies reused", count(GSPerfMon::RTCopiesReused), "");
 					// Render passes the ordered view's draws kept (PS5ROVKeepPass): not in "passes".
-					Add("passes kept", count(GSPerfMon::ROVPassesKept), "", GPU_NAME, COOL_VALUE);
+					Stat("passes kept", count(GSPerfMon::ROVPassesKept), "");
 				}
 			}
 
 			// ---- the graphics chip's work (Settings > On-screen display > GPU statistics): its time a
 			// frame by the kind of render pass (the latest window; the test log's sums are kept apart),
 			// and the shader invocations PCSX2 counts.
-			if (GSConfig.OsdShowGPUStats && g_gs_device && !pgs)
+			if (card && on.gpu_stats && g_gs_device && !pgs)
 			{
-				Section();
 				GSDevice::PS5GpuSections w;
 				if (g_gs_device->PS5GetGpuSections(w))
 				{
-					Add("GPU", Number(w.total_ms, 2), "ms", GPU_NAME, HOT_VALUE);
-					Add("ordered", Number(w.ordered_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("barrier", Number(w.barrier_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("draw", Number(w.draw_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("convert", Number(w.conversion_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("present", Number(w.present_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("outside", Number(w.outside_ms, 2), "ms", GPU_NAME, COOL_VALUE);
-					Add("timed", Number(w.passes, 0), "passes", GPU_NAME, COOL_VALUE);
+					Stat("GPU total", Number(w.total_ms, 2), "ms");
+					Stat("ordered", Number(w.ordered_ms, 2), "ms");
+					Stat("barrier", Number(w.barrier_ms, 2), "ms");
+					Stat("draw", Number(w.draw_ms, 2), "ms");
+					Stat("convert", Number(w.conversion_ms, 2), "ms");
+					Stat("present", Number(w.present_ms, 2), "ms");
+					Stat("outside", Number(w.outside_ms, 2), "ms");
+					Stat("timed", Number(w.passes, 0), "passes");
 				}
 				const auto units = [](double v) {
 					return v >= 1e6 ? fmt::format("{:.1f}M", v / 1e6) : v >= 1e3 ? fmt::format("{:.1f}K", v / 1e3) : Number(v, 0);
 				};
-				Add("VS", units(PerformanceMetrics::GetGPUAverageVSInvocations()), "", GPU_NAME, COOL_VALUE);
-				Add("PS", units(PerformanceMetrics::GetGPUAveragePSInvocations()), "", GPU_NAME, COOL_VALUE);
+				Stat("VS", units(PerformanceMetrics::GetGPUAverageVSInvocations()), "");
+				Stat("PS", units(PerformanceMetrics::GetGPUAveragePSInvocations()), "");
 			}
 
-			// ---- the processor
-			if (GSConfig.OsdShowCPU || GSConfig.OsdShowHardwareInfo)
+			// ---- the footer: the internal resolution and its multiple; the processor's temperature
+			// (and clock in Custom) and the memory the title has taken, when the kernel tells them.
+			if (card && on.resolution)
 			{
-				Section();
-				if (GSConfig.OsdShowCPU)
-				{
-					Add("EE", Number(std::min(100.0, PerformanceMetrics::GetCPUThreadUsage()), 0), "%", CPU_NAME, HOT_VALUE);
-					Add("GS", Number(std::min(100.0f, PerformanceMetrics::GetGSThreadUsage()), 0), "%", CPU_NAME, HOT_VALUE);
-					if (THREAD_VU1)
-						Add("VU", Number(std::min(100.0f, PerformanceMetrics::GetVUThreadUsage()), 0), "%", CPU_NAME, HOT_VALUE);
-					if (pgs)
-					{
-						Add("PGS", Number(std::min(100.0f, pf.thread_percent), 0), "%", CPU_NAME, HOT_VALUE);
-						Add("wait", Number(pf.wait_ms, 1), "ms", CPU_NAME, HOT_VALUE); // the GS thread's, for the graphics card
-						if (pf.readbacks > 0.0f) // the game reads its picture back: what that stall costs a frame
-							Add("reads", Number(pf.readback_wait_ms, 1), "ms", CPU_NAME, HOT_VALUE);
-					}
-					const u32 sw = PerformanceMetrics::GetGSSWThreadCount();
-					for (u32 t = 0; t < sw; t++)
-					{
-						Row& r = s_panel.rows.emplace_back();
-						r.name = fmt::format("SW{}", t);
-						r.value = Number(std::min(100.0, PerformanceMetrics::GetGSSWThreadUsage(t)), 0);
-						r.unit = "%";
-						r.name_colour = CPU_NAME;
-						r.value_colour = HOT_VALUE;
-					}
-				}
-				if (GSConfig.OsdShowHardwareInfo)
-				{
-					int temp = 0;
-					if (s_cpu_temp && s_cpu_temp(&temp) == 0 && temp > 0 && temp < 130)
-						Add("temp", Number(temp, 0), "\xc2\xb0" "C", CPU_NAME, HOT_VALUE);
-					if (s_cpu_freq)
-					{
-						const uint64_t hz = s_cpu_freq();
-						if (hz > 100000000ULL && hz < 10000000000ULL)
-							Add("clock", Number(static_cast<double>(hz) / 1e6, 0), "MHz", CPU_NAME, HOT_VALUE);
-					}
-					// The direct memory the title has taken (its pool less the largest free run).
-					const u64 total = GetPhysicalMemory(), free_run = GetAvailablePhysicalMemory();
-					if (total > free_run)
-						Add("RAM", Number(static_cast<double>((total - free_run) >> 20), 0), "MB", CPU_NAME, HOT_VALUE);
-				}
+				int w = 0, h = 0;
+				GSgetInternalResolution(&w, &h);
+				o.footer_left = fmt::format("{}x{}", w, h);
+				if (GSConfig.UseHardwareRenderer())
+					o.footer_left += fmt::format("  \xc2\xb7  {:g}x", GSConfig.UpscaleMultiplier);
 			}
-
-			// ---- the frames
-			if (GSConfig.OsdShowFPS || GSConfig.OsdShowVPS || GSConfig.OsdShowSpeed || GSConfig.OsdShowFrameTimes ||
-				GSConfig.OsdShowResolution || GSConfig.OsdShowVersion)
+			if (card && on.hardware)
 			{
-				Section();
-				const ImU32 speed_colour = (speed < 95.0f) ? SLOW_VALUE : COOL_VALUE;
-				if (GSConfig.OsdShowFPS)
+				std::string hw;
+				int temp = 0;
+				if (s_cpu_temp && s_cpu_temp(&temp) == 0 && temp > 0 && temp < 130)
+					hw = fmt::format("{} \xc2\xb0" "C", temp);
+				if (custom && s_cpu_freq)
 				{
-					Add(GSConfig.Renderer == GSRendererType::SW ? "Software" : "Vulkan", Number(PerformanceMetrics::GetInternalFPS(), 0), "FPS",
-						FRAME_NAME, speed_colour);
-					// With frame generation running: the pictures a second the screen is given, and how
-					// many of them are made (counted where they are presented, over the last half second).
-					if (const float given = PS5Pacing::FrameGenShownPerSecond(); given > 0.5f)
-					{
-						Add("screen", Number(given, 0), "FPS", FRAME_NAME, COOL_VALUE);
-						Add("made", Number(PS5Pacing::FrameGenMadePerSecond(), 0), "FPS", FRAME_NAME, COOL_VALUE);
-					}
-					else if (const float shown = PS5Pacing::ShownPerSecond(); shown > PerformanceMetrics::GetInternalFPS() + 2.0f)
-						Add("shown", Number(shown, 0), "FPS", FRAME_NAME, COOL_VALUE);
+					const uint64_t hz = s_cpu_freq();
+					if (hz > 100000000ULL && hz < 10000000000ULL)
+						hw += fmt::format("{}{:.0f} MHz", hw.empty() ? "" : "  \xc2\xb7  ", static_cast<double>(hz) / 1e6);
 				}
-				if (GSConfig.OsdShowVPS)
-					Add("VPS", Number(PerformanceMetrics::GetFPS(), 0), "", FRAME_NAME, COOL_VALUE);
-				if (GSConfig.OsdShowSpeed)
-					Add("Speed", Number(speed, 0), "%", FRAME_NAME, speed_colour);
-				if (GSConfig.OsdShowFrameTimes)
-				{
-					const FrameFigures f = Figures();
-					if (f.any)
-					{
-						Add("Frametime", Number(f.last_ms, 1), "ms", FRAME_NAME, COOL_VALUE);
-						Add("Max", Number(f.max_fps, 0), "FPS", FRAME_NAME, COOL_VALUE);
-						Add("Average", Number(f.avg_fps, 0), "FPS", FRAME_NAME, COOL_VALUE);
-						Add("Min", Number(f.min_fps, 0), "FPS", FRAME_NAME, COOL_VALUE);
-						Add("1% Low", Number(f.low1_fps, 0), "FPS", FRAME_NAME, COOL_VALUE);
-						Add("0.1% Low", Number(f.low01_fps, 0), "FPS", FRAME_NAME, COOL_VALUE);
-					}
-				}
-				if (GSConfig.OsdShowResolution)
-				{
-					int w = 0, h = 0;
-					GSgetInternalResolution(&w, &h);
-					Add("Res", fmt::format("{}x{}", w, h), "", FRAME_NAME, COOL_VALUE);
-				}
-				if (GSConfig.OsdShowVersion)
-					Add("Crux2", ps5px_build_version(), "", FRAME_NAME, COOL_VALUE);
+				// The direct memory the title has taken (its pool less the largest free run).
+				const u64 total = GetPhysicalMemory(), free_run = GetAvailablePhysicalMemory();
+				if (total > free_run)
+					hw += fmt::format("{}{:.1f} GB", hw.empty() ? "" : "  \xc2\xb7  ", static_cast<double>(total - free_run) / (1024.0 * 1024.0 * 1024.0));
+				o.footer_right = std::move(hw);
 			}
-			s_panel.graph = GSConfig.OsdShowFrameTimes;
+			if (card && on.version)
+				o.version = fmt::format("Crux2 {}", ps5px_build_version());
 		}
 	} // namespace
 
 	bool DrawPanel(float& position_y, float scale, float margin)
 	{
-		// The style, looked at twice a second (a setting is not read every frame).
+		// The style and the size, looked at twice a second (a setting is not read every frame).
 		if (s_style_check.GetTimeSeconds() >= 0.5)
 		{
 			s_style_check.Reset();
 			s_style = Host::GetBaseIntSettingValue("PS5", "OsdStyle", 0);
+			s_size = Host::GetBaseIntSettingValue("PS5", "OsdSize", PS5OsdLogic::DEFAULT_SIZE);
 		}
 		if (s_style != 0)
 			return false;
@@ -350,14 +384,19 @@ namespace PS5Osd
 			Refresh();
 		}
 		const auto& history = PerformanceMetrics::GetFrameTimeHistory();
-		s_panel.history = history.data();
-		s_panel.history_size = static_cast<uint32_t>(history.size());
-		s_panel.history_pos = PerformanceMetrics::GetFrameTimeHistoryPos();
+		s_overlay.history = history.data();
+		s_overlay.history_size = static_cast<uint32_t>(history.size());
+		s_overlay.history_pos = PerformanceMetrics::GetFrameTimeHistoryPos();
 
-		ImFont* const font = ps5px_interface_font(2) ? ps5px_interface_font(2) : ImGuiManager::GetOSDFont();
-		const float size = std::round(ImGuiManager::GetFontSizeStandard() * 1.3f);
-		const float bottom = PS5OsdDraw::Draw(ImGui::GetBackgroundDrawList(), font, size, s_panel, static_cast<int>(GSConfig.OsdPerformancePos),
-			scale, margin, position_y, ImGuiManager::GetWindowWidth(), ImGuiManager::GetWindowHeight());
+		// Roboto (the interface's text face and its bold), else PCSX2's OSD face. The design's pixels
+		// are a 1080-line screen's, times the OSD scale.
+		PS5OsdDraw::Fonts fonts;
+		fonts.regular = ps5px_interface_font(0) ? ps5px_interface_font(0) : ImGuiManager::GetOSDFont();
+		fonts.bold = GSConfig.OsdBoldText && ps5px_interface_font(1) ? ps5px_interface_font(1) : fonts.regular;
+		const float screen_h = ImGuiManager::GetWindowHeight();
+		const float u = std::max(0.5f, scale) * std::max(0.5f, screen_h / 1080.0f);
+		const float bottom = PS5OsdDraw::Draw(ImGui::GetBackgroundDrawList(), fonts, u, s_overlay, static_cast<int>(GSConfig.OsdPerformancePos),
+			margin, position_y, ImGuiManager::GetWindowWidth(), screen_h);
 		position_y = bottom + std::round(margin * 0.5f);
 		return true;
 	}

@@ -8,6 +8,23 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Changed: the settings rebuilt: a home with a search bar, eight areas (Picture, Sound, Controls,
+  Games and saves, Emulation, Network, Interface, System) that say what is set and how many settings
+  are changed, the pinned settings and the ones changed lately; an area's page with its sections, one
+  line a setting and the focused one described in full (choices, default, what it applies to, when it
+  takes effect); a search through every setting at every level and the library's games; pins (Square);
+  the levels named Essentials, More and Everything; a game's own settings with a switch to those of
+  all games (the touch pad) and L3 to use the global setting again. Every option of before is still
+  there (the settings inventory). Not yet run on a console.
+- Changed: every setting's description is taken word for word from PCSX2 where PCSX2 has the
+  setting, and written in PCSX2's style where it has not; labels and choice names likewise.
+- Changed: the performance overlay (Settings > On-Screen Display) comes in three sizes (Performance
+  Overlay Size): Minimal (a pill with the frame rate), Compact (one bar: frame rate, GPU, EE, GS and VU) and
+  Full (a card with the frame time, speed, 1% and 0.1% lows, a frame-time graph, the loads as bars,
+  resolution, temperature and memory), plus Custom (what the switches under Show give). A size sets
+  those switches; changing one makes it Custom. Digits of one width, colour only for meaning (amber
+  close to a limit, red over it), "30 → 60" with frame generation. The overlay stays off until a
+  figure is switched on; switching the FPS on gives Compact. Not yet run on a console.
 - Added: one Anti-aliasing row (Settings > Graphics > Post-processing): Off, FXAA, SMAA, SSAA or
   SSAA + SMAA. SSAA draws the game larger than the screen (choosing it raises the internal resolution
   to about 1.5 times the screen's and turns FSR 1 off) and makes it screen-sized from every texel each

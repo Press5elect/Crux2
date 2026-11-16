@@ -27,6 +27,7 @@ the host memory test. CI has neither, so it skips those two.
 | letter jumps | `ps5_letter_jump.h`: order, groups, L2/R2 landings |
 | quick menu entries | `bp_quick_layout.h`: shown, hidden, ordered |
 | frame generation's figures | `ps5_pacing.h` (FrameGenFigures) |
+| the performance overlay | `ps5_osd_logic.h`: the levels (white, amber, red) at their thresholds, the sizes' presets, Custom after a switch changes (`tests/osd`) |
 | PlayStation Move | `ps5_move_logic.h` and the loopback stream, against a stand-in producer |
 | profile folding, profiler | `ps5_profile_fold.h`, `ps5_profiler.cpp` (plain, ASan, TSan) |
 | thread times | `PS5ThreadTimes.h` under TSan |
@@ -45,7 +46,7 @@ the host memory test. CI has neither, so it skips those two.
 ## The interface: `ps5/tests/bigpicture/run-bigpicture-tests.sh`
 
 ```bash
-ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row changed every way, 2 x 60,000 random steps
+ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp crawl   # ASan/UBSan: every row of every section (all games' and a game's, at Everything) changed every way, the settings' home and search, 2 x 60,000 random steps
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp shots   # a PNG of each screen in /tmp/crux2-bp/shots
 ps5/tests/bigpicture/run-bigpicture-tests.sh /tmp/crux2-bp inventory   # the no-loss test of the settings (settings-inventory.md)
 ```

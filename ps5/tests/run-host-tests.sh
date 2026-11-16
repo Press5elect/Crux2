@@ -12,6 +12,8 @@
 #   - the libc stand-ins of frontend/ps5_libc.c, each against the PC's own libc;
 #   - the quick menu's entries and their order (frontend/bigpicture/bp_quick_layout.h), and frame
 #     generation's figures for the on-screen display and the log (frontend/ps5_pacing.h);
+#   - the performance overlay's levels (white, amber, red), its sizes' presets of the switches and
+#     what the settings keep after a switch changes (frontend/ps5_osd_logic.h);
 #   - the game list's letter jumps (frontend/ps5_letter_jump.h): the order, the groups, and where
 #     L2 and R2 land on sorted and unsorted lists;
 #   - the profiler's folding (frontend/ps5_profile_fold.h): symbols.txt read and refused, the
@@ -108,6 +110,11 @@ echo "== frame generation's Steady 30 (frontend/ps5_framegen_pacer.h)"
 # shellcheck disable=SC2086
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/pacing/steady30_test.cpp" -o "$work/steady30_test"
 "$work/steady30_test" || status=1
+
+echo "== the performance overlay's levels and sizes (frontend/ps5_osd_logic.h)"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$frontend" "$tests/osd/osd_logic_test.cpp" -o "$work/osd_logic_test"
+"$work/osd_logic_test" || status=1
 
 echo "== a picture's size from its header, huge ones refused before decoding (frontend/ps5_image_header.h)"
 mkdir -p "$work/image"

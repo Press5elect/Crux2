@@ -259,7 +259,7 @@ float discSpin();
 
 // ------------------------------------------------------------ button glyphs
 
-enum class Glyph { Cross, Circle, Square, Triangle, L1, R1, L1R1, L2, R2, L2R2, R3, Options, TouchPad, DPadLR, DPadUD };
+enum class Glyph { Cross, Circle, Square, Triangle, L1, R1, L1R1, L2, R2, L2R2, R3, Options, TouchPad, DPadLR, DPadUD, L3 };
 float glyph(ImDrawList* dl, Glyph g, float x, float cy, float size = 34.f);
 
 struct Hint
@@ -438,8 +438,28 @@ const GameInfo& settingsGame();
 /// The open settings' page of that name, with the focus on the row of that label (none: on the
 /// page). False when there is no such page or row. For the PC preview's walk through the screens.
 bool settingsFocus(const char* page, const char* row = nullptr);
-/// The settings of all games, and of one game, as pages of options (bp_options.cpp).
+/// For the PC preview's walk through the settings: their sections at the level shown ("Area/Section",
+/// in order), the focus on the n-th row of one (false: it has no such row), and the search for a text
+/// (chip: 0 everything, 1 settings, 2 games, 3 changed from default) with its first result in focus.
+std::vector<std::string> settingsSections();
+bool settingsFocusAt(int section, int row);
+void settingsSearchFor(const std::string& query, int chip);
+/// The settings of all games, and of one game, as pages of options (bp_options.cpp), with the words
+/// and places of settings-text.yaml put on their rows (applySettingsText).
 std::vector<Page> settingsPages(bool forGame);
+/// The pages' rows, their words and places from the baked table of settings-text.yaml
+/// (bp_settings_words.cpp): each row's label, description and choice names, and its entry.
+struct SettingsText;
+void applySettingsText(Page& page);
+void applySettingsText(std::vector<Page>& pages);
+/// A row's entry in the table (area, section, level, today's page); null when it has none.
+const SettingsText* settingsTextOf(const Option& o);
+/// A row's id as settings-text.yaml names it (its place after "@" when it is in several), or, with no
+/// entry, as it would be named (section.key, or kind:label).
+std::string settingsIdOf(const Option& o);
+std::string settingsBaseId(const Option& o);
+/// A label as an id has it: "Add Network Share" -> "add-network-share".
+std::string settingsSlug(const std::string& text);
 /// The "This game" page the open game's settings begin with (bp_settings.cpp), for the settings
 /// inventory (ps5/tests/bigpicture/inventory).
 Page settingsSummaryPage();

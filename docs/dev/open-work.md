@@ -14,12 +14,36 @@ item is done or something new is learned; delete what no longer applies.
 - The pins were moved on 2026-11-15 (PCSX2 master after v2.9.179, PS5_Vulkan
   `7f492b4`, the SDK `3345cde` with upstream v0.45's C++ runtime, PS2Recomp `e563698`); `check-sources.sh`
   reports every source current. None of it has run on a console. Save states from before don't load.
+- The settings' revamp, phase 3 (bp_settings.cpp, bp_settings_home.cpp, bp_settings_words.cpp; the
+  words of settings-text.yaml applied): checked on the PC only (the crawl, the shots, the inventory).
+  Not run on a console. To check there: every area and section opens and its rows behave as before
+  (lists, ranges, bindings and their capture, actions, the network share being added, the memory
+  cards and their manager, the log, achievements' sign-in); a game's own settings from the library
+  and the quick menu (Game options, Patches and cheats), L3 (Use Global Setting, clear a binding),
+  the touch pad's switch to all games and back, and that what is changed there is written to the
+  game's file and to PCSX2.ini; the texture-pack manager's "Texture settings of the game"; Restart
+  and NextStart rows (Takes effect) and the quick menu's "Apply changes now"; pins and Changed lately
+  kept across starts ([PS5UI] Pins, RecentChanges); the search's keyboard (a USB or the phone's one
+  too); readability at Text size Largest and Interface size 70%; the skins (light ones: Brutal,
+  Clay, Gloss) on the new layout; how fast the home is drawn (what is changed is looked at again every
+  half second: about 700 values). The README's other sections still name some settings by their old
+  labels and old pages.
 - USB controllers (DualShock 3, Xbox 360 pads, guitars and drums): never tried on a console.
 - VRR has not been tried on a TV that has it.
 - Surround: which console channel each ends up in has not been heard.
 - Online play through the network adapter's DNS presets (PS2 Online, PS Rewired) has not been tried.
 - The overlay's EE/GS/VU percentages are each thread's own report; whether a title may read
   another thread's processor time is not measured.
+- The performance overlay's sizes ([PS5] OsdSize; ps5_osd.cpp, ps5_osd_draw.h, ps5_osd_logic.h with
+  its host test `tests/osd/osd_logic_test.cpp`; pictured in the interface's shots 49c2-49c7). Not run
+  on a console. To check: readability on a television from the sofa at OSD scale 100% (the design's
+  pixels are a 1080-line screen's times the OSD scale: on the 2160-line output the overlay is twice
+  as large in pixels as on a 1080-line one, and larger than the v1.0.2 panel was); Minimal, Compact
+  and Full in each corner and top centre, with "Move the figures from corner to corner"; amber and red
+  where a game is slow; "30 → 60" with frame generation; the card's footer (the kernel's temperature,
+  the memory figure); a settings file from before it gets Custom when its switches match no size.
+  Cost: the overlay is made 10 times a second and drawn every frame (about 150 thin bars and a few
+  dozen text runs for Full); its GPU and GS-thread time is not measured.
 - Not every setting has been tried one by one; paraLLEl-GS not in every game; native code modules
   and many PS2 accessories not tried. PGO's worth has not been measured before/after.
 - Screen care: how fast a panel ages is not measured.

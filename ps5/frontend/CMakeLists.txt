@@ -87,6 +87,8 @@ set(PS5PX_FRONTEND_SOURCES
 	bigpicture/bp_textures.cpp
 	bigpicture/bp_quick.cpp
 	bigpicture/bp_settings.cpp
+	bigpicture/bp_settings_home.cpp
+	bigpicture/bp_settings_words.cpp
 	bigpicture/bp_splash.cpp
 )
 

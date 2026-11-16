@@ -33,6 +33,7 @@
 #include "../ps5_disc.h"
 #include "../ps5_disc_image.h"
 #include "../ps5_hdr.h"
+#include "../ps5_osd_logic.h"
 #include "../ps5_about.h"
 #include "../vfs/ps5_vfs.h"
 #include "../ps5_shares.h"
@@ -6439,6 +6440,40 @@ private:
 					else if (si->GetStringValue(section, "Type", "None") == "guncon2")
 						si->SetStringValue(section, "Type", "None");
 				}
+			}
+		}
+		// The performance overlay's sizes ([PS5] OsdSize, ps5_osd_logic.h) are presets of its switches:
+		// a size chosen writes them; a switch changed afterwards makes the size Custom, and the FPS
+		// counter switched on with nothing else shown brings the size's figures back (Compact's, for a
+		// new user). (The rows are the settings of all games only.)
+		if (layer != bp::Own &&
+			((where == "PS5" && what == "OsdSize") || (where == PS5OsdLogic::SWITCH_SECTION && PS5OsdLogic::IsSwitchKey(key))))
+		{
+			const auto lock = Host::GetSettingsLock();
+			if (SettingsInterface* const si = Layer(layer); si != nullptr)
+			{
+				PS5OsdLogic::Switches now;
+				for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
+					now.*k.field = si->GetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, false);
+				const int size = si->GetIntValue("PS5", "OsdSize", PS5OsdLogic::DEFAULT_SIZE);
+				bool apply = false;
+				int keep = size;
+				if (what == "OsdSize")
+					apply = PS5OsdLogic::IsPreset(size);
+				else
+					keep = PS5OsdLogic::SizeAfterSwitch(size, now, what == "OsdShowFPS" && now.fps, apply);
+				if (apply)
+				{
+					now = PS5OsdLogic::Preset(keep);
+					for (const PS5OsdLogic::SwitchKey& k : PS5OsdLogic::SWITCH_KEYS)
+						si->SetBoolValue(PS5OsdLogic::SWITCH_SECTION, k.key, now.*k.field);
+				}
+				if (keep != size)
+					si->SetIntValue("PS5", "OsdSize", keep);
+				// (As below: figures switched on while their place is "Not shown" go to the top right.)
+				SettingsInterface* const base = Host::Internal::GetBaseSettingsLayer();
+				if (now.Any() && base && base->GetIntValue("EmuCore/GS", "OsdPerformancePos", 3) == 0)
+					base->SetIntValue("EmuCore/GS", "OsdPerformancePos", 3);
 			}
 		}
 		// A figure of the on-screen display switched on while the figures' place is "Not shown" (the

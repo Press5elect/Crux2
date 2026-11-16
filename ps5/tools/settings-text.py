@@ -14,8 +14,8 @@
 #   ps5/tools/settings-text.py check [--inventory FILE | --dump FILE]
 #       Fails when a row of the inventory has no entry, an entry is of no row (a stale id), a field
 #       is not one of its values (area, level, origin), the baked header is not what bake would
-#       write, or (until the interface takes its words from here: phase 3 of the revamp) a label,
-#       desc or choice name is not the one the code shows.
+#       write, or a label, desc or choice name is not the one the code's rows show (since phase 3 the
+#       interface puts this file's words on them: bp_settings_words.cpp).
 #
 #   ps5/tools/settings-text.py bake [--check]
 #       Writes bp_settings_text.h, the file's words as a table the interface can compile in.
@@ -29,9 +29,8 @@
 #
 #   ps5/tools/settings-text.py apply
 #       Makes the new words the row's words: new_label, new_desc and new_choices become label, desc
-#       and choices (a field marked exact-but-wrong is left as it is, and named), then bakes. For
-#       phase 3: after it, `check`'s comparison with the code's words fails until the interface
-#       takes its words from the baked table.
+#       and choices (a field marked exact-but-wrong is left as it is, and named), then bakes. (Phase 3
+#       of the revamp did it; the interface takes its words from the baked table.)
 #
 # An entry (one line per field, values in double quotes or as a [list]):
 #
@@ -723,11 +722,11 @@ def write_yaml(pages, path):
 def dump_yaml(pages, path):
     """Writes the file from read_yaml()'s pages (a list of pages, each a list of headings)."""
     out = ["# Crux2 - every setting's words, for editing by hand (ps5/tools/settings-text.py: make, check, bake, review, apply).",
-           "# Under each page and heading as the interface shows them today. label, desc and choices are today's words;",
-           "# new_label, new_desc and new_choices the revamp's (text, label_text, choices_text: exact = PCSX2's, byte for",
-           "# byte, at *_source; written = in PCSX2's voice; exact-but-wrong = PCSX2's but untrue here, for the owner to",
-           "# decide). area, section and level place the row in the revamp's eight areas. Never change an id. A row marked",
-           "# dynamic takes its words from data. pcsx2_* is PCSX2's own text and where it is (for reference).",
+           "# Under the page and heading each row has in the code. label, desc and choices are the words the interface shows",
+           "# (text, label_text, choices_text: exact = PCSX2's, byte for byte, at *_source; written = in PCSX2's voice);",
+           "# new_label, new_desc and new_choices, where a row still has them, are words not applied (a dynamic row's label).",
+           "# area, section and level place the row in the settings' eight areas. Never change an id. A row marked dynamic",
+           "# takes its label from data. pcsx2_* is PCSX2's own text and where it is (for reference).",
            "pages:"]
     for page in pages:
         out.append(f"  - page: {q(slug(page['name']))}")
@@ -883,6 +882,13 @@ def check_new_words(have, rows):
     problems = []
     written = {}
     for rid, e in have.items():
+        # After apply (phase 3) the new words are the row's words: label, desc and choices.
+        e = dict(e)
+        for field in ("label", "desc", "choices"):
+            if f"new_{field}" not in e and field in e and (field != "label" or e.get("label_text")):
+                e[f"new_{field}"] = e[field]
+        if "new_desc" not in e and e.get("text"):
+            e["new_desc"] = ""
         r = rows.get(rid, {})
         where = f"{rid} ({e.get('label')}, {e.get('area')} > {e.get('section')})"
         if e.get("text") not in TEXT_KINDS:

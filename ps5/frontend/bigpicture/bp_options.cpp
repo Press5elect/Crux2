@@ -288,10 +288,9 @@ Page interfacePage()
 
 	rows.push_back(heading("BEHAVIOUR"));
 	rows.push_back(list("Settings shown",
-		"How many settings are shown. Normal covers what most people need, Advanced adds finer options, and Expert "
-			"shows everything, including options that can stop games from working. Press Triangle anywhere in Settings to "
-			"switch.",
-		FRONT, "SettingsLevel", 0, {"Normal", "Advanced", "Expert"}, 0, Option::Front));
+		"Determines how many settings are shown. More adds finer options; Everything shows every option, including ones "
+			"that can stop games from working.",
+		FRONT, "SettingsLevel", 0, {"Essentials", "More", "Everything"}, 0, Option::Front));
 	rows.push_back(toggle("Pause when a controller disconnects", "Pauses the emulator when a controller with bindings is disconnected.", "UI",
 		"PauseOnControllerDisconnection", false, A));
 	rows.push_back(toggle("Warn about unsafe settings", "Displays warnings when settings are enabled which may break games.", CORE,
@@ -1119,6 +1118,10 @@ Page osdPage()
 	rows.push_back(toggle("Move the figures from corner to corner", "Moves the on-screen figures to another corner every five minutes to prevent burn-in.", FRONT, "OsdMove",
 		false, F));
 	rows.push_back(list("Style", "Crux2: one panel with sections and a frame-time graph. PCSX2: PCSX2's own lines of text.", "PS5", "OsdStyle", 0, {"Crux2's panel", "PCSX2's lines"}, 0, A));
+	// A preset of the switches under SHOW (bp_pcsx2.cpp writes them; ps5_osd_logic.h): Compact for a new user.
+	rows.push_back(listOf("Overlay size", "Selects how much of the performance overlay is shown. Minimal shows the FPS; Compact adds the GPU and CPU "
+		"usage; Full adds frame times, the resolution and hardware info. Custom shows what is switched on below.", "PS5", "OsdSize", 2,
+		{"Minimal", "Compact", "Full", "Custom"}, {1, 2, 3, 0}, A));
 	rows.push_back(heading("SHOW"));
 	rows.push_back(toggle("Speed percentages", "Shows the current emulation speed of the system as a percentage.", GS, "OsdShowSpeed", false, A));
 	rows.push_back(toggle("FPS", "Shows the number of internal video frames displayed per second by the system.", GS,
@@ -1464,8 +1467,12 @@ Page statisticsPage()
 
 } // namespace
 
-// The pages of the settings, in their order: for every game, or for the game opened.
-std::vector<Page> settingsPages(bool forGame)
+namespace
+{
+
+// The pages of the settings, in their order: for every game, or for the game opened. (Their words are
+// the code's here; settingsPages puts settings-text.yaml's on them.)
+std::vector<Page> codePages(bool forGame)
 {
 	const int layer = forGame ? Own : Shared;
 	std::vector<Page> pages;
@@ -1537,6 +1544,15 @@ std::vector<Page> settingsPages(bool forGame)
 	pages.push_back(debugPage());
 	pages.push_back(ps5Page(layer));
 	pages.push_back(statisticsPage());
+	return pages;
+}
+
+} // namespace
+
+std::vector<Page> settingsPages(bool forGame)
+{
+	std::vector<Page> pages = codePages(forGame);
+	applySettingsText(pages);
 	return pages;
 }
 

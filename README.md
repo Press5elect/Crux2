@@ -132,8 +132,7 @@ for PSFlyCast, made over for a PlayStation 2 emulator: a library with a tab for 
 come from (**Internal**, **USB**, **Network**, and **Disc** when a disc is in a drive), a game's
 details with its saved states, a loading screen with the progress of a disc image being read, a
 quick menu over the paused game, and one settings screen that serves every game and, opened from a
-game, that game alone. Settings come at three levels, Normal, Advanced and Expert (Triangle in the
-Settings), grouped as PCSX2's settings window groups them. The name in the top bar is drawn by the
+game, that game alone (see **The settings** below). The name in the top bar is drawn by the
 interface: C, R, U, the mark, 2.
 
 **The library has ten views** (the touch pad goes through them; Square > View chooses one):
@@ -206,11 +205,47 @@ and pictures are downloaded three at a time, those on the screen first (*new*).
 types one, Square takes the last letter away, Triangle is the space, L1 the capitals, R1 the
 signs, Options accepts and Circle leaves. A password is shown as dots; L2 shows and hides it.
 
-**A game's own options** (Details > Options, or Game options in the quick menu) show what that
-game follows as "As in Settings"; changing an option gives the game a value of its own, marked
-with a dot, and Square takes it away again. They are PCSX2's per-game settings files, in
-`gamesettings/`, as its desktop builds write them. The same screen lists the game's patches and
-cheats when `resources/patches.zip` or `cheats/` has any for it.
+**The settings** (Options in the library, Settings in the quick menu) open on a home: a search bar,
+then eight areas, **Picture**, **Sound**, **Controls**, **Games and saves**, **Emulation**,
+**Network**, **Interface** and **System**, each card saying what is in it, what is set now and how
+many of its settings differ from their defaults ("3 changed"). Under them, **Pinned** (the settings
+you pinned, with their values) and **Changed lately** (the last three you changed); Cross on one of
+them goes to it. Triangle on the home shows only what is changed, everywhere, until pressed again.
+
+- **An area's page** has its sections on the left (L2 / R2 go from one to the next, a dot marks one
+  with something changed), its settings in the middle, one line each (a dot when changed, the value
+  on the right, in the accent colour when it is not the default; L1 / R1 jump between the groups of
+  a long section, such as a controller's buttons), and on the right the focused setting described in
+  full: its description, its choices with the current one marked, its default, what it applies to
+  (all games, or this game) and when it takes effect (at once, at the next game start, or at the
+  next start of Crux2). Left and right change a value, Cross runs a row or opens its list, Circle
+  goes back to the home.
+- **Levels**: Essentials, More and Everything (the three levels of before, Normal, Advanced and
+  Expert, under new names, kept in the same setting). Triangle on an area's page goes through them;
+  the top bar shows which is on.
+- **Search** (Square on the home): type on the keyboard on the screen; every setting at every level
+  is looked through, by its name, its description and the names of its choices, and the library's
+  games too. L1 / R1 choose Everything, Settings, Games or Changed from Default. On a result, Cross
+  (and left and right) change it where it is, Triangle goes to its page (raising the level when it
+  is shown only at a higher one), Square pins it; a game opens its own settings.
+- **Pins**: Square on any setting pins it to the home, or unpins it.
+
+Elsewhere in this guide, "Settings > Graphics" and the like name the section a setting is in (here
+Picture > Graphics), and some settings are named as they were called before they took PCSX2's names:
+the search finds any of them by a word of its name or description.
+
+**A game's own settings** (Details > Options, or Game options in the quick menu) are the same
+screens for that game, opening on Games and saves, whose first section is the game itself (its
+serial, its file, what the database recommends, clearing its settings). A setting the game does not
+have uses the global setting and is shown fainter; changing it gives the game a value of its own,
+marked with a dot and "This game", and **L3** takes it away again (L3 also clears a button's binding).
+The switch at the top (the **touch pad**) goes between this game's settings and those of all games,
+where a "This game" tag marks what the game overrides. They are PCSX2's per-game settings files, in
+`gamesettings/`, as its desktop builds write them. The game's patches and cheats are under Games and
+saves (Patches, Cheats) when `resources/patches.zip` or `cheats/` has any for it.
+
+Every setting's description is PCSX2's own where PCSX2 has the setting, and is written in its
+style where it has not.
 
 **The look.** Settings > Interface has 36 skins (six of the title's own: **Crux**, its warm black,
 orange and cream, is the default; Midnight is the look of the first builds; Carbon is black, for an
@@ -482,8 +517,21 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
 - **Speed hacks are as PCSX2 ships them.** If a game falls short of full speed, the first thing
   to try is Settings > Emulation > **Multi-threaded VU1 (MTVU)**: safe for most games, wrong for a
   few.
+- **The performance overlay** (Settings > On-Screen Display; off until a figure is switched on).
+  **Performance Overlay Size** picks how much of it there is: *Minimal*, a small pill with the frame rate;
+  *Compact* (the default when you switch the FPS on), one bar with the frame rate and the GPU, EE,
+  GS and VU loads; *Full*, a card with the frame rate large, the frame time and speed, the 1% and
+  0.1% lows, a graph of the last frame times, the loads as bars, and the internal resolution,
+  processor temperature and memory at the foot. A size switches the figures under Show for you;
+  change any of them and the size becomes *Custom* (the card, with what you switched on). Colour
+  means something only: white is fine, amber close to a limit (a thread or the GPU at 80% or more,
+  speed under 98%, a frame a little late), red over it (95% or more, speed under 90%, a frame half
+  as long again as it should be: the graph's spikes). With frame generation running the rate reads
+  "30 → 60" (the game's, then the screen's). Style still has PCSX2's own lines of text; the
+  overlay's place (any corner, top centre...), OSD scale and margin, and moving it from corner to
+  corner work as before. Its readability on a television has not been checked on a console yet.
 - **When a game is slow, the overlay says which part is the limit.** Settings > On-Screen Display:
-  turn on Speed, Frames a second, Processor usage and Graphics chip usage. Then:
+  turn on Speed, Frames a second, Processor usage and Graphics chip usage (or Performance Overlay Size: Full). Then:
   - *Speed at 100% but the game's own frame rate low:* the game itself is slow, as it would be on
     a PlayStation 2 (a 60 fps patch can ask more of the emulated processor than it has). Settings >
     Emulation > EE cycle rate above 100% gives the game a faster emulated processor.
@@ -554,9 +602,9 @@ Shown for all games; not tried on the console one by one.
   and **Graphics driver on a core of its own** (on).
 - **Graphics:** under advanced settings, internal resolutions above 12x, and three switches for a
   graphics driver that misbehaves. A game's Renderer fixes have **Target page rearranging**.
-- **On-screen display:** one panel in sections (graphics chip, processor, frames with 1% and 0.1%
-  lows and a frame-time graph; Style has PCSX2's own lines back), the GS statistics, the state of an
-  input recording.
+- **On-screen display:** the performance overlay in three sizes and Custom (frames with 1% and 0.1%
+  lows and a frame-time graph, the loads as bars; Style has PCSX2's own lines back), the GS
+  statistics, the state of an input recording.
 - **Audio:** **Output latency** (5 ms up to 43) and **Surround** (PCSX2's expansion to 5.1 or 7.1;
   which of the console's channels each ends up in has not been heard, and if the console refuses
   the port the sound stays stereo).

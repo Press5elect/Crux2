@@ -109,6 +109,9 @@ void row(std::FILE* f, bool& first, const char* state, const char* layer, const 
 		first ? "" : ",\n", jsonText(state), jsonText(layer), jsonText(page.name), index, jsonText(heading), KINDS[o.kind]);
 	first = false;
 	line += ", \"label\": " + jsonText(o.label);
+	// (The label the code gave the row, when settings-text.yaml's took its place: the row's id is made from it.)
+	if (!o.codeLabel.empty())
+		line += ", \"code_label\": " + jsonText(o.codeLabel);
 	if (o.kind != bp::Option::Heading)
 	{
 		line += ", \"desc\": " + jsonText(o.desc);
@@ -217,7 +220,7 @@ bool press(const char* pageName, const char* label)
 			continue;
 		for (const bp::Option& o : page.rows)
 		{
-			if (o.kind == bp::Option::Action && o.label == label && o.action)
+			if (o.kind == bp::Option::Action && (o.label == label || o.codeLabel == label) && o.action)
 			{
 				o.action();
 				return true;

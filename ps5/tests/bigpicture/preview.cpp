@@ -22,7 +22,7 @@
 #include "bp.h"
 #include "bp_internal.h" // the screen that is on, for the checks
 #include "ps5_mc.h"      // the memory cards the card manager is shown: true ones, held in memory
-#include "ps5_osd_draw.h" // the on-screen display's panel, pictured with made-up figures
+#include "ps5_osd_draw.h" // the performance overlay, pictured with made-up figures
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -2548,6 +2548,20 @@ void shots(Harness& h)
 	};
 	h.press(P::Options, 40);
 	h.shot("11-settings-library");
+	g_check.expect(bp::screen == bp::Screen::Settings, "Options opens the settings' home");
+	// The search (the settings' revamp): every setting at every level, by its words.
+	bp::settingsSearchFor("vsync", 0);
+	h.wait(20);
+	h.shot("11s-settings-search");
+	h.press(P::Down, 10);
+	h.shot("11s2-settings-search-result");
+	h.press(P::Square, 20);
+	g_check.expect(!b.getString(0, "PS5UI", "Pins").value_or("").empty(), "Square pins a setting from the search");
+	h.press(P::R1, 6);
+	h.press(P::R1, 20);
+	h.shot("11s3-settings-search-games");
+	h.press(P::Circle, 20);
+	g_check.expect(bp::screen == bp::Screen::Settings, "Circle goes from the search back to the settings' home");
 	go("Interface");
 	h.shot("11a-settings-interface");
 	go("Interface", "Skin");
@@ -2591,6 +2605,35 @@ void shots(Harness& h)
 	h.shot("13-0f-settings-at-80");
 	b.setInt(0, "PS5UI", "InterfaceSize", 100);
 	bp::loadOptions();
+	// The home with what was pinned and changed lately, and an area's page with only what is changed.
+	go("Graphics", "Internal resolution");
+	h.press(P::Square, 10);
+	go("Interface", "Text size");
+	h.press(P::Right, 10);
+	h.press(P::Square, 10);
+	h.press(P::Circle, 30);
+	h.shot("13-0g-settings-home-pinned");
+	g_check.expect(b.getString(0, "PS5UI", "RecentChanges").value_or("").find("PS5UI.TextSize") == 0,
+		"a setting changed is the first of the changed lately");
+	h.press(P::Triangle, 20);
+	go("Interface", "Text size");
+	h.shot("13-0h-settings-only-changed");
+	h.press(P::Left, 10);
+	h.press(P::Circle, 20);
+	h.press(P::Triangle, 20);
+	// The skins' colours on the settings (the default skin's are the design's own).
+	for (const int skin : {1, 8, 20})
+	{
+		b.setInt(0, "PS5UI", "Look", skin);
+		bp::loadOptions();
+		go("Graphics", "Texture filtering");
+		char name[48];
+		std::snprintf(name, sizeof(name), "13-0i-settings-skin-%02d-%s", skin, bp::skins[skin].name);
+		h.shot(name);
+	}
+	b.setInt(0, "PS5UI", "Look", 0);
+	bp::loadOptions();
+	h.press(P::Circle, 20);
 	// Memory cards (v1.5.0): saves brought in from a USB drive, from a PlayStation 2 over the network
 	// and from a card image; a card made, one brought in whole, one formatted; a save copied, deleted
 	// and brought back, written out; a card written out, copied, deleted and renamed.
@@ -2994,7 +3037,10 @@ void shots(Harness& h)
 	h.press(P::Right);
 	h.press(P::Cross, 40);
 	h.shot("17-game-options");
-	// What the database recommends for it: set, and said.
+	g_check.expect(bp::screen == bp::Screen::Settings && !bp::settingsGame().path.empty(), "a game's details open its own settings");
+	// What the database recommends for it: set, and said. (Games and saves, its first section: the game.)
+	h.press(P::Cross, 10);
+	h.shot("17a-game-options-this-game");
 	h.press(P::Cross, 10);
 	for (int i = 0; i < 12 && !b.recommended; i++)
 	{
@@ -3016,6 +3062,12 @@ void shots(Harness& h)
 	h.press(P::Right);
 	h.wait(20);
 	h.shot("18-game-options-picture");
+	h.press(P::Circle);
+	// The switch in the top bar: the settings of all games while the game's are open, and back.
+	go("Graphics", "Texture filtering");
+	h.press(P::TouchPad, 20);
+	h.shot("18a-game-options-all-games");
+	h.press(P::TouchPad, 20);
 	h.press(P::Circle);
 	// A game's own Texture Replacement row opens the manager on that game.
 	go("Graphics", "HD texture packs");
@@ -3491,43 +3543,111 @@ void shots(Harness& h)
 	g_check.expect(b.run.valid && bp::screen == bp::Screen::None, "a game runs with no screen over it");
 	g_check.expect(b.corner >= 0, "the figures are sent to a corner");
 	h.shot("49c-game-with-grey-bars");
-	// The on-screen display's panel (v1.0.2), with made-up figures, over the game.
+	// The performance overlay in its sizes (ps5_osd_draw.h), with made-up figures, over the game:
+	// Minimal, Compact, Full; frame generation running ("30 → 60"); figures close to and over their
+	// limits (amber, red); Custom's card.
 	{
-		static float history[150];
+		using namespace PS5OsdDraw;
+		using PS5OsdLogic::Level;
+		static float steady[150], spiky[150];
+		const float budget = PS5OsdLogic::FrameBudgetMs(59.94f, 1.0f);
 		for (int i = 0; i < 150; i++)
-			history[i] = 16.7f + 2.0f * std::sin(i * 0.7f) + ((i % 37) == 0 ? 14.0f : 0.0f);
-		g_overlay = [] {
-			using namespace PS5OsdDraw;
-			Panel p;
-			const auto add = [&p](const char* n, const char* v, const char* u, ImU32 nc, ImU32 vc) { p.rows.push_back({n, v, u, nc, vc}); };
-			add("GPU", "71", "%", GPU_NAME, HOT_VALUE);
-			add("time", "11.8", "ms", GPU_NAME, HOT_VALUE);
-			p.sections.push_back(p.rows.size());
-			add("EE", "48", "%", CPU_NAME, HOT_VALUE);
-			add("GS", "86", "%", CPU_NAME, HOT_VALUE);
-			add("VU", "62", "%", CPU_NAME, HOT_VALUE);
-			add("temp", "61", "\xc2\xb0" "C", CPU_NAME, HOT_VALUE);
-			add("clock", "3500", "MHz", CPU_NAME, HOT_VALUE);
-			add("RAM", "7387", "MB", CPU_NAME, HOT_VALUE);
-			p.sections.push_back(p.rows.size());
-			add("Vulkan", "60", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Frametime", "16.7", "ms", FRAME_NAME, COOL_VALUE);
-			add("Max", "62", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Average", "59", "FPS", FRAME_NAME, COOL_VALUE);
-			add("Min", "32", "FPS", FRAME_NAME, COOL_VALUE);
-			add("1% Low", "43", "FPS", FRAME_NAME, COOL_VALUE);
-			add("0.1% Low", "32", "FPS", FRAME_NAME, COOL_VALUE);
-			p.graph = true;
-			p.history = history;
-			p.history_size = 150;
-			const ImGuiIO& io = ImGui::GetIO();
-			const float scale = io.DisplaySize.y / 1080.0f;
-			PS5OsdDraw::Draw(ImGui::GetForegroundDrawList(), bp::brand(), std::round(15.0f * 1.3f * scale * 1.6f), p, 3, scale,
-				std::round(10.0f * scale), std::round(10.0f * scale), io.DisplaySize.x, io.DisplaySize.y);
+		{
+			steady[i] = 16.7f + 0.6f * std::sin(i * 0.7f);
+			spiky[i] = 16.7f + 1.2f * std::sin(i * 0.9f) + ((i % 37) == 0 ? 17.0f : (i % 23) == 0 ? 3.5f : 0.0f);
+		}
+		static std::vector<std::pair<Overlay, int>> shown; // what to draw, and where (PCSX2's places)
+		const auto meters = [](Overlay& o, float gpu, float ee, float gs, float vu) {
+			for (const auto& [label, v] : {std::pair<const char*, float>{"GPU", gpu}, {"EE", ee}, {"GS", gs}, {"VU", vu}})
+				o.meters.push_back({label, v, std::to_string(static_cast<int>(std::lround(v))), "%", PS5OsdLogic::LoadLevel(v)});
 		};
-		h.wait(2);
-		h.shot("49c2-osd-panel");
+		const auto make = [&](PS5OsdLogic::Size size, float fps, float screen, float speed, const float* history) {
+			Overlay o;
+			o.size = size;
+			o.fps = true;
+			o.game_fps = fps;
+			o.screen_fps = screen;
+			o.fps_level = PS5OsdLogic::SpeedLevel(speed, 1.0f);
+			o.budget_ms = budget;
+			if (size == PS5OsdLogic::Full || size == PS5OsdLogic::Custom)
+			{
+				o.frame_ms = o.speed = o.graph = true;
+				o.last_ms = 16.7f;
+				o.frame_level = PS5OsdLogic::FrameLevel(o.last_ms, budget);
+				o.speed_percent = speed;
+				o.speed_level = PS5OsdLogic::SpeedLevel(speed, 1.0f);
+				o.low1_fps = 43;
+				o.low01_fps = 32;
+				o.history = history;
+				o.history_size = 150;
+				o.footer_left = "3840x2688  \xc2\xb7  6x";
+				o.footer_right = "61 \xc2\xb0" "C  \xc2\xb7  7.4 GB";
+			}
+			return o;
+		};
+		g_overlay = [] {
+			const ImGuiIO& io = ImGui::GetIO();
+			const float u = io.DisplaySize.y / 1080.0f; // the design's pixels at the OSD scale's 100 %
+			const Fonts fonts{bp::regular(), bp::bold()};
+			const float margin = std::round(10.0f * u);
+			for (const auto& [o, place] : shown)
+				Draw(ImGui::GetForegroundDrawList(), fonts, u, o, place, margin, margin, io.DisplaySize.x, io.DisplaySize.y);
+		};
+		const auto picture = [&](const char* name) {
+			h.wait(2);
+			h.shot(name);
+		};
+		// Each size alone, at the top right (the default place).
+		shown = {{make(PS5OsdLogic::Minimal, 60, 0, 100, steady), 3}};
+		picture("49c2-osd-minimal");
+		shown = {{make(PS5OsdLogic::Compact, 60, 0, 100, steady), 3}};
+		meters(shown[0].first, 71, 48, 62, 22);
+		picture("49c3-osd-compact");
+		shown = {{make(PS5OsdLogic::Full, 60, 0, 100, steady), 3}};
+		meters(shown[0].first, 71, 48, 62, 22);
+		picture("49c4-osd-full");
+		// Frame generation running: the game's 30 to the screen's 60, in all three (top left, top
+		// centre, top right).
+		shown = {{make(PS5OsdLogic::Minimal, 30, 60, 100, steady), 1}, {make(PS5OsdLogic::Compact, 30, 60, 100, steady), 2},
+			{make(PS5OsdLogic::Full, 30, 60, 100, steady), 3}};
+		meters(shown[1].first, 64, 52, 58, 20);
+		meters(shown[2].first, 64, 52, 58, 20);
+		picture("49c5-osd-frame-generation");
+		// Close to the limits (amber: 93 % speed, the GPU at 86 %, a frame a little late) and over them
+		// (red: 74 % speed, GS at 97 %, spikes in the graph).
+		{
+			Overlay near = make(PS5OsdLogic::Compact, 56, 0, 93, steady);
+			meters(near, 86, 81, 64, 30);
+			Overlay over = make(PS5OsdLogic::Full, 44, 0, 74, spiky);
+			meters(over, 88, 79, 97, 41);
+			over.last_ms = 22.8f;
+			over.frame_level = PS5OsdLogic::FrameLevel(over.last_ms, budget);
+			over.low1_fps = 29;
+			over.low01_fps = 21;
+			Overlay pill = make(PS5OsdLogic::Minimal, 41, 0, 70, steady);
+			shown = {{pill, 1}, {near, 2}, {over, 3}};
+			g_check.expect(near.fps_level == Level::Near && over.fps_level == Level::Over && over.frame_level == Level::Near,
+				"the overlay's levels: 93 % speed close, 74 % over, a 22.8 ms frame a little over its budget");
+		}
+		picture("49c6-osd-amber-red");
+		// Custom: Full's card with what the switches give (here frame times without the lows' line, VPS,
+		// the GS statistics, the version).
+		{
+			Overlay c = make(PS5OsdLogic::Custom, 60, 0, 100, steady);
+			meters(c, 71, 48, 62, 22);
+			c.speed = false;
+			c.vps = true;
+			c.vps_value = 60;
+			c.footer_right.clear();
+			for (const auto& [label, value] : {std::pair<const char*, const char*>{"prims", "4210"}, {"draws", "388"}, {"calls", "402"},
+					 {"barriers", "12"}, {"passes", "41"}, {"readbacks", "0"}, {"GPU time", "11.8"}})
+				c.stats.push_back({label, value, std::strcmp(label, "GPU time") == 0 ? "ms" : "", Level::Fine});
+			c.version = "Crux2 v1.5.0";
+			shown = {{c, 3}};
+		}
+		picture("49c7-osd-custom");
 		g_overlay = nullptr;
+		shown.clear();
 	}
 	bp::careSetIdle(301);
 	h.wait(240);
@@ -3576,41 +3696,122 @@ void crawl(Harness& h, unsigned seed)
 	PreviewBackend& b = h.backend;
 	h.wait(200);
 
-	const auto walk = [&](const char* what) {
-		// Through the categories: into each, down every row, with every button on each.
-		for (int category = 0; category < 16; category++)
+	// (A walk's step may have left the settings: a game started by a row is put away, and the
+	// settings are opened again, of all games or of the game.)
+	bp::GameInfo walkGame;
+	const auto backToSettings = [&](bool forGame) {
+		for (int i = 0; i < 4 && bp::dialogOpen(); i++)
+			h.press(P::Circle, 3);
+		if (b.starting())
 		{
-			h.press(P::Cross, 3);
-			for (int row = 0; row < 90; row++)
+			b.isStarting = false;
+			bp::startFailed("Put away by the walk through the settings.");
+			h.wait(3);
+		}
+		if (b.run.valid)
+		{
+			b.run = bp::Running();
+			bp::gameStopped();
+			h.wait(3);
+		}
+		if (bp::screen != bp::Screen::Settings)
+		{
+			bp::openSettings(forGame ? &walkGame : nullptr, bp::Screen::Library);
+			h.wait(3);
+		}
+	};
+	const auto walk = [&](const char* what, bool forGame) {
+		// Every section of every area, every row of it, with every button on each.
+		const std::vector<std::string> sections = bp::settingsSections();
+		unsigned rows = 0;
+		for (int section = 0; section < static_cast<int>(sections.size()); section++)
+		{
+			for (int row = 0; row < 400; row++)
 			{
+				backToSettings(forGame);
+				// (A row of the walk may be Settings Shown itself: the walk stays at Everything.)
+				if (b.getInt(0, "PS5UI", "SettingsLevel").value_or(0) != 2)
+				{
+					b.setInt(0, "PS5UI", "SettingsLevel", 2);
+					bp::loadOptions();
+				}
+				if (b.listening() > 0)
+					h.wait(320);
+				if (!bp::settingsFocusAt(section, row))
+					break;
+				rows++;
+				h.wait(2);
 				h.press(P::Right, 2);
 				h.press(P::Left, 2);
 				h.press(P::Left, 2);
-				h.press(P::Square, 2);
+				h.press(P::Square, 2); // pinned...
+				h.press(P::Square, 2); // ...and not
 				h.press(P::Cross, 3);
 				// (A list or a question may be up: one choice down and taken, or left.)
 				h.press(P::Down, 2);
 				h.press((row % 2) ? P::Cross : P::Circle, 3);
 				h.press(P::Circle, 2);
-				h.press(P::Cross, 2);
-				h.press(P::Circle, 2);
 				h.wait(b.listening() > 0 ? 320 : 0);
-				// Back into the rows if that left them, and on.
-				h.press(P::Cross, 2);
+				if (bp::screen == bp::Screen::Settings && bp::settingsFocusAt(section, row))
+				{
+					h.press(P::L3, 2);
+					h.press(P::L1, 2);
+					h.press(P::R1, 2);
+					h.press(P::Down, 2);
+				}
 				h.press(P::Circle, 2);
-				h.press(P::Right, 2);
-				h.press(P::Down, 2);
 			}
-			h.press(P::Circle, 3);
-			h.press(P::Circle, 0);
-			if (bp::active() && b.listening() <= 0)
-				h.press(P::Down, 3);
 		}
-		std::printf("crawl: %s walked, %llu values written\n", what, b.writes);
+		std::printf("crawl: %s walked, %zu sections, %u rows, %llu values written\n", what, sections.size(), rows, b.writes);
+		g_check.expect(rows > 100, "the walk went through the settings' rows");
 	};
 
 	h.press(P::Options, 20);
-	walk("the settings of all games");
+	// At every level: what Everything shows has every row.
+	b.setInt(0, "PS5UI", "SettingsLevel", 2);
+	bp::loadOptions();
+	walk("the settings of all games", false);
+	// The home, the search and the levels with every button.
+	{
+		backToSettings(false);
+		for (int i = 0; i < 4; i++)
+			h.press(P::Circle, 3);
+		h.press(P::Options, 10);
+		const uint32_t keys[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1, P::L2,
+			P::R2, P::L3, P::TouchPad};
+		std::mt19937 prng(seed * 13 + 5);
+		const char* queries[] = {"vsync", "resolution", "a", "", "controller", "zz-nothing", "game"};
+		for (int step = 0; step < 3000; step++)
+		{
+			backToSettings(false);
+			if (step % 300 == 0)
+				bp::settingsSearchFor(queries[(step / 300) % 7], static_cast<int>(prng() % 4));
+			h.wait(1, keys[prng() % (sizeof(keys) / sizeof(keys[0]))]);
+			h.wait(1 + static_cast<int>(prng() % 2));
+		}
+		std::printf("crawl: the settings' home and search walked, %llu values written\n", b.writes);
+	}
+	b.setInt(0, "PS5UI", "SettingsLevel", 0);
+	bp::loadOptions();
+	// A game's own, at every level, and the switch to all games and back.
+	if (!b.list.empty())
+	{
+		walkGame = b.list.front();
+		for (int i = 0; i < 6 && bp::screen == bp::Screen::Settings; i++)
+			h.press(P::Circle, 4);
+		b.setInt(0, "PS5UI", "SettingsLevel", 2);
+		bp::loadOptions();
+		bp::openSettings(&walkGame, bp::Screen::Library);
+		h.wait(10);
+		walk("a game's own settings", true);
+		backToSettings(true);
+		h.press(P::TouchPad, 6);
+		h.press(P::TouchPad, 6);
+		for (int i = 0; i < 6 && bp::screen == bp::Screen::Settings; i++)
+			h.press(P::Circle, 4);
+		b.setInt(0, "PS5UI", "SettingsLevel", 0);
+		bp::loadOptions();
+	}
 	// Out of the settings, whatever is up.
 	for (int i = 0; i < 6; i++)
 		h.press(P::Circle, 4);
@@ -3676,7 +3877,7 @@ void crawl(Harness& h, unsigned seed)
 	b.findTexturePacks();
 	std::mt19937 rng(seed);
 	const uint32_t buttons[] = {P::Up, P::Down, P::Left, P::Right, P::Cross, P::Cross, P::Circle, P::Square, P::Triangle, P::L1, P::R1,
-		P::L2, P::R2, P::Options, P::TouchPad, P::R3};
+		P::L2, P::R2, P::Options, P::TouchPad, P::R3, P::L3};
 	unsigned started = 0, menus = 0;
 	for (int step = 0; step < 60000; step++)
 	{

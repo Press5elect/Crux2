@@ -190,6 +190,12 @@ struct Option
 	/// A switch on a game's own page: its value when the game's settings name none, if this gives one
 	/// (Crux2's defaults for one game, such as accurate floating point), instead of the shared value.
 	std::function<std::optional<bool>()> gameDefault;
+	/// Set when the settings' words are put on the row (bp_settings_words.cpp): its entry in the baked
+	/// table of settings-text.yaml (an index into settingsText; -1: none), and the label the code gave it
+	/// when the table's took its place. The row's id is made from the code's label, so that it stays the
+	/// same when its words change.
+	int textRow = -1;
+	std::string codeLabel;
 };
 
 /// A page of the settings made by the Backend (the controllers, the memory cards, the patches a

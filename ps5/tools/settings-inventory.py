@@ -52,7 +52,9 @@ def base_id(row):
         return "heading:" + slug(row["label"])
     if row["kind"] in SETTING_KINDS and row.get("key"):
         return f"{row['section']}.{row['key']}"
-    return f"{row['kind']}:{slug(row['label'])}"
+    # (An action's or a line's id is made from the label the code gives it, so that it stays when the
+    # words shown, settings-text.yaml's, change.)
+    return f"{row['kind']}:{slug(row.get('code_label', row['label']))}"
 
 
 def place(row):
@@ -105,7 +107,7 @@ def make(dump):
         taken.add(unique)
         occurrences = seen[k]
         out = {"id": unique}
-        for field in ("page", "heading", "kind", "label", "desc", "section", "key", "default", "choices", "range", "parts", "bind_type",
+        for field in ("page", "heading", "kind", "label", "code_label", "desc", "section", "key", "default", "choices", "range", "parts", "bind_type",
                       "flags", "conditional", "game_default", "shows_value"):
             if field in first:
                 out[field] = first[field]

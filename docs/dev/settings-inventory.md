@@ -76,10 +76,16 @@ ps5/tools/settings-text.py review --out /tmp/review.html   # the review sheet: e
 ps5/tools/settings-text.py apply     # phase 3: the new words become the row's words, then bake
 ```
 
-In phase 1 the interface does not read `bp_settings_text.h` yet, and `check` requires the file's
-words to be exactly the code's, so nothing on the screen can change. Phase 2 writes the new words
-beside today's; phase 3 makes the interface take its words and places from the baked table (and
-lifts that check).
+In phase 1 the interface did not read `bp_settings_text.h`, and `check` required the file's words to
+be exactly the code's. Phase 2 wrote the new words beside today's; phase 3 applied them and made the
+interface take its words and places from the baked table: `bp_settings_words.cpp` puts each entry's
+label (not a `dynamic` row's), description and choice names on the row it finds by its id, on its page
+and under its heading of today. So `check`'s comparison of the file's words with the code's still
+holds: the code's rows, as the inventory makes them, show the file's words. The labels in the code
+are the rows' handles: an action's or an information line's id is made from the label the code gives
+it (the dump's `code_label` when the file's words took its place), so ids do not change when words do.
+The settings' screens group the rows by `area` and `section` (a row with no entry goes where the row
+before it on its page goes).
 
 ## The new words (phase 2)
 
@@ -132,5 +138,27 @@ British spellings (a name in double quotes is left out of the search); no descri
 (bindings and information lines may be: PCSX2's have none, a line shows its value) or another row's
 by accident; a choice named `(Default)` is the row's default; every row has `text`.
 
-`apply` (phase 3) writes the new words over today's and bakes; an action's or information line's id
-is made from its label, so the inventory's baseline is blessed for those relabels then.
+`apply` (phase 3) wrote the new words over today's and baked (the four `exact-but-wrong` rows were
+written in PCSX2's style first, the owner's decision). `check` runs the same checks on the applied
+words. The inventory's baseline was blessed for the new words: only labels (490), descriptions (288)
+and choice names (109 rows) changed, and `code_label` was added; no id, key, default, choice value,
+range, layout or skin.
+
+## Phase 3's places
+
+The 60 `doubtful` places were decided and the notes taken out. Moved: Pause On Controller
+Disconnection to Controls > Controllers; Warn About Unsafe Settings to Emulation > Emulation; the
+download of cheats for all games and of game patches to Games and saves > Cheats and > Patches; a
+game's patches and cheats (the rows, their warnings, Show Patches/Cheats For All CRCs, Enable Cheats,
+Download Cheats, Enter Cheat Code) to Games and saves > Patches and > Cheats; Thread Pinning and the
+driver's own core to System > PlayStation 5; the five frame-pacing rows (Frame Pacing, Maximum Frame
+Latency, Queue Frames When Slow, Advanced Frame Display, Skip Presenting Duplicate Frames) to a section
+of their own, Emulation > Frame Pacing; Move OSD Periodically to Interface > Screen care; the remote
+control page and its two actions to Network > Remote Control. Kept where phase 1 put them: Swap
+OK/Cancel (Interface), Show Gameplay Background (Interface > Library layouts), Sync Covers (Game
+List), Console Language and the two fast-boot rows (BIOS), Black Frame Insertion (Output and HDR),
+the texture dumping rows (Texture packs), Debanding and the color blindness filter (Looks), the USB
+microphones and their tests (Controls > USB devices), Map to USB Controller (Controllers), Enable Game
+Fixes, Enable Patches and the database's recommended settings (Game Fixes), the native code module
+rows (System > PlayStation 5), and a game's own first page (Games and saves > This game, its first
+section in a game's settings).
