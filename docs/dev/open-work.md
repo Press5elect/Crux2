@@ -138,6 +138,105 @@ item is done or something new is learned; delete what no longer applies.
   `MTVU.cpp` and `Memory.cpp`, about 94 lines) were not brought back either; the owner left them
   out on 2026-11-16.
 
+## Found by the frontend review of 2026-11-16 (none fixed)
+
+A read-only review of the interface (`ps5/frontend/bigpicture/`) and the host code it drives, at
+`88e6acd`. From reading the code only: nothing was run, nothing reproduced on a console. ✔ marks
+what the lead checked against the code as well. Line numbers are of that commit.
+
+**Can crash or hang**
+
+- ✔ The quick menu's Screenshot tile queues work for the graphics thread from the graphics thread
+  (`bp_pcsx2.cpp:5715` → `PS5Shots::Take`, `ps5_shots.cpp:110`): `MTGS::SendPointerPacket` has one
+  unlocked writer, the emulation thread. Fix: `Host::RunOnCPUThread([]{ PS5Shots::Take(); })`.
+- ✔ Worker threads queue to the graphics thread directly (`ps5_texture_packs.cpp:101`,
+  `ps5_jobs.cpp:171`, `:301`): a pack download or a save search ending during a game. Fix: go
+  through `Host::RunOnGSThread` (`ps5_host.cpp:908`), which goes by the emulation thread.
+- The "discs are in the drives" toast reads `drive.games[1]` after one of two discs was ejected
+  (`bp_library.cpp:4595-4621`). Fix: test `size() >= 2`.
+- The texture pack manager's "Move to…" keeps a place's index across a rebuild of the places
+  (`bp_textures.cpp:464`, `:584`, `:623`). Fix: keep the place's name, look the index up again.
+
+**Can lose or damage data**
+
+- Moving a pack onto a share that has one for the serial merges the two and deletes the source;
+  a stopped move leaves a partial `replacements` taken as whole (`ps5_texture_pack_store.cpp:690-749`).
+- `WriteFile` unlinks the old file before the new one is in place, no fsync (`ps5_backup.cpp:191-227`;
+  memory cards, card sync, restore). Fix: as `ps5_update.cpp`'s `MoveVerified`.
+- A restore stopped by a game start leaves a mixed set of cards (`ps5_backup.cpp:746`).
+- A pinned action run from the quick menu's pinned panel does not `closeOwn()` (`bp_quick.cpp:1153`);
+  a game's settings opened from there have their layer closed by `render()` (`:1576`): changes dropped.
+- ✔ `dropLast` removes two characters when an ASCII one follows a multibyte one (`bp_draw.cpp:1864`);
+  the same over-cut in `fit()` (`:158`, `:214`).
+- A full field takes a multibyte character's continuation bytes without its lead (`bp_draw.cpp:2200`).
+
+**Does the wrong thing**
+
+- ✔ The curl downloader leaves `status_code` 0 on a connection error (`HTTPDownloaderCurl.cpp:158`)
+  and `ps5_online.cpp` tests `status < 0`: offline, every game is written to `no-cover.txt` /
+  `no-picture.txt` as "has none"; the libretro fallback and the three-failures stop never trigger;
+  cheats and patches report "none found". Fix: set `HTTP_STATUS_ERROR` there (ps5.patch).
+- Any non-200 (403, 429, 5xx, an HTML page) is remembered as "not there" (`ps5_online.cpp:399`,
+  `:454`, `:637`). Fix: remember only a 404.
+- `download-running.txt` outlives a kill of the title and turns automatic covers and pictures off
+  with no word (`ps5_online.cpp:312`, `:567`); "Share covers" copies it and `no-cover.txt` to the
+  share (`ps5_jobs.cpp:931`).
+- The two cover pools share one failure counter and three connections (`ps5_online.cpp:346`, from
+  `b18f1ef`).
+- ✔ Controller ports 2 to 8 take port 1's row ids (`bp_settings_words.cpp:156`, `settingsIdOf`):
+  after "Map to Console Controller" the focus goes to the last port's row; a pin of port 2 is port 1's.
+- The search's "Changed from Default" list drops the focused row when it reaches its default; the
+  next press changes the following setting (`bp_settings_home.cpp:203`, `:558`).
+- ✔ "Internal resolution above 12x" shares `upscale_multiplier`, default 1 (`bp_options.cpp:1081`):
+  at 6x Left writes 25x, Right 13x; always counted as changed.
+- `erase(Own, "PS5", "SingStar")` or the light gun's key runs `Changed`, which writes `USBn Type=None`
+  into the game's file instead of removing it (`bp_pcsx2.cpp:6397`, `:6440`).
+- ✔ `unpackQuick` clamps the view to 0..5 of ten (`bp_library.cpp:695`).
+- On the Disc tab's page, Favourite, Hide and Rename toast success; the Backend returns early for
+  source 3 (`bp_library.cpp:1716`, `bp_pcsx2.cpp:815`).
+- The pack menu refuses every entry when the pack is busy, settings and download too
+  (`bp_textures.cpp:567`, `:649`); queue and stop act on an index or on what runs now (`:663`).
+- ✔ `devices[min(port, size - 1)]` maps the last controller, not the first (`bp_pcsx2.cpp:6796`).
+- Choosing a disc for a running game saves the library's place (`bp_library.cpp:4670`).
+- More > The next disc loses the page and the focus in Shelves when not by name (`bp_library.cpp:1614`).
+
+**Shows the wrong thing**
+
+- ✔ Defaults of rows against what `ps5_host.cpp` writes: `PS5.ThreadLayout` false against true
+  (`bp_options.cpp:517`, `ps5_host.cpp:388`), `OsdShowTextureReplacements` true against false
+  (`bp_options.cpp:1146`, `ps5_host.cpp:381`): both "changed" on a new install.
+- The log and What's New wrap for the normal text size and draw at the chosen one (`bp_draw.cpp:2587`).
+- The card manager and the texture pack manager are placed for a 1920-unit page: off-centre under
+  100% interface size (`bp_cards.cpp:522`, `bp_textures.cpp:82`); the Slash wipe likewise
+  (`bp_splash.cpp:354`).
+- A set's last-played and favourite are its front disc's only (`bp_library.cpp:138`, `:4334`, `:1717`).
+- The game page's looked-up facts stay after the texture pack manager closes (`bp_library.cpp:1963`);
+  the strip's state count is not renewed after a delete (`:4180`).
+- ✔ The memory cards row's `info` lists and opens every card each frame (`bp_pcsx2.cpp:2106`).
+- Covers from "Share the covers" do not show until a rescan: `m_cover_paths` is not cleared
+  (`bp_pcsx2.cpp:940`, `ps5_jobs.cpp:971`).
+- Accurate floating point in the quick menu asks `settingsGame()`, not the running game
+  (`bp_options.cpp:457`); the pinned "HD texture packs" likewise (`:955`).
+- The download bar is drawn over a running game with each toast and over the managers' foot
+  (`bp_draw.cpp:2391`, `:2909`).
+
+**Minor**
+
+L3 hinted on a row that cannot be reset (`bp_settings.cpp:960`); OneGame rows never count as changed
+(`:1139`); "N on" stale in the quick menu (`bp_quick.cpp:722`); hints on the Disc tab
+(`bp_library.cpp:5015`); L2 repeat flickers Show/Hide (`bp_draw.cpp:2252`); expired toasts count
+against the cap (`:2029`); long message bodies clipped (`:2816`); quick views and a view chosen by
+hand (`bp_library.cpp:752`); the focus into Shelves when not by name (`:1009`); an OSD switch in a
+game's options sets the shared place without saving it (`bp_pcsx2.cpp:6502`); share discovery's
+budget per wake-up (`ps5_shares.cpp:404`); the message after a stopped delete on a share
+(`ps5_texture_pack_manager.cpp:578`); `writeShares` renames onto the file (`ps5_shares.cpp:238`).
+
+**Not reached:** `ps5_covers_match.h`'s matching, `ps5_aim_logic.h`, `ps5_input_source_logic.h`,
+`ps5_texture_packs_extract.cpp`, `ps5_services.cpp`, `ps5_card_sync.*`, `ps5_osd_draw.h`'s layout.
+
+**Order suggested:** the two graphics-queue bugs, the offline covers, the pack merge on a share,
+the controller ports' ids.
+
 ## Known problems
 
 - paraLLEl-GS is slower than PCSX2's renderer in the heaviest game tested, and its picture is
