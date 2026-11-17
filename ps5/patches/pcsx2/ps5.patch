@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 79929f01750fdc8185810968c934bd3923d099a7.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 840774630f7a1a456e50575df62ec0b72cc00a98.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -44,7 +44,7 @@ index b0c3945..220d859 100644
  endif()
  
 diff --git a/bin/resources/GameIndex.yaml b/bin/resources/GameIndex.yaml
-index 0d8d936..37ac49a 100644
+index 9d6fc6b..22ec633 100644
 --- a/bin/resources/GameIndex.yaml
 +++ b/bin/resources/GameIndex.yaml
 @@ -2046,6 +2046,7 @@ SCAJ-20125:
@@ -87,7 +87,7 @@ index 0d8d936..37ac49a 100644
      getSkipCount: "GSC_NamcoGames"
  SCES-53247:
    name: "WRC Rally Evolved"
-@@ -70586,6 +70591,7 @@ SLUS-21059:
+@@ -70654,6 +70659,7 @@ SLUS-21059:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -95,7 +95,7 @@ index 0d8d936..37ac49a 100644
      getSkipCount: "GSC_NamcoGames"
  SLUS-21060:
    name: "WWE SmackDown! vs. RAW"
-@@ -71166,6 +71172,7 @@ SLUS-21160:
+@@ -71234,6 +71240,7 @@ SLUS-21160:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
