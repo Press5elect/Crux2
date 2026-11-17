@@ -21,7 +21,9 @@
 // leaves the source as it was. Where folders can be renamed (the console, a drive) the copy is
 // made beside its place ("replacements.crux2-moving") and renamed when checked, so a half copy is
 // never read by the game; a share cannot rename a folder, so there the copy is made in its place
-// (the source, on the console or a drive, is read before it until the end). A move begun again
+// (the source, on the console or a drive, is read before it until the end), with an empty folder
+// "replacements.crux2-copying" beside it until it is whole: listed as unfinished till then, and a
+// pack already there is never merged into. A move begun again
 // goes on from what was copied (a file already there with the source's size is not copied again).
 // A delete renames the pack away first where it can ("replacements.crux2-deleting"), so the game
 // no longer reads it from the first moment; what a stopped delete leaves is found as such and
@@ -42,6 +44,7 @@ namespace PS5TexturePackStore
 inline constexpr const char* MOVING = ".crux2-moving";
 inline constexpr const char* DELETING = ".crux2-deleting";
 inline constexpr const char* PART = ".crux2-part";
+inline constexpr const char* COPYING = ".crux2-copying"; // "replacements.crux2-copying": the copy beside it is not whole
 
 struct Entry
 {

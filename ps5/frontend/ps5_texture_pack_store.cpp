@@ -294,13 +294,17 @@ std::vector<Pack> Find(Files& files, const std::vector<Place>& places)
 				if (!files.List(Join(textures, e.name), &inside))
 					continue;
 				std::sort(inside.begin(), inside.end(), [](const Entry& a, const Entry& b) { return a.name < b.name; });
+				// A copy made in its place on a share is marked while it is not whole (Move).
+				const bool copying = std::any_of(inside.begin(), inside.end(), [](const Entry& sub) {
+					return sub.folder && IEquals(sub.name, std::string("replacements") + COPYING);
+				});
 				for (const Entry& sub : inside)
 				{
 					if (!sub.folder)
 						continue;
 					Pack::State state;
 					if (IEquals(sub.name, "replacements"))
-						state = Pack::Whole;
+						state = copying ? Pack::Moving : Pack::Whole;
 					else if (IEquals(sub.name, std::string("replacements") + MOVING))
 						state = Pack::Moving;
 					else if (IEquals(sub.name, std::string("replacements") + DELETING))
@@ -689,7 +693,16 @@ Outcome Move(Files& files, const Pack& pack, const std::string& textures, const 
 	}
 	const bool rename = files.CanRename(textures);
 	const std::string staging = rename ? dest + MOVING : dest;
-	if (rename && files.Exists(dest, &folder, &size))
+	// Where the copy is made in its place (a share), it is marked until it is whole: a copy that was
+	// stopped is found as unfinished (Find), and a move begun again goes on with it.
+	const std::string marker = dest + COPYING;
+	bool resuming = false;
+	if (!rename)
+	{
+		bool markerFolder = false;
+		resuming = files.Exists(marker, &markerFolder, &size) && markerFolder;
+	}
+	if (!resuming && files.Exists(dest, &folder, &size))
 	{
 		std::vector<Entry> inside;
 		if (folder && files.List(dest, &inside) && inside.empty())
@@ -702,7 +715,7 @@ Outcome Move(Files& files, const Pack& pack, const std::string& textures, const 
 			return o;
 		}
 	}
-	if (!files.MakeFolders(Parent(staging)))
+	if (!files.MakeFolders(Parent(staging)) || (!rename && !files.MakeFolders(marker)))
 	{
 		o.error = "cannot make the folder " + Parent(staging);
 		return o;
@@ -727,6 +740,11 @@ Outcome Move(Files& files, const Pack& pack, const std::string& textures, const 
 	if (rename && !files.Rename(staging, dest))
 	{
 		o.error = "the copy could not be put in its place";
+		return o;
+	}
+	if (!rename && !files.Remove(marker, true))
+	{
+		o.error = "the copy could not be marked whole: the pack was left where it was";
 		return o;
 	}
 	o.path = dest;
@@ -778,6 +796,9 @@ Outcome Delete(Files& files, const Pack& pack, const std::function<bool()>& stop
 			target = pack.path + DELETING;
 	}
 	o = RemoveTree(files, target, stop, progress);
+	// (An unfinished copy's mark goes with the last of it.)
+	if (o.ok)
+		files.Remove(pack.path + COPYING, true);
 	DropEmptyFolder(files, Parent(pack.path));
 	return o;
 }

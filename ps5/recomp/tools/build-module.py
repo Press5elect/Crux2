@@ -104,7 +104,17 @@ def main() -> int:
     parser.add_argument("--cxx", default=os.environ.get("CXX", "clang++"))
     parser.add_argument("--cc", default=os.environ.get("CC", "clang"))
     parser.add_argument("--opt", default="-O2")
+    parser.add_argument("--lld", default=os.environ.get("LLD", "ld.lld"))
+    parser.add_argument("--sdk", type=Path, help="the console's headers (SDK/target/include, with libc++'s): compile for the "
+                        "console's own target with them, as on Windows, where the PC has no headers a module can be made with")
     args = parser.parse_args()
+    # Windows has no C++ headers of its own a module could be compiled with: the kit's are used.
+    if args.sdk is None and os.name == "nt":
+        args.sdk = HERE.parent / "runner" / "sdk"
+    if args.sdk is not None:
+        args.sdk = args.sdk.resolve()
+        if not (args.sdk / "target/include/c++/v1").is_dir():
+            raise SystemExit(f"{args.sdk}: not the console's headers (no target/include/c++/v1); they come with the recomp kit")
 
     gen = args.generated
     elf = Elf(args.elf)
@@ -164,6 +174,13 @@ def main() -> int:
     # recompiler, which runs the code a module does not have, uses separate SSE operations.
     common = [args.opt, "-march=znver2", "-ffp-contract=off", "-fPIC", "-fvisibility=hidden", "-fno-exceptions", "-fno-asynchronous-unwind-tables",
               "-fno-stack-protector", "-ffunction-sections", "-I", str(RUNTIME), "-I", str(gen), "-w"]
+    if args.sdk is not None:
+        # The console's target and headers (the module is freestanding either way: it imports nothing,
+        # which is checked below). Its target hides what has no DLL storage class; a module's five
+        # exports are marked by visibility, as on Linux.
+        common += ["-target", "x86_64-sie-ps5", "-isysroot", str(args.sdk), "--sysroot", str(args.sdk),
+                   "-stdlib++-isystem", str(args.sdk / "target/include/c++/v1"), "-fno-visibility-from-dllstorageclass",
+                   "-fno-plt", "-fomit-frame-pointer"]
     cxx = [args.cxx, "-std=c++20", "-fno-rtti", "-fno-threadsafe-statics"] + common
 
     # An object newer than its source and than Crux2's runtime headers is kept from the last build.
@@ -207,8 +224,16 @@ def main() -> int:
         sys.stderr.write("\n".join(failures[:5]) + f"\nbuild-module: {len(failures)} file(s) did not compile\n")
         return 1
 
-    link = [args.cxx, "-shared", "-nostdlib", "-fuse-ld=lld", "-Wl,-z,defs", "-Wl,-Bsymbolic", "-Wl,--gc-sections",
-            "-Wl,--hash-style=sysv", "-o", str(args.out)] + [str(obj) for _, obj, _ in jobs]
+    # The objects are named in a file the linker reads (@file): a game has thousands of them, and
+    # Windows takes no command line over 32,767 characters.
+    listed = objects_dir / "objects.rsp"
+    listed.write_text("".join(f'"{obj.resolve().as_posix()}"\n' for _, obj, _ in jobs), encoding="utf-8")
+    if args.sdk is not None:
+        link = [args.lld, "-shared", "-z", "defs", "-Bsymbolic", "--gc-sections", "--hash-style=sysv", "-o", str(args.out),
+                "@" + listed.resolve().as_posix()]
+    else:
+        link = [args.cxx, "-shared", "-nostdlib", "-fuse-ld=lld", "-Wl,-z,defs", "-Wl,-Bsymbolic", "-Wl,--gc-sections",
+                "-Wl,--hash-style=sysv", "-o", str(args.out), "@" + listed.resolve().as_posix()]
     result = subprocess.run(link, capture_output=True, text=True)
     if result.returncode != 0:
         sys.stderr.write(result.stderr[-4000:])

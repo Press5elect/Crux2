@@ -38,6 +38,7 @@ struct PackRow
 	GameInfo game;             // the library's game, for its cover
 	int place = -1;            // a place's index
 	int queued = -2;           // a download: -1 the one that runs, else its place in the queue
+	std::string line;          // a queued download's line as the queue gave it (what it is, for when it is acted on)
 	std::function<void()> act; // an action's
 	std::string key() const
 	{
@@ -79,7 +80,7 @@ struct Manager
 	std::string keep;     // the row focused before the lists were made again
 } s_m;
 
-constexpr float MGR_W = 1760, MGR_H = 852, MGR_X = (1920 - MGR_W) / 2, MGR_Y = 118;
+constexpr float MGR_W = 1760, MGR_H = 852, MGR_Y = 118;
 constexpr float LEFT_W = 720, ROW_H = 96, HEAD_H = 50, ITEM_H = 78;
 constexpr const char* DOT = "   \xc2\xb7   ";
 
@@ -359,6 +360,7 @@ void rebuild()
 			PackRow d;
 			d.kind = PackRow::Download;
 			d.queued = static_cast<int>(i);
+			d.line = queue[i];
 			d.label = ICON_FA_CLOCK "   " + queue[i];
 			d.sub = i == 0 ? std::string("Next, when the one that runs is done") : "Waiting: " + std::to_string(i + 1) + " in the queue";
 			m.rows.push_back(std::move(d));
@@ -458,22 +460,56 @@ std::vector<PackItem> itemsFor(const PackRow* row)
 	return items;
 }
 
-// Whether `need` bytes go into a place; when it is known they do not, asked first.
-void ifRoom(int place, uint64_t need, const char* verb, std::function<void()> then)
+// A place by what it is, not by its index: the places are made again (a drive comes or goes) while
+// a list or a question is up, and the index then names another one.
+std::string placeKey(int place)
 {
+	if (place < 0 || place >= static_cast<int>(s_m.places.size()))
+		return std::string();
+	const PackPlace& p = s_m.places[static_cast<size_t>(place)];
+	return p.where + "\n" + p.name;
+}
+
+int placeFind(const std::string& key)
+{
+	if (key.empty())
+		return -1;
+	for (size_t i = 0; i < s_m.places.size(); i++)
+	{
+		if (placeKey(static_cast<int>(i)) == key)
+			return static_cast<int>(i);
+	}
+	return -1;
+}
+
+// Whether `need` bytes go into a place (`key`: placeKey); when it is known they do not, asked first.
+// `then` gets the place's index as it is when the act is done.
+void ifRoom(const std::string& key, uint64_t need, const char* verb, std::function<void(int)> then)
+{
+	const int place = placeFind(key);
+	if (place < 0)
+	{
+		toast("That place is gone.", 4.f);
+		return;
+	}
 	const PackPlace& p = s_m.places[static_cast<size_t>(place)];
 	const uint64_t margin = need / 100 + (64ull << 20);
 	if (p.freeBytes < 0 || need + margin <= static_cast<uint64_t>(p.freeBytes))
 	{
-		then();
+		then(place);
 		return;
 	}
 	confirm("It may not fit",
 		"This needs about " + formatSize(need) + " and " + p.name + " has " + formatSize(static_cast<uint64_t>(p.freeBytes)) +
 			" free. What does not fit stops it when the place is full (a move leaves the pack where it is).",
-		[then](bool yes) {
-			if (yes)
-				then();
+		[then, key](bool yes) {
+			if (!yes)
+				return;
+			const int again = placeFind(key);
+			if (again < 0)
+				toast("That place is gone.", 4.f);
+			else
+				then(again);
 		},
 		verb, "No");
 }
@@ -507,6 +543,7 @@ void openGameTextures(const std::string& serial)
 void downloadMenu(const OfferedPack& offer, int fromPlace)
 {
 	std::vector<int> targets;
+	std::vector<std::string> keys;
 	std::vector<std::string> names;
 	const uint64_t need = offer.size + offer.size / 20;
 	for (size_t i = 0; i < s_m.places.size(); i++)
@@ -515,6 +552,7 @@ void downloadMenu(const OfferedPack& offer, int fromPlace)
 		if (!p.downloads || !p.writable)
 			continue;
 		targets.push_back(static_cast<int>(i));
+		keys.push_back(placeKey(static_cast<int>(i)));
 		names.push_back(std::string(placeIcon(p)) + "   " + p.name + roomNote(static_cast<int>(i), need));
 	}
 	if (targets.empty())
@@ -528,11 +566,10 @@ void downloadMenu(const OfferedPack& offer, int fromPlace)
 		if (targets[i] == fromPlace)
 			current = static_cast<int>(i);
 	}
-	pick("Download " + offer.title + " (" + formatSize(offer.size) + ") to", names, current, [targets, offer, need](int choice) {
-		if (choice < 0 || choice >= static_cast<int>(targets.size()) || s_m.shelf == nullptr)
+	pick("Download " + offer.title + " (" + formatSize(offer.size) + ") to", names, current, [keys, offer, need](int choice) {
+		if (choice < 0 || choice >= static_cast<int>(keys.size()) || s_m.shelf == nullptr)
 			return;
-		const int place = targets[static_cast<size_t>(choice)];
-		ifRoom(place, need, "Download anyway", [offer, place] {
+		ifRoom(keys[static_cast<size_t>(choice)], need, "Download anyway", [offer](int place) {
 			if (s_m.shelf != nullptr)
 				s_m.shelf->queueDownload(offer, place);
 		});
@@ -557,14 +594,19 @@ void deleteAsked(const InstalledPack& pack)
 
 void packMenu(const PackItem& item)
 {
-	TexturePackShelf* shelf = s_m.shelf;
 	if (item.offered)
 	{
 		downloadMenu(item.offer, 0);
 		return;
 	}
 	const InstalledPack pack = item.pack;
-	const std::string busy = shelf->packBusy(pack);
+	// (Asked when a move or a delete is chosen, not when the menu opens: what runs changes meanwhile.)
+	const auto idle = [pack] {
+		const std::string busy = (s_m.shelf != nullptr) ? s_m.shelf->packBusy(pack) : std::string();
+		if (!busy.empty())
+			message("Not now", busy);
+		return busy.empty() && s_m.shelf != nullptr;
+	};
 	std::vector<std::string> names;
 	std::vector<std::function<void()>> acts;
 	if (pack.state == InstalledPack::Moving)
@@ -581,15 +623,20 @@ void packMenu(const PackItem& item)
 				if (whole)
 					break;
 				names.push_back(ICON_FA_TRUCK "   Go on with the move from " + placeName(other.place));
-				acts.push_back([other, place = pack.place] {
-					if (s_m.shelf != nullptr)
+				acts.push_back([other, idle, key = placeKey(pack.place)] {
+					const int place = placeFind(key);
+					if (place < 0)
+						toast("That place is gone.", 4.f);
+					else if (idle())
 						s_m.shelf->movePack(other, place);
 				});
 				break;
 			}
 		}
 		names.push_back(ICON_FA_TRASH "   Delete what was copied");
-		acts.push_back([pack] {
+		acts.push_back([pack, idle] {
+			if (!idle())
+				return;
 			confirm("Delete the unfinished copy?", "What an unfinished move copied to " + placeName(pack.place) + " is deleted. The pack it came from stays.",
 				[pack](bool yes) {
 					if (yes && s_m.shelf != nullptr)
@@ -600,8 +647,8 @@ void packMenu(const PackItem& item)
 	else if (pack.state == InstalledPack::Deleting)
 	{
 		names.push_back(ICON_FA_TRASH "   Finish deleting");
-		acts.push_back([pack] {
-			if (s_m.shelf != nullptr)
+		acts.push_back([pack, idle] {
+			if (idle())
 				s_m.shelf->deletePack(pack);
 		});
 	}
@@ -620,9 +667,11 @@ void packMenu(const PackItem& item)
 				continue;
 			const int place = static_cast<int>(i);
 			names.push_back(std::string(ICON_FA_TRUCK "   Move to ") + p.name + roomNote(place, pack.bytes));
-			acts.push_back([pack, place] {
-				ifRoom(place, pack.bytes, "Move anyway", [pack, place] {
-					if (s_m.shelf != nullptr)
+			acts.push_back([pack, idle, key = placeKey(place)] {
+				if (!idle())
+					return;
+				ifRoom(key, pack.bytes, "Move anyway", [pack, idle](int place) {
+					if (idle())
 						s_m.shelf->movePack(pack, place);
 				});
 			});
@@ -632,8 +681,11 @@ void packMenu(const PackItem& item)
 		{
 			const OfferedPack offer = *offers.front();
 			names.push_back(ICON_FA_CLOUD_ARROW_DOWN "   Download again from the collection");
-			acts.push_back([offer, place = pack.place] {
-				if (s_m.shelf != nullptr)
+			acts.push_back([offer, key = placeKey(pack.place)] {
+				const int place = placeFind(key);
+				if (place < 0)
+					toast("That place is gone.", 4.f);
+				else if (s_m.shelf != nullptr)
 					s_m.shelf->queueDownload(offer, place);
 			});
 		}
@@ -643,17 +695,15 @@ void packMenu(const PackItem& item)
 			acts.push_back([serial = pack.serial] { openGameTextures(serial); });
 		}
 		names.push_back(ICON_FA_TRASH "   Delete");
-		acts.push_back([pack] { deleteAsked(pack); });
+		acts.push_back([pack, idle] {
+			if (idle())
+				deleteAsked(pack);
+		});
 	}
 	const std::string title = titleOf(pack.serial) + " on " + placeName(pack.place);
-	pick(title, names, -1, [acts, busy](int choice) {
+	pick(title, names, -1, [acts](int choice) {
 		if (choice < 0 || choice >= static_cast<int>(acts.size()))
 			return;
-		if (!busy.empty())
-		{
-			message("Not now", busy);
-			return;
-		}
 		acts[static_cast<size_t>(choice)]();
 	});
 }
@@ -662,16 +712,37 @@ void downloadRowMenu(const PackRow& row)
 {
 	if (row.queued == -1)
 	{
-		confirm("Stop the download?", "What was unpacked whole stays; the next in the queue starts.", [](bool yes) {
-			if (yes)
+		// (The one that ran when it was asked: not whichever runs when it is answered.)
+		const std::string doing = be->texturePackDoing();
+		confirm("Stop the download?", "What was unpacked whole stays; the next in the queue starts.", [doing](bool yes) {
+			if (!yes)
+				return;
+			if (be->texturePackDoing() != doing)
+				toast("That download is no longer the one that runs.", 4.f);
+			else
 				be->stopTexturePack();
 		}, "Stop it", "No");
 		return;
 	}
 	const int index = row.queued;
-	pick(row.label, {ICON_FA_XMARK "   Take it off the queue"}, -1, [index](int choice) {
-		if (choice == 0 && s_m.shelf != nullptr)
-			s_m.shelf->unqueueDownload(index);
+	const std::string line = row.line;
+	pick(row.label, {ICON_FA_XMARK "   Take it off the queue"}, -1, [index, line](int choice) {
+		if (choice != 0 || s_m.shelf == nullptr)
+			return;
+		// (The queue moves on while this is up: the item that was shown, wherever it is now.)
+		const std::vector<std::string> queue = s_m.shelf->queuedDownloads();
+		int at = -1;
+		if (index >= 0 && index < static_cast<int>(queue.size()) && queue[static_cast<size_t>(index)] == line)
+			at = index;
+		for (size_t i = 0; at < 0 && i < queue.size(); i++)
+		{
+			if (queue[i] == line)
+				at = static_cast<int>(i);
+		}
+		if (at < 0)
+			toast("That download has started or is gone.", 4.f);
+		else
+			s_m.shelf->unqueueDownload(at);
 	});
 }
 
@@ -888,7 +959,7 @@ void texturePacksDraw(ImDrawList* dl)
 	m.shown = approach(m.shown, 1, 14);
 	const float t = m.shown;
 	dl->AddRectFilled(V(0, 0), V(W, H), col::rgba(0, 0, 0, static_cast<int>(180 * t)));
-	const float x = MGR_X, y = MGR_Y + (1 - t) * 24, w = MGR_W, h = MGR_H;
+	const float x = (W - MGR_W) / 2, y = MGR_Y + (H - 1080.f) / 2 + (1 - t) * 24, w = MGR_W, h = MGR_H;
 	glow(dl, x, y, w, h, 26, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
 	rect(dl, x, y, w, h, alpha(col::panel, t), 26);
 

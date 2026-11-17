@@ -76,10 +76,60 @@ bool setsDirty = true;
 // drawing the screen does.
 unsigned libraryGeneration = 1;
 bool setsGrouped = false; // what the titles and fronts were last made for
+unsigned statesRevision = 1; // moves when a state is deleted here: the strip counts again
 
 bool grouping(bool selectDisc)
 {
 	return options().groupDiscs && !selectDisc;
+}
+
+// A set shown as one entry stands for its discs together: it was played when it was last played on
+// any disc, for the time played on all of them, and is a favourite when any disc is (the front disc's
+// own figures are one disc's). The discs of its set, or none for a game on its own and for a set
+// whose discs are listed one by one.
+const std::vector<size_t>* setDiscs(const Game& g)
+{
+	if (g.setSize < 2 || g.set.empty() || !setsGrouped)
+		return nullptr;
+	const auto it = discSets.find(g.set);
+	return it == discSets.end() ? nullptr : &it->second;
+}
+
+time_t lastPlayedOf(const Game& g)
+{
+	time_t latest = g.info.lastPlayed;
+	if (const std::vector<size_t>* discs = setDiscs(g))
+	{
+		for (size_t i : *discs)
+			latest = std::max(latest, games[i].info.lastPlayed);
+	}
+	return latest;
+}
+
+time_t playedSecondsOf(const Game& g)
+{
+	if (const std::vector<size_t>* discs = setDiscs(g))
+	{
+		time_t sum = 0;
+		for (size_t i : *discs)
+			sum += games[i].info.playedSeconds;
+		return sum;
+	}
+	return g.info.playedSeconds;
+}
+
+bool favouriteOf(const Game& g)
+{
+	if (const std::vector<size_t>* discs = setDiscs(g))
+	{
+		for (size_t i : *discs)
+		{
+			if (games[i].info.favourite)
+				return true;
+		}
+		return false;
+	}
+	return g.info.favourite;
 }
 
 std::string baseName(const std::string& fileName)
@@ -291,7 +341,7 @@ void drawCover(ImDrawList* dl, const Game& g, float x, float y, float w, float h
 	dl->AddRectFilledMultiColor(V(x, y), V(x + w, y + h * 0.18f), col::rgba(255, 255, 255, static_cast<int>(18 + 20 * lift)),
 		col::rgba(255, 255, 255, static_cast<int>(18 + 20 * lift)), 0, 0);
 	// A favourite: a star in its corner.
-	if (g.info.favourite && w >= 100)
+	if (favouriteOf(g) && w >= 100)
 	{
 		const float size = std::clamp(w * 0.1f, 16.f, 24.f), bh = size * 1.8f;
 		rect(dl, x + 10, y + 10, bh, bh, alpha(col::bar, 0.92f), bh / 2);
@@ -321,6 +371,7 @@ struct Shelf
 	float scroll = 0;     // in cards, animated
 	float focusAnim = -1; // where the focus ring is, on its way to focus
 	bool byTitle = true;  // in the order of its titles (the triggers go by letter)
+	bool listing = false; // one of the library's own lists of games (not the last played, favourites, a collection)
 };
 
 // The library as one tab shows it. Each tab keeps its own (the shelf, the focus, the scroll),
@@ -607,11 +658,11 @@ bool matches(const Game& g)
 	{
 		return false;
 	}
-	if (nar.show == ShowFavourites && !g.info.favourite)
+	if (nar.show == ShowFavourites && !favouriteOf(g))
 		return false;
 	if (nar.region != RegionAny && regionOf(g.info) != nar.region)
 		return false;
-	const bool played = g.info.lastPlayed > 0 || g.info.playedSeconds > 0;
+	const bool played = lastPlayedOf(g) > 0 || playedSecondsOf(g) > 0;
 	if ((nar.played == 1 && played) || (nar.played == 2 && !played))
 		return false;
 	if ((nar.runs == 1 && g.info.compatibility < 5) || (nar.runs == 2 && g.info.compatibility != 0))
@@ -655,6 +706,14 @@ std::string narrowText()
 	return out;
 }
 
+// The views: shelves by what the games are; every cover in a grid; a list with the focused game
+// beside it; the covers in a row that flows past; the games as books on shelves, their backs
+// out; a table of what is known of each; the focused game as a dashboard shows it, a strip of
+// covers under it; a wheel of titles beside the game's art; a wall of every cover; the discs
+// themselves, the focused one turning.
+enum View { Shelves, Grid, List, Flow, Bookcase, Table, Showcase, Wheel, Wall, Discs, ViewCount };
+const char* const viewNames[ViewCount] = {"Shelves", "Grid", "List", "Flow", "Bookcase", "Table", "Showcase", "Wheel", "Wall", "Discs"};
+
 // ---- quick views
 //
 // What the list is narrowed to and its order, kept under a name: R3 in the library goes from one
@@ -692,7 +751,7 @@ bool unpackQuick(const std::string& line, QuickView* q)
 	const auto word = [&](size_t i) { return parts[i] == "." ? std::string() : parts[i]; };
 	q->name = word(0);
 	q->sort = number(1, 0, 4);
-	q->view = number(2, -1, 5);
+	q->view = number(2, -1, ViewCount - 1);
 	q->narrow.show = number(3, 0, 2);
 	q->narrow.region = number(4, 0, RegionCount - 1);
 	q->narrow.played = number(5, 0, 2);
@@ -797,7 +856,7 @@ std::string insertedPath;
 GameInfo loadingGame;
 std::string loadingTitle;
 
-void switchSource(int source)
+void switchSource(int source, bool keep = true)
 {
 	if (source == lib.source)
 		return;
@@ -809,7 +868,7 @@ void switchSource(int source)
 	lib.detailsAnim = 0;
 	lib.heroPath.clear();
 	// (The Disc tab is there only with a disc: it is not the tab the library opens on next time.)
-	if (source != DiscDrive)
+	if (source != DiscDrive && keep)
 	{
 		options().source = source;
 		saveOptions();
@@ -837,14 +896,6 @@ void chooseSource()
 	if (tab == TabDisc && lib.source != DiscDrive)
 		tab = TabLibrary;
 }
-
-// The views: shelves by what the games are; every cover in a grid; a list with the focused game
-// beside it; the covers in a row that flows past; the games as books on shelves, their backs
-// out; a table of what is known of each; the focused game as a dashboard shows it, a strip of
-// covers under it; a wheel of titles beside the game's art; a wall of every cover; the discs
-// themselves, the focused one turning.
-enum View { Shelves, Grid, List, Flow, Bookcase, Table, Showcase, Wheel, Wall, Discs, ViewCount };
-const char* const viewNames[ViewCount] = {"Shelves", "Grid", "List", "Flow", "Bookcase", "Table", "Showcase", "Wheel", "Wall", "Discs"};
 
 View view()
 {
@@ -913,10 +964,10 @@ bool sortedByName()
 
 bool ordered(size_t a, size_t b)
 {
-	if (options().sort == 1 && games[a].info.lastPlayed != games[b].info.lastPlayed)
-		return games[a].info.lastPlayed > games[b].info.lastPlayed;
-	if (options().sort == 2 && games[a].info.playedSeconds != games[b].info.playedSeconds)
-		return games[a].info.playedSeconds > games[b].info.playedSeconds;
+	if (options().sort == 1 && lastPlayedOf(games[a]) != lastPlayedOf(games[b]))
+		return lastPlayedOf(games[a]) > lastPlayedOf(games[b]);
+	if (options().sort == 2 && playedSecondsOf(games[a]) != playedSecondsOf(games[b]))
+		return playedSecondsOf(games[a]) > playedSecondsOf(games[b]);
 	if (options().sort == 3 && games[a].info.size != games[b].info.size)
 		return games[a].info.size > games[b].info.size;
 	if (options().sort == 4 && games[a].info.added != games[b].info.added)
@@ -1006,7 +1057,7 @@ void focusPath(const std::string& path)
 	{
 		for (size_t i = 0; i < lib.shelves[si].items.size(); i++)
 		{
-			if (games[lib.shelves[si].items[i]].info.path == path && (lib.shelves[si].byTitle || lib.shelves.size() == 1))
+			if (games[lib.shelves[si].items[i]].info.path == path && (lib.shelves[si].byTitle || lib.shelves[si].listing || lib.shelves.size() == 1))
 			{
 				lib.shelf = static_cast<int>(si);
 				lib.shelves[si].focus = static_cast<int>(i);
@@ -1095,7 +1146,7 @@ void buildShelves(bool selectDisc)
 		favourites.byTitle = sortedByName();
 		for (size_t i = 0; i < games.size(); i++)
 		{
-			if (listed(games[i], selectDisc) && games[i].info.favourite)
+			if (listed(games[i], selectDisc) && favouriteOf(games[i]))
 				favourites.items.push_back(i);
 		}
 		std::sort(favourites.items.begin(), favourites.items.end(), ordered);
@@ -1156,6 +1207,7 @@ void buildShelves(bool selectDisc)
 		const bool inOrder = !selectDisc && lib.source != DiscDrive;
 		std::sort(shelf->items.begin(), shelf->items.end(), inOrder ? ordered : byTitle);
 		shelf->byTitle = !inOrder || sortedByName();
+		shelf->listing = true;
 		if (!shelf->items.empty())
 			shelves.push_back(std::move(*shelf));
 	}
@@ -1380,6 +1432,13 @@ Game* gameByPath(const std::string& path)
 			return &g;
 	}
 	return nullptr;
+}
+
+// The saved states a game has, as the page and the strip say it: the backups (the state a slot held
+// before) are not counted.
+int countStates(const std::vector<StateInfo>& states)
+{
+	return static_cast<int>(std::count_if(states.begin(), states.end(), [](const StateInfo& s) { return !s.backup; }));
 }
 
 // The tabs a game's page has: a game whose CRC is not known has no settings, states or patches of its
@@ -1625,6 +1684,12 @@ void nextDisc(Game& g)
 	Game& next = games[discs[(at + 1) % discs.size()]];
 	frontChoice[next.set] = next.info.path;
 	setsDirty = true;
+	// (The shelves keep the focus by the game's path: it is the next disc's now.)
+	for (Shelf& shelf : lib.shelves)
+	{
+		if (shelf.focusPath == g.info.path)
+			shelf.focusPath = next.info.path;
+	}
 	lib.flatPath = next.info.path;
 	const int tab = det.tab;
 	openDetails(next);
@@ -1662,20 +1727,29 @@ void moreMenu(const Game& g)
 	const GameInfo info = g.info;
 	const std::string title = g.title;
 	const bool renamed = info.renamed;
+	const bool favourite = favouriteOf(g);
 	// (The first five are where they always were; what was on the page's buttons and L1 / R1 before
 	// comes after them.)
 	enum { MoreStartWith, MoreRename, MoreCollections, MorePictures, MoreOwnName, MoreFavourite, MoreHide, MoreNextDisc, MoreImage, MoreFresh };
-	std::vector<std::string> names = {ICON_FA_POWER_OFF "   Start with...", ICON_FA_PEN "   Rename", ICON_FA_LAYER_GROUP "   Collections",
-		ICON_FA_IMAGES "   Fetch its pictures"};
-	std::vector<int> ids = {MoreStartWith, MoreRename, MoreCollections, MorePictures};
+	std::vector<std::string> names = {ICON_FA_POWER_OFF "   Start with..."};
+	std::vector<int> ids = {MoreStartWith};
 	const auto add = [&](int id, std::string name) {
 		ids.push_back(id);
 		names.push_back(std::move(name));
 	};
+	// (A disc in the drive keeps no name, favourite or hiding: the Backend does not, so they are not offered.)
+	const bool inDrive = (info.source == DiscDrive);
+	if (!inDrive)
+		add(MoreRename, ICON_FA_PEN "   Rename");
+	add(MoreCollections, ICON_FA_LAYER_GROUP "   Collections");
+	add(MorePictures, ICON_FA_IMAGES "   Fetch its pictures");
 	if (renamed)
 		add(MoreOwnName, ICON_FA_ROTATE_LEFT "   Its own name again");
-	add(MoreFavourite, info.favourite ? ICON_FA_STAR "   Not a favourite any more" : ICON_FA_STAR "   A favourite");
-	add(MoreHide, info.hidden ? ICON_FA_EYE "   List it again" : ICON_FA_EYE_SLASH "   Hide it");
+	if (!inDrive)
+	{
+		add(MoreFavourite, favourite ? ICON_FA_STAR "   Not a favourite any more" : ICON_FA_STAR "   A favourite");
+		add(MoreHide, info.hidden ? ICON_FA_EYE "   List it again" : ICON_FA_EYE_SLASH "   Hide it");
+	}
 	if (setsGrouped && g.setSize > 1)
 		add(MoreNextDisc, ICON_FA_COMPACT_DISC "   The next disc (this is disc " + std::to_string(g.discOrder) + " of " + std::to_string(g.setSize) + ")");
 	if (info.source == DiscDrive)
@@ -1717,9 +1791,20 @@ void moreMenu(const Game& g)
 				if (Game* game = gameByPath(info.path))
 				{
 					// A favourite, or not one any more: at once.
-					game->info.favourite = !game->info.favourite;
-					be->setFavourite(game->info, game->info.favourite);
-					toast(game->info.favourite ? "A favourite now: it is on the Favourites shelf." : "Not a favourite any more.", 3.f);
+					// (A set's discs are all of them one or the other.)
+					const bool now = !favouriteOf(*game);
+					std::vector<size_t> discs;
+					if (const std::vector<size_t>* set = setDiscs(*game))
+						discs = *set;
+					else
+						discs.push_back(static_cast<size_t>(game - games.data()));
+					for (size_t disc : discs)
+					{
+						games[disc].info.favourite = now;
+						be->setFavourite(games[disc].info, now);
+					}
+					libraryGeneration++;
+					toast(now ? "A favourite now: it is on the Favourites shelf." : "Not a favourite any more.", 3.f);
 				}
 				break;
 			case MoreHide:
@@ -1861,6 +1946,7 @@ void detailsInput(Game& g, bool selectDisc)
 					return;
 				if (!be->deleteState(state))
 					toast("That state could not be deleted.");
+				statesRevision++;
 				det.states = be->states(info.serial, info.crc, true);
 				det.row = std::clamp(det.row, 0, std::max(0, static_cast<int>(det.states.size()) - 1));
 				if (det.states.empty())
@@ -1960,7 +2046,13 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 {
 	const settings::Palette p = settings::palette();
 	// (Back from another screen, or opened: what has to be looked up, again.)
-	if (det.drawnAt < frameNow - 2 || det.path != g.info.path)
+	// (Not while it closes: the focus may be on another game by then. And after the card manager or
+	// the texture pack manager: they change what is found.)
+	static bool managerWas = false;
+	const bool manager = cardManagerOpen() || texturePacksOpen();
+	const bool managerClosed = managerWas && !manager;
+	managerWas = manager;
+	if (lib.details && (det.drawnAt < frameNow - 2 || det.path != g.info.path || managerClosed))
 	{
 		det.path = g.info.path;
 		lookUp(g, selectDisc);
@@ -2060,7 +2152,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 	{
 		// The title, with a star before it when the game is a favourite.
 		float titleX = tx;
-		if (g.info.favourite && !selectDisc)
+		if (favouriteOf(g) && !selectDisc)
 		{
 			text(dl, regular(), 40, tx, y0 + 8, alpha(col::warm, t), ICON_FA_STAR);
 			titleX += 58;
@@ -2079,9 +2171,9 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 		add(g.info.serial);
 		if (g.info.compatibility >= 1 && g.info.compatibility <= 6)
 			add(compatibilityWords[g.info.compatibility]);
-		if (g.info.playedSeconds > 0)
-			add("Played " + formatPlayed(g.info.playedSeconds));
-		add(g.info.lastPlayed > 0 ? "Last played " + formatWhen(g.info.lastPlayed) : std::string("Not played yet"));
+		if (playedSecondsOf(g) > 0)
+			add("Played " + formatPlayed(playedSecondsOf(g)));
+		add(lastPlayedOf(g) > 0 ? "Last played " + formatWhen(lastPlayedOf(g)) : std::string("Not played yet"));
 		if (setsGrouped && g.setSize > 1)
 			add("Disc " + std::to_string(g.discOrder) + " of " + std::to_string(g.setSize));
 		textIn(dl, regular(), 22, tx, y0 + 76, alpha(p.secondary, t), meta, tw, false);
@@ -2131,13 +2223,13 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 			{
 				Card c{"WHERE YOU LEFT OFF", "", ""};
 				StateInfo newest;
-				const size_t count = static_cast<size_t>(std::count_if(det.states.begin(), det.states.end(), [](const StateInfo& s) { return !s.backup; }));
+				const size_t count = static_cast<size_t>(countStates(det.states));
 				if (const std::optional<StateInfo> closed = resumeState(g))
 					c.fact = "Closed " + formatWhen(closed->when);
 				else if (newestOf(det.states, newest))
 					c.fact = "Saved " + formatWhen(newest.when);
 				else
-					c.fact = g.info.lastPlayed > 0 ? "Played " + formatWhen(g.info.lastPlayed) : std::string("Not played yet");
+					c.fact = lastPlayedOf(g) > 0 ? "Played " + formatWhen(lastPlayedOf(g)) : std::string("Not played yet");
 				c.note = count == 0 ? std::string("No save states yet") : count == 1 ? std::string("1 save state") : std::to_string(count) + " save states";
 				cards.push_back(std::move(c));
 			}
@@ -2402,7 +2494,7 @@ void drawShelves(ImDrawList* dl, Game* focused, bool selectDisc)
 		text(dl, bold(), 20, tx + 14, heroTop + 88 - bs.y / 2, alpha(tint, a), badge.c_str());
 		textIn(dl, bold(), 72, tx, heroTop + 122 + (1 - a) * 16, alpha(col::text, a), focused->title, W * 0.6f, true);
 		std::string meta = metaText(*focused);
-		const std::string played = formatPlayed(focused->info.playedSeconds);
+		const std::string played = formatPlayed(playedSecondsOf(*focused));
 		if (!played.empty())
 			meta += (meta.empty() ? "" : "   \xc2\xb7   ") + ("Played " + played);
 		textIn(dl, regular(), 26, tx, heroTop + 220, alpha(col::dim, a), meta, W * 0.6f, true);
@@ -2940,8 +3032,8 @@ void drawList(ImDrawList* dl, Game* focused, bool selectDisc)
 		textIn(dl, regular(), 22, px + 190, y, col::text, value, pw - 190, true);
 		y += 38;
 	};
-	row("Last played", focused->info.lastPlayed > 0 ? formatWhen(focused->info.lastPlayed) : std::string("Not yet"));
-	row("Time played", formatPlayed(focused->info.playedSeconds));
+	row("Last played", lastPlayedOf(*focused) > 0 ? formatWhen(lastPlayedOf(*focused)) : std::string("Not yet"));
+	row("Time played", formatPlayed(playedSecondsOf(*focused)));
 	row("Size", focused->info.size != 0 ? formatSize(focused->info.size) : std::string());
 	row("File", focused->info.fileName);
 
@@ -3091,7 +3183,7 @@ void bookSpine(ImDrawList* dl, const Game& g, float x, float y, float w, float h
 	rect(dl, x, y + 12, w, 5, band);
 	rect(dl, x, y + h - 17, w, 5, band);
 	float room = h - 64, shift = 0;
-	if (g.info.favourite)
+	if (favouriteOf(g))
 	{
 		const ImVec2 ss = textSize(regular(), 17, ICON_FA_STAR);
 		text(dl, regular(), 17, x + (w - ss.x) / 2, y + 26, col::warm, ICON_FA_STAR);
@@ -3222,7 +3314,7 @@ void drawTable(ImDrawList* dl, Game* focused)
 		else
 			rect(dl, x0 + 16, y + 7, tw, th, col::card, 4);
 		float tx = titleX;
-		if (g.info.favourite)
+		if (favouriteOf(g))
 		{
 			text(dl, regular(), 20, tx, y + 18, on ? col::text : col::warm, ICON_FA_STAR);
 			tx += 32;
@@ -3235,8 +3327,8 @@ void drawTable(ImDrawList* dl, Game* focused)
 		};
 		cell(g.info.region, columns[0].width);
 		cell((g.info.compatibility >= 1 && g.info.compatibility <= 6) ? compatibilityWords[g.info.compatibility] : "", columns[1].width);
-		cell(g.info.lastPlayed > 0 ? formatWhen(g.info.lastPlayed) : std::string(), columns[2].width);
-		cell(formatPlayed(g.info.playedSeconds), columns[3].width);
+		cell(lastPlayedOf(g) > 0 ? formatWhen(lastPlayedOf(g)) : std::string(), columns[2].width);
+		cell(formatPlayed(playedSecondsOf(g)), columns[3].width);
 		cell(g.info.size != 0 ? formatSize(g.info.size) : std::string(), columns[4].width);
 	}
 	dl->PopClipRect();
@@ -3308,8 +3400,8 @@ float gameFacts(ImDrawList* dl, const Game& g, float x, float y, float w, float 
 		textIn(dl, regular(), 22, x + 180, y, alpha(col::text, a), value, w - 180, false);
 		y += 34;
 	};
-	row("Last played", g.info.lastPlayed > 0 ? formatWhen(g.info.lastPlayed) : std::string("Not yet"));
-	row("Time played", formatPlayed(g.info.playedSeconds));
+	row("Last played", lastPlayedOf(g) > 0 ? formatWhen(lastPlayedOf(g)) : std::string("Not yet"));
+	row("Time played", formatPlayed(playedSecondsOf(g)));
 	if (g.info.compatibility >= 1 && g.info.compatibility <= 6)
 		row("Known to run", compatibilityWords[g.info.compatibility]);
 	if (setsGrouped && g.setSize > 1)
@@ -3958,6 +4050,7 @@ void listMenu()
 			{
 				std::vector<std::string> views(viewNames, viewNames + ViewCount);
 				pick("View", std::move(views), std::clamp(options().view, 0, static_cast<int>(ViewCount) - 1), [](int chosen) {
+					quickLeft();
 					options().view = chosen;
 					saveOptions();
 				});
@@ -4176,22 +4269,21 @@ const char* placeWords(int source)
 	}
 }
 
-// How many saved states a game has (asked of the Backend once for each game the focus comes to).
+// How many saved states a game has (asked of the Backend once for each game the focus comes to, and
+// again after one is deleted).
 int stateCount(const Game& g)
 {
 	static std::string forPath;
-	static unsigned forGeneration = ~0u;
+	static unsigned forGeneration = ~0u, forRevision = 0;
 	static int count = 0;
-	if (g.info.path != forPath || forGeneration != libraryGeneration)
+	if (g.info.path != forPath || forGeneration != libraryGeneration || forRevision != statesRevision)
 	{
 		forPath = g.info.path;
 		forGeneration = libraryGeneration;
+		forRevision = statesRevision;
 		count = 0;
 		if (g.info.hasStates && g.info.crc != 0)
-		{
-			for (const StateInfo& state : be->states(g.info.serial, g.info.crc, false))
-				count += (state.slot >= -1 && !state.backup) ? 1 : 0;
-		}
+			count = countStates(be->states(g.info.serial, g.info.crc, false));
 	}
 	return count;
 }
@@ -4222,7 +4314,7 @@ void drawStrip(ImDrawList* dl, const Game* focused)
 		text(dl, bold(), 19, right + 14, y + h / 2 - ts.y / 2, tint, label);
 		right -= 12;
 	};
-	if (g.info.favourite)
+	if (favouriteOf(g))
 		tag(ICON_FA_STAR "  Favourite", col::warm);
 	if (g.info.hasTextures)
 		tag(ICON_FA_IMAGES "  Texture pack", p.accent);
@@ -4234,7 +4326,7 @@ void drawStrip(ImDrawList* dl, const Game* focused)
 		if (!part.empty())
 			meta += (meta.empty() ? "" : "   \xc2\xb7   ") + part;
 	};
-	const std::string played = formatPlayed(g.info.playedSeconds);
+	const std::string played = formatPlayed(playedSecondsOf(g));
 	add(played.empty() ? std::string("Never played") : "Played " + played);
 	if (const int states = stateCount(g); states > 0)
 		add(std::to_string(states) + (states == 1 ? " save state" : " save states"));
@@ -4336,7 +4428,7 @@ const HomeLists& homeLists()
 		if (!standsAlone(games[i]))
 			continue;
 		h.newest.push_back(i);
-		if (games[i].info.lastPlayed > 0)
+		if (lastPlayedOf(games[i]) > 0)
 			h.played.push_back(i);
 		const int source = games[i].info.source;
 		if (source >= 0 && source < SourceCount)
@@ -4344,7 +4436,7 @@ const HomeLists& homeLists()
 		h.count[SourceCount]++;
 	}
 	std::sort(h.played.begin(), h.played.end(), [](size_t a, size_t b) {
-		return games[a].info.lastPlayed != games[b].info.lastPlayed ? games[a].info.lastPlayed > games[b].info.lastPlayed : byTitle(a, b);
+		return lastPlayedOf(games[a]) != lastPlayedOf(games[b]) ? lastPlayedOf(games[a]) > lastPlayedOf(games[b]) : byTitle(a, b);
 	});
 	std::sort(h.newest.begin(), h.newest.end(), [](size_t a, size_t b) {
 		return games[a].info.added != games[b].info.added ? games[a].info.added > games[b].info.added : byTitle(a, b);
@@ -4359,7 +4451,7 @@ std::vector<HomeGame> firstOf(const std::vector<size_t>& which, int most)
 	{
 		if (static_cast<int>(out.size()) >= most || i >= games.size())
 			break;
-		out.push_back({&games[i].info, games[i].title, i});
+		out.push_back({&games[i].info, games[i].title, i, lastPlayedOf(games[i]), playedSecondsOf(games[i])});
 	}
 	return out;
 }
@@ -4615,7 +4707,9 @@ void pollDisc()
 			if (driveKey == "game:" + game.path + ":" + game.serial)
 				said = &game;
 		}
-		if (driveKey == "games")
+		if (driveKey == "games" && said == nullptr && drive.games.size() == 1)
+			said = &drive.games.front(); // (one was taken out again before it was said)
+		if (driveKey == "games" && drive.games.size() >= 2)
 			toast(std::to_string(drive.games.size()) + " discs are in the drives: " + drive.games.front().title + ", " + drive.games[1].title +
 					  (drive.games.size() > 2 ? "..." : ""),
 				5.f);
@@ -4667,7 +4761,7 @@ void libraryScreen(bool selectDisc)
 		{
 			if (games[i].info.path == insertedPath)
 			{
-				switchSource(games[i].info.source);
+				switchSource(games[i].info.source, false); // (a disc chosen for the game is not the library's place)
 				if (!games[i].set.empty())
 				{
 					const std::vector<size_t>& discs = discSets[games[i].set];
@@ -4829,6 +4923,7 @@ void libraryScreen(bool selectDisc)
 		// The touch pad goes through the views.
 		if (in.touch && lib.source != DiscDrive)
 		{
+			quickLeft();
 			options().view = (std::clamp(options().view, 0, static_cast<int>(ViewCount) - 1) + 1) % ViewCount;
 			saveOptions();
 			toast(std::string("View: ") + viewNames[options().view], 1.6f);
@@ -4997,7 +5092,7 @@ void libraryScreen(bool selectDisc)
 		lib.detailsAnim = approach(lib.detailsAnim, 1, 16);
 	else
 		lib.detailsAnim = approach(lib.detailsAnim, 0, 20);
-	if (lib.detailsAnim > 0.01f && focused != nullptr)
+	if (lib.detailsAnim > 0.01f && focused != nullptr && (lib.details || focused->info.path == det.path))
 		detailsPanel(dl, *focused, lib.detailsAnim, selectDisc);
 
 	topBar(dl, selectDisc ? (lib.source == DiscDrive ? TabDisc : TabLibrary) : libraryTab(), selectDisc,
@@ -5020,7 +5115,7 @@ void libraryScreen(bool selectDisc)
 		std::vector<Hint> hints = {{Glyph::Circle, "Quit"}, {Glyph::L1R1, "Sections"}};
 		if (lib.shelves.size() == 1 && lib.shelves[0].items.size() > 1)
 			hints.push_back({Glyph::DPadLR, "Other disc"});
-		hints.insert(hints.end(), {{Glyph::Options, "Settings"}, {Glyph::Square, "Make an image"}, {Glyph::Triangle, "Game page"}, {Glyph::Cross, "Play"}});
+		hints.insert(hints.end(), {{Glyph::Options, "Settings"}, {Glyph::Square, "Make an image"}, {Glyph::Triangle, "Details"}, {Glyph::Cross, "Play"}});
 		hintBar(dl, hints);
 	}
 	else

@@ -58,6 +58,7 @@ what each patch does and where it comes from. In brief:
 | `0014` | GFX10.1 hardware workarounds for the console's GPU (`RADV_PS5_GFX101_WORKAROUNDS=0` turns them off) |
 | `0015`-`0017` | VRR: 119.88 Hz on a VRR display, variable refresh on request, found at run time |
 | `0020` | HDR10 framebuffers on request (from OGBox; needs `param.json`'s attribute `0x20000000`) |
+| `0021` | New buffers zeroed with non-temporal stores (`RADV_PS5_STREAM_ZERO=1`; off by default) |
 
 `ps5/patches/mesa/` is the older series on Mesa 26.2.5 ([its README](../../ps5/patches/mesa/README.md));
 it is used only with `CRUX2_MESA_PATCHES=ps5/patches/mesa`.

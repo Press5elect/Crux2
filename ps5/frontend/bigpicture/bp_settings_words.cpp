@@ -141,13 +141,17 @@ std::string settingsBaseId(const Option& o)
 void applySettingsText(Page& page)
 {
 	std::string heading;
+	int port = 1; // the controller port the rows under the heading are of
 	for (Option& o : page.rows)
 	{
 		if (o.kind == Option::Heading)
 		{
 			heading = o.label;
+			port = 1;
 			continue;
 		}
+		if (o.section.size() == 4 && o.section.compare(0, 3, "Pad") == 0 && o.section[3] >= '1' && o.section[3] <= '8')
+			port = o.section[3] - '0';
 		if (o.textRow >= 0)
 			continue;
 		const std::string base = settingsBaseId(o);
@@ -156,7 +160,19 @@ void applySettingsText(Page& page)
 		if (row < 0 && base.size() > 5 && base.compare(0, 3, "Pad") == 0 && base[3] >= '2' && base[3] <= '8' && base[4] == '.')
 			row = find("Pad1" + base.substr(4), page.name, heading);
 		if (row >= 0)
+		{
+			// A port's action (Map to ...) has the first port's words, but its own id and its own description.
+			const bool portAction = o.kind == Option::Action && port >= 2 && o.codeLabel.empty();
+			const std::string code = portAction ? o.label : std::string();
+			const std::string codeDesc = portAction ? o.desc : std::string();
 			put(o, row);
+			if (portAction)
+			{
+				o.codeLabel = (o.codeLabel.empty() ? code : o.codeLabel) + " port " + std::to_string(port);
+				if (!codeDesc.empty())
+					o.desc = codeDesc;
+			}
+		}
 	}
 }
 
@@ -175,7 +191,22 @@ const SettingsText* settingsTextOf(const Option& o)
 std::string settingsIdOf(const Option& o)
 {
 	if (const SettingsText* t = settingsTextOf(o))
+	{
+		// A row of ports 2 to 8 has the first port's words, not its id.
+		const bool ofPort = (o.section.size() == 4 && o.section.compare(0, 3, "Pad") == 0 && o.section[3] >= '2' && o.section[3] <= '8') ||
+							(o.kind == Option::Action && o.codeLabel.size() > 7 && o.codeLabel.find(" port ", o.codeLabel.size() - 7) != std::string::npos);
+		if (ofPort)
+		{
+			const std::string base = settingsBaseId(o);
+			std::string id = t->id;
+			const size_t at = id.find_first_of("@#");
+			if (at != std::string::npos)
+				id.resize(at);
+			if (id != base)
+				return base;
+		}
 		return t->id;
+	}
 	return settingsBaseId(o);
 }
 

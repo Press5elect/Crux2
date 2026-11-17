@@ -6,7 +6,8 @@ stays at the repository's root because the build copies it into the title folder
 
 | Release | Published | Notes | Main points |
 | --- | --- | --- | --- |
-| v1.0.21 | pending | [`v1.0.21.md`](v1.0.21.md) | A game's settings open at once with many cheat files; the interface asks the emulator for less when a screen opens; covers from a second collection, by serial |
+| v1.0.22 | pending | [`v1.0.22.md`](v1.0.22.md) | The graphics thread no longer spends half its time creating textures (two switches, on); about fifty interface bugs fixed; native modules made on Windows; PCSX2 master of 2026-11-17 |
+| v1.0.21 | 2026-11-16 | [`v1.0.21.md`](v1.0.21.md) | A game's settings open at once with many cheat files; the interface asks the emulator for less when a screen opens; covers from a second collection, by serial |
 | v1.0.20 | 2026-11-16 | [`v1.0.20.md`](v1.0.20.md) | The interface laid out anew (Home, the library's filter row, a game's page, the quick menu, settings in eight areas, search and pins); anti-aliasing in one row; the HD texture pack manager; a performance overlay in three sizes. Not yet run on a console |
 | v1.0.19 | pending | [`v1.0.19.md`](v1.0.19.md) | HDR10; network shares set up on the console; light gun (GunCon 2 setup, steady aim, PlayStation Move); trophy pop-ups; texture packs over 10 connections; startup video; recomp kit with the release; PCSX2 v2.9.179 |
 | v1.0.18 | 2026-11-01 | [`v1.0.18.md`](v1.0.18.md) | Settings > Folders; accurate floating point (FPU, VU0, VU1); MihawkGen frame generation; Show the movement; frame generation fixes at 30 fps and 120 Hz |

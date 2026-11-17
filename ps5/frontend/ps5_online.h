@@ -35,6 +35,8 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 /// Where the pictures are kept, and a game's one: `which` 0 its title screen, 1 the picture of play.
 std::string PicturesFolder();
 std::string PicturePath(const std::string& serial, int which);
+/// Whether covers are being downloaded into the covers folder now ("Share the covers" waits).
+bool Downloading();
 /// The disc in a drive (it is in no list): its box art, as covers/<serial>.png, and its two
 /// pictures, those of the three that are not there yet. Returns how many were saved.
 int FetchForDisc(const std::string& serial, const std::string& title, const std::string& title_en, const std::string& region);

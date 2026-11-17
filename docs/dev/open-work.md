@@ -138,7 +138,81 @@ item is done or something new is learned; delete what no longer applies.
   `MTVU.cpp` and `Memory.cpp`, about 94 lines) were not brought back either; the owner left them
   out on 2026-11-16.
 
+## The frontend review of 2026-11-16: fixed, to check on a console
+
+A read-only review of the interface and the host code it drives (at `88e6acd`) found about fifty
+bugs; the list with files and lines is in this file's history (`b580cc7`). All of them are fixed
+in the commit after it. Checked on the PC only: the host tests, the interface's crawl with new
+checks, the texture pack store's, the backup's and the shares' tests, and a compile for the PS5.
+**None of it has run on a console.** To check there:
+
+- The quick menu's Screenshot tile during a game; a texture pack download, the card manager's save
+  search and "Find in" ending during a game (their results now go by the emulation thread).
+- A pack moved to a real share: refused when one is there; stopped, gone on with, deleted
+  (`replacements.crux2-copying` marks an unfinished copy; does the share take an empty folder?).
+- Memory-card writes, card sync and a restore on an exFAT USB drive (the old file is kept as
+  `<name>.old` until the new one is in place); a restore with a game started in its middle.
+- Offline at start: covers and pictures say "no connection" and `no-cover.txt` is left alone;
+  the title killed during a cover download: one message at the next start, then downloads again.
+  Covers with two downloaders (up to six connections). "Share covers": pictures only.
+- Controllers: "Map to Console Controller" on ports 2 and up with a multitap (the focus stays);
+  a pin of a port 2 setting; with fewer controllers than ports the first one is mapped.
+- A game's own SingStar or light gun choice put back to the global one (L3): the game follows
+  the global choice at its start.
+- Settings: "Internal resolution above 12x" at 6x (Left stays, Right 13x); the search's
+  "Changed from Default" after putting a row back; Thread Pinning reads "Dedicated Cores
+  (Default)" and is not marked changed on a new install.
+- The library: quick views kept in Wall or Discs after a restart; a disc set's last played, time
+  and favourite; More > The next disc in Shelves; the Disc tab's More (no Rename, Favourite, Hide);
+  the game page after the texture pack or card manager closes.
+- The keyboard: Delete after an accented letter; a full field; logs and What's New at Text size
+  Largest; the managers at Interface size 70%; long messages scrolled with Up and Down.
+
+Not reviewed: `ps5_covers_match.h`'s matching, `ps5_aim_logic.h`, `ps5_input_source_logic.h`,
+`ps5_texture_packs_extract.cpp`, `ps5_services.cpp`, `ps5_card_sync.*`, `ps5_osd_draw.h`'s layout.
+Known and left: a cover run where every answer was a 403 or 5xx still says "no connection".
+
+## The graphics thread at 100%: texture creation (measured 2026-11-16, in progress)
+
+A console profile (SCES-53247, 6x, blending basic, the threaded driver on; `profile all`) showed the
+graphics thread on a processor 100% of the time with **47% of it under `GSDevice::FetchSurface` →
+`GSDeviceVK::CreateSurface` → VMA `AllocateDedicatedMemory` → `radv_ps5_buffer_create`**: 28% in
+the kernel's mapping calls and 18.7% in `radv_ps5_cpu_flush` (a `clflushopt` per line of a ~41 MB
+target). The same share shows in light scenes (49% of a thread 55% busy), so it is a cost of every
+frame, about 8 ms. The GIF and vertex handlers are about 20%; the recorder thread is 30% busy.
+
+- **Measured with both switches on (the owner, 2026-11-16, SLUS-21376, 6x):** the thread is on a
+  processor 30-60% of the time (100% before), the driver's share of it 1-3% (20%), nothing under
+  `CreateSurface` among the 40 functions on the stack, and 38% of the busy window is the wait for
+  the next image at present. The owner reports about 50% more speed. The surfaces still created
+  are small textures from `GSTextureCache::CreateSource` (+0xd97e6: 50 to 200 a second) and a few
+  from `Target::Create`, `Target::Update` and `Palette::Palette`. A run of the first game with
+  both switches off (the caller of the large targets there) was not made.
+- Why it costs: `GSTextureVK.cpp:243` asks for a dedicated allocation for every target of 512x448
+  and more; the winsys zeroes each new buffer and flushes it (`radv_ps5_bo.c:136`); the pool
+  (`GSDevice.cpp:685`) reuses only an exact size and format.
+- **Not known yet: who creates a target every frame.** The profile's stack list stopped one line
+  short. The build after this note logs `graphics: N surfaces created in S s (M MB): target WxH
+  format F xCOUNT from +offset; ...` (offsets from the program's base, in `symbols.txt`) and lists
+  40 functions on the stack. Candidates: `GSRendererHW.cpp:8913` (the draw's copy),
+  `GSTextureCache.cpp:6639`, `:6329`, `GSRendererHW.cpp:4386`, `:5127`, `:10879`.
+- The two switches, on by default since `6ce03c1`'s measurements (the owner's decision, 2026-11-16;
+  the change of defaults has not been built or tested yet): `[EmuCore/GS] PS5SharedTargetMemory` (no dedicated
+  allocation, VMA blocks of 512 MiB) and `[PS5] StreamZero` (`RADV_PS5_STREAM_ZERO=1`, Mesa patch
+  0021: non-temporal zeroing in place of memset and the flush).
+- To do after the caller is known: keep or round that caller's texture so the pool finds it. A
+  follow-up in the driver: no zeroing at all for application memory that did not ask for it.
+- Smaller candidates from the same study (each about 1% or less here): `Target::Update` unswizzles
+  twice (`GSTextureCache.cpp:8290`); `GSGetRGBA8AlphaMinMax` and the CLUT loops with 256-bit
+  vectors; adjacent blocks in one XXH3 update (`:9327`); the descriptor builder made only when
+  textures changed (`GSDeviceVK.cpp:6430`); the last pipeline remembered (`:5718`).
+- The menus: the thread is 55% busy without a game; the present path's fence waits spin for
+  `GpuWaitSpinUs` (1500 µs) at 120 Hz. Not settled.
+
 ## Known problems
+
+- PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,
+  Depth as RT) in its own menu; Crux2's settings have no row for it yet (the core has the setting).
 
 - paraLLEl-GS is slower than PCSX2's renderer in the heaviest game tested, and its picture is
   softer by design.

@@ -16,6 +16,7 @@
 #include "ps5_platform.h"
 
 #include "Config.h"
+#include "Host.h"
 #include "MTGS.h"
 
 #include "common/FileSystem.h"
@@ -94,11 +95,14 @@ bool RunDetached(std::function<void()> work)
 	return true;
 }
 
-// The graphics thread draws the interface: what a job found is handed to it there.
+// The graphics thread draws the interface: what a job found is handed to it there, by the emulation
+// thread (the graphics thread's queue has that one writer). From any thread.
 void OnGraphicsThread(std::function<void()> work)
 {
-	if (MTGS::IsOpen())
-		MTGS::RunOnGSThread(std::move(work));
+	Host::RunOnCPUThread([work = std::move(work)]() mutable {
+		if (MTGS::IsOpen())
+			MTGS::RunOnGSThread(std::move(work));
+	});
 }
 
 void Prepare(CURL* curl, const std::string& url)

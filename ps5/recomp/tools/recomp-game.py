@@ -6,7 +6,7 @@
 
   recomp-game.py GAME.chd --for recomp      a folder for Crux2 Recomp: the executable, its module and
                                             the disc as an .iso (copy the folder to the console)
-  recomp-game.py GAME.chd                   a native module for Crux2 (Linux; SLUS_213.76.crux2native)
+  recomp-game.py GAME.chd --for crux2       a native module for Crux2 (SLUS_213.76.crux2native)
   recomp-game.py GAME.chd --for both        both
   recomp-game.py SLUS_213.76 ...            the executable itself (the file BOOT2 names in SYSTEM.CNF)
   recomp-game.py GAMES_FOLDER ...           every disc image in the folder, one after another
@@ -15,7 +15,8 @@ A game is a disc image (.chd, .iso, .cue with its .bin, .cso), a folder of the d
 executable alone. From a disc the executable is read out by itself (SYSTEM.CNF's BOOT2).
 
 Options:
-  --for WHAT     crux2, recomp or both (default: crux2 on Linux, recomp on Windows)
+  --for WHAT     crux2, recomp or both (default: crux2 on Linux, recomp on Windows; the kit's
+                 "Crux2 Native.cmd" asks for crux2)
   --out DIR      where the results go (default: here)
   --iso WHEN     auto (default): for Crux2 Recomp, a .chd, .cue/.bin or .cso is written out as an .iso
                  into the game's folder (the console reads .iso); yes; no
@@ -414,8 +415,10 @@ def main() -> int:
     args.work = args.work.resolve()
 
     try:
-        if args.what in ("crux2", "both") and WINDOWS:
-            raise Failure("Crux2's native modules are made on Linux for now: --for recomp makes Crux2 Recomp's here")
+        if args.what in ("crux2", "both") and WINDOWS and not (RECOMP / "runner" / "sdk" / "target" / "include" / "c++" / "v1").is_dir():
+            # (Windows has no C++ headers of its own a module can be compiled with: the kit's are used.)
+            raise Failure(f"{RECOMP / 'runner' / 'sdk'} is missing: on Windows a native module is compiled with the "
+                          "console's headers, which Crux2's recomp kit has")
         games = inputs_of(args.inputs)
         tools = find_llvm()
         args.work.mkdir(parents=True, exist_ok=True)

@@ -575,8 +575,18 @@ bool Delete(const Pack& pack, std::function<void(bool ok, std::string sentence)>
 		if (o.ok)
 			sentence = fmt::format("The pack of {} on {} is deleted ({} files).", pack.serial, where, o.files);
 		else if (o.stopped)
-			sentence = fmt::format("Stopped: {} files of the pack of {} were deleted. The game does not read what is left; deleting it again finishes it.",
-				o.files, pack.serial);
+		{
+			// Where the pack could not be renamed away first (a share), what is left is still where
+			// the game reads it.
+			bool folder = false;
+			uint64_t size = 0;
+			const bool stillRead = (pack.state == Pack::Whole) && s_files.Exists(pack.path, &folder, &size);
+			sentence = stillRead ?
+				fmt::format("Stopped: {} files of the pack of {} were deleted. The game still reads what is left; deleting it again finishes it.",
+					o.files, pack.serial) :
+				fmt::format("Stopped: {} files of the pack of {} were deleted. The game does not read what is left; deleting it again finishes it.",
+					o.files, pack.serial);
+		}
 		else
 			sentence = fmt::format("The pack of {} on {} was not all deleted ({}).", pack.serial, where, o.error);
 		ps5px_log("texture packs: delete of %s %s: %llu files", pack.path.c_str(), o.ok ? "done" : o.stopped ? "stopped" : "failed",

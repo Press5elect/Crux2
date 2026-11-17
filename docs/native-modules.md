@@ -17,11 +17,18 @@ run. Not tried on the console game by game: treat it as an experiment.
 
 ## On Windows
 
-The kit makes Crux2 Recomp's folders on Windows too: with Python 3 and LLVM 18 or newer installed,
-drop a game's `.chd` (or `.iso`, `.cue`, `.cso`, or a folder of them) on `Crux2 Recomp.cmd`, and
-copy the folder it makes in `output` (the executable, its module and the disc as an `.iso`) into
-`/data/crux2recomp/`. The kit brings PS2Recomp's converter built for Windows. Crux2's native modules
-are made on Linux.
+With Python 3 and LLVM 18 or newer installed, the kit makes both kinds:
+
+- **A native module for Crux2:** drop the game's disc image (`.chd`, `.iso`, `.cue`, `.cso`) or its
+  executable on `Crux2 Native.cmd`. `output` then holds `SLUS_123.45.crux2native`: copy it to
+  `/data/crux2/native/` on the console and start the game in Crux2.
+- **A folder for Crux2 Recomp:** drop it on `Crux2 Recomp.cmd`, and copy the folder it makes in
+  `output` (the executable, its module and the disc as an `.iso`) into `/data/crux2recomp/`.
+
+The kit brings PS2Recomp's converter built for Windows. A native module is compiled there with the
+console's headers the kit has (`recomp/runner/sdk`), since Windows has none a module can be made
+with; on Linux the PC's own are used. Both give a module that exports Crux2's five functions and
+imports nothing.
 
 ## From a network share
 

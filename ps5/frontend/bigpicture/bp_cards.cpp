@@ -99,6 +99,10 @@ void pickCard(CardShelf* shelf, const std::string& title, const std::string& exc
 	});
 }
 
+// The search for saves that is current (a newer one, or the manager closing, makes an older one's
+// answer stale: it is ignored).
+unsigned s_search = 0;
+
 /// "From where?": a source chosen (the PlayStation 2's address asked), then `then` with what was
 /// found there. `images`: only card images are wanted.
 void chooseSource(CardShelf* shelf, bool images, std::function<void(std::vector<CardFound>)> then)
@@ -118,7 +122,10 @@ void chooseSource(CardShelf* shelf, bool images, std::function<void(std::vector<
 		const int choice = index[static_cast<size_t>(picked)];
 		const auto look = [shelf, images, then](int source, const std::string& address) {
 			toast(source == 0 ? "Asking the PlayStation 2 for its memory cards..." : "Looking...", 3.f);
-			shelf->findIn(source, address, [shelf, images, then, source](std::vector<CardFound> found, std::string why) {
+			const unsigned request = ++s_search;
+			shelf->findIn(source, address, [shelf, images, then, source, request](std::vector<CardFound> found, std::string why) {
+				if (request != s_search)
+					return;
 				std::vector<CardFound> wanted;
 				for (CardFound& f : found)
 				{
@@ -519,7 +526,7 @@ struct Manager
 	std::string keep;     // the card focused before the lists were made again
 } s_manager;
 
-constexpr float MGR_W = 1760, MGR_H = 852, MGR_X = (1920 - MGR_W) / 2, MGR_Y = 118;
+constexpr float MGR_W = 1760, MGR_H = 852, MGR_Y = 118;
 constexpr float LEFT_W = 720, ROW_H = 96, HEAD_H = 50, SAVE_H = 74;
 
 bool isSystemName(const std::string& title)
@@ -738,6 +745,7 @@ void closeCardManager()
 	if (!s_manager.open)
 		return;
 	s_manager.open = false;
+	s_search++;
 	s_manager.rows.clear();
 	if (be != nullptr)
 		be->cue(CueModalClose);
@@ -859,7 +867,7 @@ void cardManagerDraw(ImDrawList* dl)
 	m.shown = approach(m.shown, 1, 14);
 	const float t = m.shown;
 	dl->AddRectFilled(V(0, 0), V(W, H), col::rgba(0, 0, 0, static_cast<int>(180 * t)));
-	const float x = MGR_X, y = MGR_Y + (1 - t) * 24, w = MGR_W, h = MGR_H;
+	const float x = (W - MGR_W) / 2, y = MGR_Y + (H - 1080.f) / 2 + (1 - t) * 24, w = MGR_W, h = MGR_H;
 	glow(dl, x, y, w, h, 26, col::rgba(0, 0, 0, static_cast<int>(255 * t)), 30);
 	rect(dl, x, y, w, h, alpha(col::panel, t), 26);
 

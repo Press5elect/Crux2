@@ -1,4 +1,4 @@
-Crux2's changes to PCSX2 (the PS5 port), on PCSX2 0ab00c49b157be667a8a2f0bf4cda83f75a9198e.
+Crux2's changes to PCSX2 (the PS5 port), on PCSX2 840774630f7a1a456e50575df62ec0b72cc00a98.
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
@@ -44,7 +44,7 @@ index b0c3945..220d859 100644
  endif()
  
 diff --git a/bin/resources/GameIndex.yaml b/bin/resources/GameIndex.yaml
-index 0d8d936..37ac49a 100644
+index 9d6fc6b..22ec633 100644
 --- a/bin/resources/GameIndex.yaml
 +++ b/bin/resources/GameIndex.yaml
 @@ -2046,6 +2046,7 @@ SCAJ-20125:
@@ -87,7 +87,7 @@ index 0d8d936..37ac49a 100644
      getSkipCount: "GSC_NamcoGames"
  SCES-53247:
    name: "WRC Rally Evolved"
-@@ -70586,6 +70591,7 @@ SLUS-21059:
+@@ -70654,6 +70659,7 @@ SLUS-21059:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -95,7 +95,7 @@ index 0d8d936..37ac49a 100644
      getSkipCount: "GSC_NamcoGames"
  SLUS-21060:
    name: "WWE SmackDown! vs. RAW"
-@@ -71166,6 +71172,7 @@ SLUS-21160:
+@@ -71234,6 +71240,7 @@ SLUS-21160:
      alignSprite: 1 # Fixes vertical lines.
      nativeScaling: 1 # Fixes depth of field effect.
      textureInsideRT: 1 # Fixes heat haze half screen problem.
@@ -733,7 +733,7 @@ index 24eddeb..d8b5728 100644
  
  	return S_ISLNK(sysStatData.st_mode);
 diff --git a/common/HTTPDownloaderCurl.cpp b/common/HTTPDownloaderCurl.cpp
-index 078d5d3..fa7f999 100644
+index 078d5d3..f9b1b9b 100644
 --- a/common/HTTPDownloaderCurl.cpp
 +++ b/common/HTTPDownloaderCurl.cpp
 @@ -14,6 +14,10 @@
@@ -747,7 +747,16 @@ index 078d5d3..fa7f999 100644
  HTTPDownloaderCurl::HTTPDownloaderCurl()
  	: HTTPDownloader()
  {
-@@ -172,6 +176,11 @@ bool HTTPDownloaderCurl::StartRequest(HTTPDownloader::Request* request)
+@@ -153,6 +157,8 @@ void HTTPDownloaderCurl::InternalPollRequests()
+ 		else
+ 		{
+ 			Console.Error(fmt::format("Request for '{}' returned error {}", req->url, static_cast<int>(msg->data.result)));
++			// Crux2: no answer is an error, not a status of 0 (read as "the server said no").
++			req->status_code = HTTP_STATUS_ERROR;
+ 		}
+ 
+ 		req->state.store(Request::State::Complete, std::memory_order_release);
+@@ -172,6 +178,11 @@ bool HTTPDownloaderCurl::StartRequest(HTTPDownloader::Request* request)
  	curl_easy_setopt(req->handle, CURLOPT_NOSIGNAL, 1L);
  	curl_easy_setopt(req->handle, CURLOPT_PRIVATE, req);
  	curl_easy_setopt(req->handle, CURLOPT_FOLLOWLOCATION, 1L);
@@ -4151,10 +4160,151 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..75253c4 100644
+index b3c8d65..4d6585f 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-@@ -1012,6 +1012,11 @@ void GSDevice::ClearCurrent()
+@@ -22,6 +22,18 @@
+ #include <ostream>
+ #include <fstream>
+ 
++
++#ifdef __PROSPERO__
++// Crux2: FetchSurface and the functions that call it are kept out of line so that their return address names
++// the code that asked for a surface (GSDeviceVK::CreateSurface's count of what is created).
++#define PS5_FETCH_FN __attribute__((noinline))
++#define PS5_NOTE_FETCH_CALLER() \
++	do { if (!m_ps5_fetch_wrapper) m_ps5_fetch_wrapper = __builtin_return_address(0); } while (0)
++#else
++#define PS5_FETCH_FN
++#define PS5_NOTE_FETCH_CALLER() do {} while (0)
++#endif
++
+ const char* ShaderEntryPoint(ShaderConvert value)
+ {
+ 	switch (value)
+@@ -677,13 +689,18 @@ void GSDevice::TextureRecycleDeleter::operator()(GSTexture* const tex)
+ 	g_gs_device->Recycle(tex);
+ }
+ 
+-GSTexture* GSDevice::FetchSurface(GSTexture::Usage usage, const GSVector2i& size, int levels, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::FetchSurface(GSTexture::Usage usage, const GSVector2i& size, int levels, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(usage, size.x, size.y, levels, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::FetchSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::FetchSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++#ifdef __PROSPERO__
++	m_ps5_fetch_caller = m_ps5_fetch_wrapper ? m_ps5_fetch_wrapper : __builtin_return_address(0);
++	m_ps5_fetch_wrapper = nullptr;
++#endif
+ 	const GSVector2i size(std::clamp(width, 1, static_cast<int>(g_gs_device->GetMaxTextureSize())),
+ 		std::clamp(height, 1, static_cast<int>(g_gs_device->GetMaxTextureSize())));
+ 	FastList<GSTexture*>& pool = m_pool[!GSTexture::IsTexture(usage)];
+@@ -842,33 +859,39 @@ void GSDevice::PurgePool()
+ 	m_pool_memory_usage = 0;
+ }
+ 
+-GSTexture* GSDevice::CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::RenderTarget, w, h, 1, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::RenderTarget, size.x, size.y, 1, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateFeedbackTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateFeedbackTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::FeedbackTarget, w, h, 1, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateFeedbackTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateFeedbackTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::FeedbackTarget, size.x, size.y, 1, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateShaderWriteTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateShaderWriteTarget(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::ShaderWriteTarget, w, h, 1, format, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateShaderWriteTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateShaderWriteTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GSTexture::ShaderWriteTarget, size.x, size.y, 1, format, clear, prefer_reuse);
+ }
+ 
+@@ -877,40 +900,47 @@ GSTexture::Usage GSDevice::GetDepthStencilUsage() const
+ 	return m_features.depth_feedback ? GSTexture::FeedbackDepth : GSTexture::DepthStencil;
+ }
+ 
+-GSTexture* GSDevice::CreateDepthStencil(int w, int h, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateDepthStencil(int w, int h, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GetDepthStencilUsage(), w, h, 1, GSTexture::Format::DepthStencil, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(GetDepthStencilUsage(), size.x, size.y, 1, GSTexture::Format::DepthStencil, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	pxAssert(mipmap_levels != 0 && (mipmap_levels < 0 || mipmap_levels <= GetMipmapLevelsForSize(w, h)));
+ 	const int levels = mipmap_levels < 0 ? GetMipmapLevelsForSize(w, h) : mipmap_levels;
+ 	return FetchSurface(GSTexture::Texture, w, h, levels, format, false, !m_features.prefer_new_textures || prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateTexture(const GSVector2i& size, int mipmap_levels, GSTexture::Format format, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateTexture(const GSVector2i& size, int mipmap_levels, GSTexture::Format format, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return CreateTexture(size.x, size.y, mipmap_levels, format, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateCompatible(GSTexture* tex, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateCompatible(GSTexture* tex, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return CreateCompatible(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateCompatible(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateCompatible(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return CreateCompatible(tex, size.x, size.y, clear, prefer_reuse);
+ }
+ 
+-GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
++PS5_FETCH_FN GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
+ {
++	PS5_NOTE_FETCH_CALLER();
+ 	return FetchSurface(tex->GetUsage(), w, h, 1, tex->GetFormat(), clear, prefer_reuse);
+ }
+ 
+@@ -1012,6 +1042,11 @@ void GSDevice::ClearCurrent()
  	delete m_target_tmp;
  	delete m_cas;
  	delete m_blur;
@@ -4166,7 +4316,7 @@ index b3c8d65..75253c4 100644
  
  	m_merge = nullptr;
  	m_weavebob = nullptr;
-@@ -1022,6 +1027,15 @@ void GSDevice::ClearCurrent()
+@@ -1022,6 +1057,15 @@ void GSDevice::ClearCurrent()
  	m_blur = nullptr;
  }
  
@@ -4182,7 +4332,7 @@ index b3c8d65..75253c4 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1445,540 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1475,540 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -4724,10 +4874,25 @@ index b3c8d65..75253c4 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 6f9c805..cdfdcf4 100644
+index 6f9c805..aa0b906 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
-@@ -1491,6 +1491,8 @@ protected:
+@@ -1477,6 +1477,14 @@ protected:
+ 
+ 	u32 m_frame = 0; // for ageing the pool
+ 
++#ifdef __PROSPERO__
++	// Crux2: who asked FetchSurface for a surface (the diagnostic of GSDeviceVK::CreateSurface). A wrapper
++	// (CreateRenderTarget, CreateTexture...) notes its own return address in m_ps5_fetch_wrapper, FetchSurface
++	// turns that, or its own return address, into m_ps5_fetch_caller and clears the first.
++	void* m_ps5_fetch_wrapper = nullptr;
++	void* m_ps5_fetch_caller = nullptr;
++#endif
++
+ private:
+ 	std::array<FastList<GSTexture*>, 2> m_pool; // [texture, target]
+ 	u64 m_pool_memory_usage = 0;
+@@ -1491,6 +1499,8 @@ protected:
  	static constexpr u32 MAX_POOLED_TEXTURES = 300;
  	static constexpr u32 MAX_TEXTURE_AGE = 10;
  	static constexpr u32 NUM_CAS_CONSTANTS = 12; // 8 plus src offset x/y, 16 byte alignment
@@ -4736,7 +4901,7 @@ index 6f9c805..cdfdcf4 100644
  	static constexpr u32 EXPAND_BUFFER_SIZE = sizeof(u16) * 16383 * 6;
  
  	WindowInfo m_window_info;
-@@ -1506,6 +1508,46 @@ protected:
+@@ -1506,6 +1516,46 @@ protected:
  	GSTexture* m_current = nullptr;
  	GSTexture* m_cas = nullptr;
  	GSTexture* m_blur = nullptr;
@@ -4783,7 +4948,7 @@ index 6f9c805..cdfdcf4 100644
  	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
  	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
  	GSTexture* m_ds_as_rt_orig = nullptr; ///< Where the depth as color came from
-@@ -1531,6 +1573,36 @@ protected:
+@@ -1531,6 +1581,36 @@ protected:
  	/// Applies Gaussian blur and writes to the destination texture.
  	void DoGaussianBlur(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, GSTexture* tempTex);
  
@@ -4820,7 +4985,7 @@ index 6f9c805..cdfdcf4 100644
  	/// Perform texture operations for ImGui
  	void UpdateImGuiTextures();
  
-@@ -1740,6 +1812,87 @@ public:
+@@ -1740,6 +1820,87 @@ public:
  	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
  	bool GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4& draw_rect, float scale, bool refresh);
  
@@ -6327,10 +6492,16 @@ index 77a28df..eccb4d0 100644
  
  void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash, const GIFRegTEX0& TEX0,
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index f9aab2a..a3d4fee 100644
+index f9aab2a..1d90952 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-@@ -28,6 +28,9 @@
+@@ -24,10 +24,15 @@
+ 
+ #include "imgui.h"
+ 
++#include <algorithm>
+ #include <bit>
++#include <chrono>
  #include <limits>
  #include <mutex>
  #include <sstream>
@@ -6340,7 +6511,7 @@ index f9aab2a..a3d4fee 100644
  
  // Tweakables
  enum : u32
-@@ -259,6 +262,9 @@ bool GSDeviceVK::SelectInstanceExtensions(ExtensionList* extension_list, const W
+@@ -259,6 +264,9 @@ bool GSDeviceVK::SelectInstanceExtensions(ExtensionList* extension_list, const W
  		return false;
  #endif
  
@@ -6350,7 +6521,7 @@ index f9aab2a..a3d4fee 100644
  	// VK_EXT_debug_utils
  	if (enable_debug_utils && !SupportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false))
  		Console.Warning("VK: Debug report requested, but extension is not available.");
-@@ -475,6 +481,17 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
+@@ -475,6 +483,17 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
  		m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth =
  		SupportsExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false);
  	m_optional_extensions.vk_ext_fragment_shader_interlock = SupportsExtension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, false);
@@ -6368,7 +6539,7 @@ index f9aab2a..a3d4fee 100644
  	m_optional_extensions.vk_ext_attachment_feedback_loop_layout =
  		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
  	m_optional_extensions.vk_ext_memory_budget = SupportsExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
-@@ -707,6 +724,27 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
+@@ -707,6 +726,27 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
  		fragment_shader_interlock_ext_feature.fragmentShaderPixelInterlock = VK_TRUE;
  		Vulkan::AddPointerToChain(&device_info, &fragment_shader_interlock_ext_feature);
  	}
@@ -6396,7 +6567,21 @@ index f9aab2a..a3d4fee 100644
  
  	VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
  	if (res != VK_SUCCESS)
-@@ -1051,6 +1089,9 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
+@@ -955,6 +995,13 @@ bool GSDeviceVK::CreateAllocator()
+ 			ci.pHeapSizeLimit = heap_size_limits.data();
+ 	}
+ 
++#ifdef __PROSPERO__
++	// Crux2 ([EmuCore/GS] PS5SharedTargetMemory): render targets share VMA's blocks, which are then made large
++	// (512 MiB) so that a block is not mapped and cleared again for each target.
++	if (Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", true))
++		ci.preferredLargeHeapBlockSize = 512ull * 1024 * 1024;
++#endif
++
+ 	VkResult res = vmaCreateAllocator(&ci, &m_allocator);
+ 	if (res != VK_SUCCESS)
+ 	{
+@@ -1051,6 +1098,9 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
  			m_gpu_timing_supported = false;
  			return false;
  		}
@@ -6406,7 +6591,7 @@ index f9aab2a..a3d4fee 100644
  	}
  
  	if (m_gpu_pipeline_statistics_supported)
-@@ -1258,12 +1299,18 @@ void GSDeviceVK::StartGPUTiming(u32 index)
+@@ -1258,12 +1308,18 @@ void GSDeviceVK::StartGPUTiming(u32 index)
  			resources.command_buffers[1], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, m_timestamp_query_pool, index * 2);
  		resources.timestamp_query_state = QueryState::Querying;
  	}
@@ -6425,7 +6610,7 @@ index f9aab2a..a3d4fee 100644
  	const bool wants_timestamp = m_gpu_timing_enabled || m_spin_timer;
  
  	if (wants_timestamp && resources.timestamp_query_state == QueryState::Querying)
-@@ -1277,6 +1324,9 @@ void GSDeviceVK::EndGPUTiming(u32 index)
+@@ -1277,6 +1333,9 @@ void GSDeviceVK::EndGPUTiming(u32 index)
  void GSDeviceVK::ReadGPUTiming(u32 index)
  {
  	FrameResources& resources = m_frame_resources[index];
@@ -6435,7 +6620,7 @@ index f9aab2a..a3d4fee 100644
  
  	const bool wants_timestamps = m_gpu_timing_enabled || resources.spin_id >= 0;
  
-@@ -2336,6 +2386,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
+@@ -2336,6 +2395,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
  	if (!CompileCASPipelines())
  		return false;
  
@@ -6446,7 +6631,7 @@ index f9aab2a..a3d4fee 100644
  	if (!CompileImGuiPipeline())
  		return false;
  
-@@ -2360,6 +2414,11 @@ void GSDeviceVK::Destroy()
+@@ -2360,6 +2423,11 @@ void GSDeviceVK::Destroy()
  
  	if (m_device != VK_NULL_HANDLE)
  	{
@@ -6458,7 +6643,7 @@ index f9aab2a..a3d4fee 100644
  		DestroySpinResources();
  		DestroyResources();
  	}
-@@ -2540,6 +2599,11 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2540,6 +2608,11 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  		return PresentResult::FrameSkipped;
  	}
  
@@ -6470,7 +6655,7 @@ index f9aab2a..a3d4fee 100644
  	// End the pipeline statistics for this cmdbuffer before postprocessing.
  	FrameResources& resources = m_frame_resources[m_current_frame];
  	if (resources.pipeline_statistics_query == QueryState::Querying)
-@@ -2600,9 +2664,16 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2600,9 +2673,16 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  
  	GSVector4i render_area(0, 0, swap_chain_texture->GetWidth(), swap_chain_texture->GetHeight());
  
@@ -6489,7 +6674,7 @@ index f9aab2a..a3d4fee 100644
  	{
  		return GSDevice::PresentResult::FrameSkipped;
  	}
-@@ -2617,9 +2688,14 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2617,9 +2697,14 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  
  void GSDeviceVK::EndPresent()
  {
@@ -6506,7 +6691,7 @@ index f9aab2a..a3d4fee 100644
  	m_swap_chain->GetCurrentTexture()->TransitionToLayout(GetCurrentCommandBuffer(), GSTextureVK::Layout::PresentSrc);
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
-@@ -2971,6 +3047,23 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2971,6 +3056,23 @@ bool GSDeviceVK::CheckFeatures()
  	                 m_device_features.fragmentStoresAndAtomics &&
  	                 has_rov_storage_flags &&
  	                 !m_features.framebuffer_fetch;
@@ -6530,7 +6715,7 @@ index f9aab2a..a3d4fee 100644
  
  	return true;
  }
-@@ -2978,6 +3071,9 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2978,6 +3080,9 @@ bool GSDeviceVK::CheckFeatures()
  void GSDeviceVK::DrawPrimitive()
  {
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6540,7 +6725,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdDraw(GetCurrentCommandBuffer(), m_vertex.count, 1, m_vertex.start, 0);
  }
  
-@@ -2990,6 +3086,9 @@ void GSDeviceVK::DrawIndexedPrimitive(int offset, int count)
+@@ -2990,6 +3095,9 @@ void GSDeviceVK::DrawIndexedPrimitive(int offset, int count)
  {
  	pxAssert(offset + count <= (int)m_index.count);
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6550,7 +6735,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdDrawIndexed(GetCurrentCommandBuffer(), count, 1, m_index.start + offset, m_vertex.start, 0);
  }
  
-@@ -2998,6 +3097,9 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
+@@ -2998,6 +3106,9 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
  	pxAssert(offset + count <= (int)m_index.count);
  
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6560,18 +6745,21 @@ index f9aab2a..a3d4fee 100644
  	if (vs_indexing)
  	{
  		SetVSPushConstants(m_vertex.start, m_index.start + offset);
-@@ -3066,6 +3168,10 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+@@ -3066,6 +3177,13 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
  		tex = GSTextureVK::Create(usage, format, width, height, levels);
  	}
  
 +#ifdef __PROSPERO__
 +	if (tex)
++	{
 +		PS5NoteCompression(tex.get());
++		PS5NoteSurfaceCreated(tex.get(), usage, width, height, format);
++	}
 +#endif
  	return tex.release();
  }
  
-@@ -3114,6 +3220,9 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
+@@ -3114,6 +3232,9 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
  			ca.colorAttachment = 0;
  
  			const VkClearRect cr = {{{0, 0}, {static_cast<u32>(r.width()), static_cast<u32>(r.height())}}, 0u, 1u};
@@ -6581,7 +6769,7 @@ index f9aab2a..a3d4fee 100644
  			vkCmdClearAttachments(GetCurrentCommandBuffer(), 1, &ca, 1, &cr);
  
  			return;
-@@ -3448,6 +3557,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
+@@ -3448,6 +3569,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
  	vkCmdBlitImage(GetCurrentCommandBuffer(), sTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
  		dTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ib,
  		filter == Biln ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
@@ -6591,7 +6779,7 @@ index f9aab2a..a3d4fee 100644
  }
  
  void GSDeviceVK::UpdateCLUTTexture(
-@@ -3830,6 +3942,9 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3830,6 +3954,9 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				cr.rect.extent.width  = size.x;
  				cr.rect.extent.height = size.y;
  				cr.layerCount = 1u;
@@ -6601,7 +6789,7 @@ index f9aab2a..a3d4fee 100644
  				vkCmdClearAttachments(GetCurrentCommandBuffer(), num_clear_values, clear_values.data(), 1, &cr);
  			}
  		}
-@@ -3890,6 +4005,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3890,6 +4017,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				}
  			}
  		}
@@ -6623,7 +6811,7 @@ index f9aab2a..a3d4fee 100644
  	}
  
  	// Invalidate DS as RT if we're updating DS alone.
-@@ -4111,6 +4241,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4111,6 +4253,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -6633,7 +6821,7 @@ index f9aab2a..a3d4fee 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4863,6 +4996,9 @@ void GSDeviceVK::RenderImGui()
+@@ -4863,6 +5008,9 @@ void GSDeviceVK::RenderImGui()
  
  			if (ApplyUtilityState())
  			{
@@ -6643,7 +6831,7 @@ index f9aab2a..a3d4fee 100644
  				vkCmdDrawIndexed(GetCurrentCommandBuffer(), pcmd->ElemCount, 1, m_index.start + pcmd->IdxOffset,
  					vertex_offset + pcmd->VtxOffset, 0);
  			}
-@@ -4897,6 +5033,238 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4897,6 +5045,238 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -6882,7 +7070,7 @@ index f9aab2a..a3d4fee 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4982,6 +5350,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4982,6 +5362,19 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -6902,7 +7090,7 @@ index f9aab2a..a3d4fee 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -5041,6 +5422,9 @@ void GSDeviceVK::DestroyResources()
+@@ -5041,6 +5434,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -6912,7 +7100,7 @@ index f9aab2a..a3d4fee 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5165,7 +5549,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5165,7 +5561,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -6960,7 +7148,7 @@ index f9aab2a..a3d4fee 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5174,39 +5598,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5174,39 +5610,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -7001,7 +7189,7 @@ index f9aab2a..a3d4fee 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5299,6 +5702,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5299,6 +5714,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	if (p.ds_as_rt)
  		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
  			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
@@ -7010,7 +7198,7 @@ index f9aab2a..a3d4fee 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5316,8 +5721,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5316,8 +5733,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -7029,7 +7217,7 @@ index f9aab2a..a3d4fee 100644
  	return pipeline;
  }
  
-@@ -5328,6 +5743,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
+@@ -5328,6 +5755,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
  		return false;
  
  	SetPipeline(pipeline);
@@ -7045,7 +7233,7 @@ index f9aab2a..a3d4fee 100644
  
  	return ApplyTFXState();
  }
-@@ -5336,6 +5760,10 @@ void GSDeviceVK::InitializeState()
+@@ -5336,6 +5772,10 @@ void GSDeviceVK::InitializeState()
  {
  	m_current_framebuffer = FramebufferInfo();
  	m_current_render_pass = VK_NULL_HANDLE;
@@ -7056,7 +7244,7 @@ index f9aab2a..a3d4fee 100644
  
  	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
  		m_tfx_textures[i] = m_null_texture.get();
-@@ -5457,6 +5885,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
+@@ -5457,6 +5897,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
  	rp.framebuffer = fb;
  	rp.renderArea.extent.width  = swap_chain_texture->GetWidth();
  	rp.renderArea.extent.height = swap_chain_texture->GetHeight();
@@ -7066,7 +7254,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &rp, VK_SUBPASS_CONTENTS_INLINE);
  }
  
-@@ -5631,6 +6062,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
+@@ -5631,6 +6074,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
  
  			vkTex->CommitClear();
  
@@ -7083,7 +7271,7 @@ index f9aab2a..a3d4fee 100644
  			if (vkTex->GetLayout() != layout)
  			{
  				update_layout = true;
-@@ -5669,9 +6110,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
+@@ -5669,9 +6122,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
  void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  {
  	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
@@ -7102,7 +7290,7 @@ index f9aab2a..a3d4fee 100644
  		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
  		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
  	}
-@@ -5680,7 +6130,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
+@@ -5680,7 +6142,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  		vkTex = m_null_texture.get();
  	}
  
@@ -7115,7 +7303,7 @@ index f9aab2a..a3d4fee 100644
  		return;
  
  	m_utility_texture = vkTex;
-@@ -5728,6 +6182,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5728,6 +6194,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -7125,7 +7313,7 @@ index f9aab2a..a3d4fee 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5736,6 +6193,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5736,6 +6205,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -7135,7 +7323,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5748,6 +6208,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5748,6 +6220,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -7145,7 +7333,7 @@ index f9aab2a..a3d4fee 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5758,6 +6221,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5758,6 +6233,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -7156,7 +7344,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5797,6 +6264,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5797,6 +6276,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -7167,7 +7355,7 @@ index f9aab2a..a3d4fee 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5811,13 +6282,23 @@ void GSDeviceVK::EndRenderPass()
+@@ -5811,13 +6294,23 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -7191,7 +7379,7 @@ index f9aab2a..a3d4fee 100644
  
  	m_is_presenting = false;
  }
-@@ -5842,6 +6323,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
+@@ -5842,6 +6335,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
  
  void GSDeviceVK::SetPipeline(VkPipeline pipeline)
  {
@@ -7202,7 +7390,7 @@ index f9aab2a..a3d4fee 100644
  	if (m_current_pipeline == pipeline)
  		return;
  
-@@ -6047,6 +6532,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -6047,6 +6544,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -7215,7 +7403,7 @@ index f9aab2a..a3d4fee 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6112,6 +6603,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+@@ -6112,6 +6615,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
  GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -7223,7 +7411,7 @@ index f9aab2a..a3d4fee 100644
  
  	// How this is done:
  	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-@@ -6210,6 +6702,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6210,6 +6714,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  	}
  
  	g_perfmon.Put(GSPerfMon::Barriers, 1);
@@ -7231,7 +7419,7 @@ index f9aab2a..a3d4fee 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6233,7 +6726,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6233,7 +6738,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -7256,7 +7444,7 @@ index f9aab2a..a3d4fee 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6474,6 +6984,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6474,6 +6996,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		pipe.feedback_loop_flags = flags;
  	}
  
@@ -7322,7 +7510,7 @@ index f9aab2a..a3d4fee 100644
  	if (fb.rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6605,6 +7174,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6605,6 +7186,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
@@ -7332,7 +7520,7 @@ index f9aab2a..a3d4fee 100644
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6627,6 +7199,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6627,6 +7211,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -7346,11 +7534,81 @@ index f9aab2a..a3d4fee 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? fb.rt : nullptr,
-@@ -6854,9 +7433,209 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6854,9 +7445,283 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
 +#ifdef __PROSPERO__
++
++extern "C" const char __executable_start[] __attribute__((weak));
++
++// Crux2's diagnostic: where the graphics thread's time in texture creation comes from. Each surface made (not
++// taken from the pool) is counted by kind, size, format and the code that asked for it; every 10 s with more
++// than 30 made, one line says how many and the six most common. The addresses are offsets from the program's
++// start, which ps5px_profile_start logs ("the program is at"); the title folder's symbols.txt names them.
++void GSDeviceVK::PS5NoteSurfaceCreated(GSTexture* tex, GSTexture::Usage usage, int width, int height, GSTexture::Format format)
++{
++	struct Entry
++	{
++		u32 usage, width, height, format, count;
++		u64 offset;
++	};
++	static std::vector<Entry> s_entries;
++	static u32 s_total = 0;
++	static u64 s_bytes = 0;
++	static std::chrono::steady_clock::time_point s_start;
++
++	const auto now = std::chrono::steady_clock::now();
++	if (s_total == 0 && s_entries.empty())
++		s_start = now;
++
++	const u64 base = reinterpret_cast<u64>(&__executable_start[0]);
++	const u64 caller = reinterpret_cast<u64>(m_ps5_fetch_caller);
++	const u64 offset = (caller >= base) ? caller - base : caller;
++	const u32 u = static_cast<u32>(usage);
++	bool found = false;
++	for (Entry& e : s_entries)
++	{
++		if (e.usage == u && e.width == static_cast<u32>(width) && e.height == static_cast<u32>(height) &&
++			e.format == static_cast<u32>(format) && e.offset == offset)
++		{
++			e.count++;
++			found = true;
++			break;
++		}
++	}
++	if (!found && s_entries.size() < 512)
++		s_entries.push_back({u, static_cast<u32>(width), static_cast<u32>(height), static_cast<u32>(format), 1, offset});
++	s_total++;
++	s_bytes += tex->GetMemUsage();
++
++	const double seconds = std::chrono::duration<double>(now - s_start).count();
++	if (seconds < 10.0)
++		return;
++	if (s_total > 30)
++	{
++		std::sort(s_entries.begin(), s_entries.end(), [](const Entry& a, const Entry& b) { return a.count > b.count; });
++		std::string line;
++		char text[160];
++		std::snprintf(text, sizeof(text), "graphics: %u surfaces created in %.0f s (%.0f MB):", s_total, seconds,
++			static_cast<double>(s_bytes) / 1048576.0);
++		line = text;
++		for (size_t i = 0; i < s_entries.size() && i < 6; i++)
++		{
++			const Entry& e = s_entries[i];
++			const char* kind = (e.usage & 1) ? "depth" : (e.usage & 2) ? "target" : "texture";
++			std::snprintf(text, sizeof(text), "%s %s%s %ux%u format %u x%u from +%llx", i ? ";" : "", kind,
++				(e.usage & 4) ? "+feedback" : (e.usage & 8) ? "+shaderwrite" : "", e.width, e.height, e.format, e.count,
++				static_cast<unsigned long long>(e.offset));
++			line += text;
++		}
++		ps5px_log("%s", line.c_str());
++	}
++	s_entries.clear();
++	s_total = 0;
++	s_bytes = 0;
++	s_start = now;
++}
 +
 +void GSDeviceVK::PS5ReadSettings(bool at_create)
 +{
@@ -7397,6 +7655,7 @@ index f9aab2a..a3d4fee 100644
 +	m_ps5_skip_barriers = skip;
 +	m_ps5_rt_no_compression = no_compression;
 +	m_ps5_rov_keep_pass = rov_keep;
++	m_ps5_shared_target_memory = Host::GetBoolSettingValue("EmuCore/GS", "PS5SharedTargetMemory", true);
 +	m_ps5_fg_debug = Host::GetBoolSettingValue("EmuCore/GS", "PS5FrameGenDebug", false);
 +
 +	const char* when = at_create ? "" : " (this game)";
@@ -7408,6 +7667,9 @@ index f9aab2a..a3d4fee 100644
 +		"made without surface compression (no DCC, never decompressed; experimental)" :
 +		no_compression_asked ? "compressed as the driver chooses (PS5RTNoCompression asked for, but the device cannot "
 +		"turn compression off: no imageCompressionControl)" : "compressed as the driver chooses");
++	ps5px_log("graphics%s: render targets %s", when, m_ps5_shared_target_memory ?
++		"share memory blocks (PS5SharedTargetMemory on; the 512 MiB blocks from the next start)" :
++		"each have an allocation of their own");
 +	ps5px_log("graphics%s: ordered view draws %s", when, m_ps5_rov_keep_pass ?
 +		"keep their render pass when only an unused feedback flag differs" :
 +		"end the render pass whenever the feedback flags differ, as upstream does (PS5ROVKeepPass off)");
@@ -7556,7 +7818,7 @@ index f9aab2a..a3d4fee 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6867,7 +7646,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6867,7 +7732,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -7565,7 +7827,7 @@ index f9aab2a..a3d4fee 100644
  
  	if (full_barrier)
  	{
-@@ -6877,11 +7656,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6877,11 +7742,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -7586,7 +7848,7 @@ index f9aab2a..a3d4fee 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6893,8 +7681,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6893,8 +7767,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -7600,7 +7862,7 @@ index f9aab2a..a3d4fee 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index f849fbf..68d8dd3 100644
+index f849fbf..31d47db 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -49,6 +49,8 @@ public:
@@ -7729,7 +7991,7 @@ index f849fbf..68d8dd3 100644
  	GSDeviceVK();
  	~GSDeviceVK() override;
  
-@@ -574,6 +648,28 @@ public:
+@@ -574,6 +648,31 @@ public:
  	bool IsPresenting() const;
  
  	bool SetGPUTimingEnabled(bool enabled) override;
@@ -7739,6 +8001,9 @@ index f849fbf..68d8dd3 100644
 +	void PS5ReadGameSettings() override;
 +	/// Whether colour render targets are made without surface compression ([EmuCore/GS] PS5RTNoCompression).
 +	__fi bool PS5RTNoCompression() const { return m_ps5_rt_no_compression; }
++	/// Whether render targets share VMA's memory blocks ([EmuCore/GS] PS5SharedTargetMemory) instead of one
++	/// dedicated allocation each (GSTextureVK::Create).
++	__fi bool PS5SharedTargetMemory() const { return m_ps5_shared_target_memory; }
 +
 +	// PS5: pictures another Vulkan device wrote into host memory (paraLLEl-GS's, ps5/frontend/ps5_pgs.cpp), copied
 +	// into a texture on the graphics card instead of through the processor (GSDeviceVK_PS5.cpp). The memory is
@@ -7758,7 +8023,7 @@ index f849fbf..68d8dd3 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -651,6 +747,53 @@ public:
+@@ -651,6 +750,59 @@ public:
  	void FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_region);
  	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  		bool one_barrier, bool full_barrier);
@@ -7801,6 +8066,12 @@ index f849fbf..68d8dd3 100644
 +	/// imageCompressionControl feature): colour render targets made without DCC (GSTextureVK::Create).
 +	bool m_ps5_rt_no_compression = false;
 +	bool m_ps5_compression_control = false; // the feature, enabled on the device
++	/// [EmuCore/GS] PS5SharedTargetMemory (off by default, read when the device is made and at each game start; the
++	/// larger blocks are set when the allocator is made, so that part waits for the next start): render targets
++	/// are allocated from shared blocks, not one dedicated allocation each (GSTextureVK::Create, CreateAllocator).
++	bool m_ps5_shared_target_memory = false;
++	/// Counts the surfaces made (CreateSurface) by kind, size and caller, and writes the top of them every 10 s.
++	void PS5NoteSurfaceCreated(GSTexture* tex, GSTexture::Usage usage, int width, int height, GSTexture::Format format);
 +	/// [EmuCore/GS] PS5ROVKeepPass (on by default): an ordered view draw drops the feedback loop flags of the
 +	/// attachment it does not bind, so a run of them stays in one render pass (RenderHW; counted in ROVPassesKept).
 +	bool m_ps5_rov_keep_pass = true;
@@ -7812,7 +8083,7 @@ index f849fbf..68d8dd3 100644
  
  	//////////////////////////////////////////////////////////////////////////
  	// Vulkan State
-@@ -774,6 +917,10 @@ private:
+@@ -774,6 +926,10 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -9825,10 +10096,10 @@ index 0000000..9eb5372
 +	return true;
 +}
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
-index bdf5356..4f60ed2 100644
+index bdf5356..ab90a1a 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
-@@ -226,6 +226,19 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Create(Usage usage, Format format, int
+@@ -226,8 +226,26 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Create(Usage usage, Format format, int
  		ici.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
  	}
  
@@ -9846,9 +10117,17 @@ index bdf5356..4f60ed2 100644
 +#endif
 +
  	// Use dedicated allocations for typical RT size
- 	if (IsRenderTargetOrDepthStencil(usage) && width >= 512 && height >= 448)
+-	if (IsRenderTargetOrDepthStencil(usage) && width >= 512 && height >= 448)
++	// Crux2 ([EmuCore/GS] PS5SharedTargetMemory): not on the PS5 when asked, so the targets share VMA's blocks.
++	if (IsRenderTargetOrDepthStencil(usage) && width >= 512 && height >= 448
++#ifdef __PROSPERO__
++		&& !GSDeviceVK::GetInstance()->PS5SharedTargetMemory()
++#endif
++		)
  		aci.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-@@ -432,6 +445,9 @@ void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32
+ 
+ 	VkImage image = VK_NULL_HANDLE;
+@@ -432,6 +450,9 @@ void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32
  	bic.imageExtent = {width, height, 1};
  
  	vkCmdCopyBufferToImage(cmdbuf, buffer, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic);
@@ -9858,7 +10137,7 @@ index bdf5356..4f60ed2 100644
  
  	if (old_layout != Layout::CopyDst && old_layout != Layout::Undefined)
  		TransitionSubresourcesToLayout(cmdbuf, level, 1, Layout::CopyDst, old_layout);
-@@ -516,6 +532,31 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
+@@ -516,6 +537,31 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
  	return true;
  }
  
@@ -9890,7 +10169,7 @@ index bdf5356..4f60ed2 100644
  bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
  {
  	if (layer >= m_mipmap_levels || IsCompressedFormat())
-@@ -688,8 +729,25 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
+@@ -688,8 +734,25 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
  	SetState(GSTexture::State::Dirty);
  }
  
@@ -9916,7 +10195,7 @@ index bdf5356..4f60ed2 100644
  	m_layout = new_layout;
  }
  
-@@ -706,6 +764,11 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
+@@ -706,6 +769,11 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
  	TransitionSubresourcesToLayout(command_buffer, 0, m_mipmap_levels, m_layout, new_layout);
  
  	m_layout = new_layout;
@@ -9928,7 +10207,7 @@ index bdf5356..4f60ed2 100644
  }
  
  void GSTextureVK::TransitionSubresourcesToLayout(
-@@ -758,6 +821,25 @@ void GSTextureVK::TransitionSubresourcesToLayout(
+@@ -758,6 +826,25 @@ void GSTextureVK::TransitionSubresourcesToLayout(
  	dependency.pImageMemoryBarriers = &barrier;
  
  	vkCmdPipelineBarrier2KHR(command_buffer, &dependency);

@@ -8,6 +8,7 @@
 #include "ps5_cheats_logic.h"
 #include "ps5_covers_match.h"
 #include "ps5_platform.h"
+#include "ps5_ui.h"
 
 #include "Config.h"
 #include "GameList.h"
@@ -26,6 +27,7 @@
 #include <zip.h>
 
 #include <algorithm>
+#include <atomic>
 #include <ctime>
 #include <functional>
 #include <deque>
@@ -178,7 +180,9 @@ namespace
 		bool Step(One* one)
 		{
 			const bool cancelled = m_progress->IsCancelled();
-			if (one->status < 0 && one->base == m_raw && !one->retried && one->status != HTTPDownloader::HTTP_STATUS_CANCELLED && !cancelled)
+			// (A pool with one address, the collection by serial, has nowhere else to ask.)
+			if (one->status < 0 && m_plain != m_raw && one->base == m_raw && !one->retried && one->status != HTTPDownloader::HTTP_STATUS_CANCELLED &&
+				!cancelled)
 			{
 				// GitHub is not to be had: libretro's own server, for this and the rest.
 				if (m_base == m_raw)
@@ -256,7 +260,20 @@ namespace
 	{
 		std::string serial, title, title_en, region, stem;
 	};
+
+	// The downloads writing into the covers folder now.
+	std::atomic<int> s_downloading{0};
+	struct DownloadingNow
+	{
+		DownloadingNow() { s_downloading.fetch_add(1, std::memory_order_acq_rel); }
+		~DownloadingNow() { s_downloading.fetch_sub(1, std::memory_order_acq_rel); }
+	};
 } // namespace
+
+bool Downloading()
+{
+	return s_downloading.load(std::memory_order_acquire) != 0;
+}
 
 int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary)
 {
@@ -312,9 +329,12 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 	const std::string running_path = Path::Combine(EmuFolders::Covers, "download-running.txt");
 	if (!again && FileSystem::FileExists(running_path.c_str()))
 	{
-		ps5px_log("covers: the last download did not come back (%s is there): not tried by itself again. "
+		// This start only: the note goes, and the user is told once (the next start tries again).
+		ps5px_log("covers: the last download did not come back (%s is there): not tried by itself this time. "
 				  "Settings > Interface > Download the missing covers now tries it.", running_path.c_str());
-		*summary = "Covers are not downloaded by themselves: the last download did not finish. \"Download the missing covers now\" tries again.";
+		FileSystem::DeleteFilePath(running_path.c_str());
+		*summary = "Covers were not downloaded by themselves this time: the last download did not finish. \"Download the missing covers now\" tries again.";
+		PS5UI::Toast(*summary);
 		return 0;
 	}
 
@@ -335,34 +355,50 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 		return 0;
 	}
 	http->SetTimeout(12.0f);
+	const DownloadingNow downloading;
 	FileSystem::WriteStringToFile(running_path.c_str(), "A cover download is running. If this file is still here when Crux2 starts, the download ended the title.\n");
 
-	int saved = 0, unmatched = 0, skipped = 0, failed = 0, unreachable = 0;
-	bool lost = false;
+	// The collection by serial has a downloader (three connections) of its own: neither pool waits
+	// for the other's.
+	std::unique_ptr<HTTPDownloader> http_serial = HTTPDownloader::Create();
+	if (!http_serial)
+	{
+		ps5px_log("covers: the downloader could not be made");
+		*summary = "The cover download could not start (crux2-boot.log has the reason).";
+		FileSystem::DeleteFilePath(running_path.c_str());
+		return 0;
+	}
+	http_serial->SetTimeout(12.0f);
+
+	int saved = 0, unmatched = 0, skipped = 0, failed = 0;
+	// Each collection's own count of no answer, and its own stop.
+	int unreachable = 0, unreachable_serial = 0;
+	bool lost = false, lost_serial = false;
 	std::string none_new;
 	progress->SetProgressRange(static_cast<u32>(missing.size()));
 	// Three games asked for at a time; what came for each is handled as it comes, as it was when
 	// they were asked for one by one.
 	Pool pool(http.get(), progress, RAW_BASE, PLAIN_BASE, "covers", true);
 	// The games libretro's collection has nothing for are asked for by serial in the second one.
-	Pool by_serial(http.get(), progress, SERIAL_BASE, SERIAL_BASE, "covers by serial", true);
+	Pool by_serial(http_serial.get(), progress, SERIAL_BASE, SERIAL_BASE, "covers by serial", true);
 	std::deque<size_t> second;
 	int saved_by_serial = 0;
-	const auto lostConnection = [&](s32 status) {
-		// No connection: three in a row, and the rest is left for the next time (the games asked
-		// for already are let finish).
+	const auto lostConnection = [&](s32 status, int& count, bool& stopped, const char* what) {
+		// No connection: three in a row, and the rest of that collection is left for the next time
+		// (the games asked for already are let finish).
 		failed++;
-		if (++unreachable >= 3 && !lost)
+		if (++count >= 3 && !stopped)
 		{
-			ps5px_log("covers: stopping: %s, three times in a row", StatusText(status));
-			s_unreachable_at = std::time(nullptr);
-			lost = true;
+			ps5px_log("%s: stopping: %s, three times in a row", what, StatusText(status));
+			if (&stopped == &lost)
+				s_unreachable_at = std::time(nullptr);
+			stopped = true;
 		}
 	};
 	size_t next = 0;
 	while (true)
 	{
-		while (!by_serial.Full() && !second.empty() && !progress->IsCancelled() && !lost)
+		while (!by_serial.Full() && !second.empty() && !progress->IsCancelled() && !lost_serial)
 		{
 			const size_t i = second.front();
 			second.pop_front();
@@ -384,7 +420,7 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 						PS5Platform::MakePublic(path.c_str(), false);
 						saved++;
 						saved_by_serial++;
-						unreachable = 0;
+						unreachable_serial = 0;
 					}
 					else
 					{
@@ -394,13 +430,20 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 				}
 				else if (status < 0)
 				{
-					lostConnection(status);
+					lostConnection(status, unreachable_serial, lost_serial, "covers by serial");
 				}
-				else
+				else if (IsNotThere(status))
 				{
 					// Neither collection has it: not asked for again.
 					unmatched++;
 					none_new += none_line + "\n";
+				}
+				else
+				{
+					// (Refused, too many asked, the server's trouble, or not a picture: asked for again
+					// the next time.)
+					ps5px_log("covers by serial: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
+					failed++;
 				}
 			});
 		}
@@ -449,9 +492,9 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 				}
 				else if (status < 0)
 				{
-					lostConnection(status);
+					lostConnection(status, unreachable, lost, "covers");
 				}
-				else
+				else if (IsNotThere(status))
 				{
 					// The list names a picture the server does not have (any more): not asked for
 					// there again, and asked for by serial.
@@ -459,9 +502,16 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 					none_new += none_line + "\n";
 					second.push_back(i);
 				}
+				else
+				{
+					// (Refused, too many asked, the server's trouble, or not a picture: asked for again
+					// the next time.)
+					ps5px_log("covers: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
+					failed++;
+				}
 			});
 		}
-		const bool more = !second.empty() && !progress->IsCancelled() && !lost;
+		const bool more = !second.empty() && !progress->IsCancelled() && !lost_serial;
 		if (pool.Active() == 0 && by_serial.Active() == 0 && !more)
 			break;
 		if (pool.Active() != 0)
@@ -479,7 +529,7 @@ int DownloadMissing(ProgressCallback* progress, bool again, std::string* summary
 	FileSystem::DeleteFilePath(running_path.c_str());
 	ps5px_log("covers: %zu game(s) without a cover: %d saved (%d of them by serial), %d in neither collection, %d not asked for again, %d failed%s",
 		missing.size(), saved, saved_by_serial, unmatched, skipped, failed, progress->IsCancelled() ? " (stopped: a scan or a game took over)" : "");
-	if (lost || (saved == 0 && failed > 0 && unmatched + skipped == 0))
+	if (lost || lost_serial || (saved == 0 && failed > 0 && unmatched + skipped == 0))
 		*summary = saved > 0 ? fmt::format("{} cover(s) downloaded; then the connection was lost.", saved) :
 							   std::string("The covers could not be downloaded: no connection (crux2-boot.log has the reason).");
 	else if (saved > 0)
@@ -567,8 +617,11 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 	const std::string running_path = Path::Combine(folder, "download-running.txt");
 	if (serial.empty() && !again && FileSystem::FileExists(running_path.c_str()))
 	{
-		ps5px_log("pictures: the last download did not come back (%s is there): not tried by itself again", running_path.c_str());
-		*summary = "Pictures are not fetched by themselves: the last download did not finish. Settings > Library > \"Fetch the games' pictures\" tries again.";
+		// This start only: the note goes, and the user is told once (the next start tries again).
+		ps5px_log("pictures: the last download did not come back (%s is there): not tried by itself this time", running_path.c_str());
+		FileSystem::DeleteFilePath(running_path.c_str());
+		*summary = "Pictures were not fetched by themselves this time: the last download did not finish. Settings > Library > \"Fetch the games' pictures\" tries again.";
+		PS5UI::Toast(*summary);
 		return 0;
 	}
 
@@ -624,6 +677,13 @@ int DownloadPictures(ProgressCallback* progress, const std::string& serial, bool
 					ps5px_log("pictures: stopping: %s, three times in a row", StatusText(status));
 					lost = true;
 				}
+			}
+			else if (!IsNotThere(status))
+			{
+				// (Refused, too many asked, the server's trouble, or not a picture: not settled, asked
+				// for again the next time. Only "not there" is remembered.)
+				ps5px_log("pictures: %s: status %d, %zu bytes", m.serial.c_str(), status, body.size());
+				asked->answered = false;
 			}
 			if (which == 0 && !lost)
 			{
@@ -717,6 +777,7 @@ int FetchForDisc(const std::string& serial, const std::string& title, const std:
 	if (!http)
 		return 0;
 	http->SetTimeout(12.0f);
+	const DownloadingNow downloading;
 	static constexpr const char* RAW = "https://raw.githubusercontent.com/libretro-thumbnails/Sony_-_PlayStation_2/master/";
 	static constexpr const char* PLAIN = "http://thumbnails.libretro.com/Sony%20-%20PlayStation%202/";
 	const char* base = RAW;
