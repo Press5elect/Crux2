@@ -474,7 +474,7 @@ void homeFrame(ImDrawList* dl)
 	// (Square and Triangle act on the game in focus: the hero's, or a cover of the row.)
 	if ((hs.row == 0 && hero != nullptr) || (hs.row == 1 && !row.empty()))
 	{
-		hints.push_back({Glyph::Square, "Game settings"});
+		hints.push_back({Glyph::Square, "Game Specific Settings"});
 		hints.push_back({Glyph::Triangle, "Game page"});
 	}
 	hints.push_back({Glyph::Cross, open});

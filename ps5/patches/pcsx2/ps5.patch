@@ -2,6 +2,159 @@ Crux2's changes to PCSX2 (the PS5 port), on PCSX2 840774630f7a1a456e50575df62ec0
 Copyright (C) 2026 Press5elect. GPL-3.0-or-later, with the attribution term of NOTICE
 (GPL-3.0 section 7(b)): keep "Crux2 by Press5elect". PCSX2 itself: PCSX2 Dev Team.
 
+diff --git a/3rdparty/soundtouch/source/SoundTouch/TDStretch.h b/3rdparty/soundtouch/source/SoundTouch/TDStretch.h
+index 483dd53..a5ea7ae 100644
+--- a/3rdparty/soundtouch/source/SoundTouch/TDStretch.h
++++ b/3rdparty/soundtouch/source/SoundTouch/TDStretch.h
+@@ -271,6 +271,9 @@ public:
+     protected:
+         double calcCrossCorr(const float *mixingPos, const float *compare, double &norm) override;
+         double calcCrossCorrAccumulate(const float *mixingPos, const float *compare, double &norm) override;
++#if defined(__FMA__) && !defined(_OPENMP) && !defined(ST_SIMD_AVOID_UNALIGNED)
++        int seekBestOverlapPositionFull(const float *refPos) override;
++#endif
+     };
+ 
+ #endif /// SOUNDTOUCH_ALLOW_SSE
+diff --git a/3rdparty/soundtouch/source/SoundTouch/sse_optimized.cpp b/3rdparty/soundtouch/source/SoundTouch/sse_optimized.cpp
+index 3cd0b34..25c18c8 100644
+--- a/3rdparty/soundtouch/source/SoundTouch/sse_optimized.cpp
++++ b/3rdparty/soundtouch/source/SoundTouch/sse_optimized.cpp
+@@ -62,6 +62,125 @@ using namespace soundtouch;
+ #include "TDStretch.h"
+ #include <xmmintrin.h>
+ #include <math.h>
++#include <float.h>
++#if defined(__FMA__)
++#include <immintrin.h>
++#endif
++
++#if defined(__FMA__) && !defined(ST_SIMD_AVOID_UNALIGNED)
++// Crux2: the correlation spelled with the operations the -ffast-math -march=znver2 build already
++// makes of the code below (per lane one fused multiply-add after another, the four lanes added
++// as (0 + 2) + (1 + 3)), so that seekBestOverlapPositionFull can work out four positions at
++// once with exactly the same results: one position is a chain of dependent FMAs and waits on
++// their latency, four keep the FMA units busy.
++static inline float st_hsum(__m128 v)
++{
++    const __m128 t = _mm_add_ps(v, _mm_movehl_ps(v, v));
++    return _mm_cvtss_f32(_mm_add_ss(t, _mm_movehdup_ps(t)));
++}
++
++static inline double st_corr(__m128 vSum, __m128 vNorm, double &anorm)
++{
++    const float norm = st_hsum(vNorm);
++    anorm = norm;
++    return (double)st_hsum(vSum) / sqrt(norm < 1e-9 ? 1.0 : norm);
++}
++
++double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &anorm)
++{
++    assert((overlapLength % 8) == 0);
++    const __m128 *pVec2 = (const __m128*)pV2;
++    __m128 vSum = _mm_setzero_ps(), vNorm = _mm_setzero_ps();
++    for (int i = 0; i < channels * overlapLength / 16; i++, pV1 += 16, pVec2 += 4)
++    {
++        for (int k = 0; k < 4; k++)
++        {
++            const __m128 v = _mm_loadu_ps(pV1 + 4 * k);
++            vSum = _mm_fmadd_ps(v, pVec2[k], vSum);
++            vNorm = _mm_fmadd_ps(v, v, vNorm);
++        }
++    }
++    return st_corr(vSum, vNorm, anorm);
++}
++
++#if !defined(_OPENMP)
++// TDStretch::seekBestOverlapPositionFull with calcCrossCorr made for four positions at a time;
++// the positions are still weighed and compared one by one, in the same order.
++int TDStretchSSE::seekBestOverlapPositionFull(const float *refPos)
++{
++    int bestOffs = 0;
++    double bestCorr;
++    double norm;
++    double corr4[4];
++    const int stride = channels;
++    const int rounds = channels * overlapLength / 16;
++
++    bestCorr = calcCrossCorr(refPos, pMidBuffer, norm);
++    bestCorr = (bestCorr + 0.1) * 0.75;
++
++    for (int base = 1; base < seekLength; base += 4)
++    {
++        const int count = (seekLength - base < 4) ? (seekLength - base) : 4;
++        if (count == 4)
++        {
++            const float *pV1 = refPos + channels * base;
++            const __m128 *pVec2 = (const __m128*)pMidBuffer;
++            __m128 s0 = _mm_setzero_ps(), s1 = s0, s2 = s0, s3 = s0;
++            __m128 n0 = s0, n1 = s0, n2 = s0, n3 = s0;
++            for (int r = 0; r < rounds; r++, pV1 += 16, pVec2 += 4)
++            {
++                for (int k = 0; k < 4; k++)
++                {
++                    const __m128 w = pVec2[k];
++                    const __m128 a = _mm_loadu_ps(pV1 + 4 * k);
++                    const __m128 b = _mm_loadu_ps(pV1 + stride + 4 * k);
++                    const __m128 c = _mm_loadu_ps(pV1 + 2 * stride + 4 * k);
++                    const __m128 d = _mm_loadu_ps(pV1 + 3 * stride + 4 * k);
++                    s0 = _mm_fmadd_ps(a, w, s0);
++                    n0 = _mm_fmadd_ps(a, a, n0);
++                    s1 = _mm_fmadd_ps(b, w, s1);
++                    n1 = _mm_fmadd_ps(b, b, n1);
++                    s2 = _mm_fmadd_ps(c, w, s2);
++                    n2 = _mm_fmadd_ps(c, c, n2);
++                    s3 = _mm_fmadd_ps(d, w, s3);
++                    n3 = _mm_fmadd_ps(d, d, n3);
++                }
++            }
++            corr4[0] = st_corr(s0, n0, norm);
++            corr4[1] = st_corr(s1, n1, norm);
++            corr4[2] = st_corr(s2, n2, norm);
++            corr4[3] = st_corr(s3, n3, norm);
++        }
++        else
++        {
++            for (int j = 0; j < count; j++)
++                corr4[j] = calcCrossCorr(refPos + channels * (base + j), pMidBuffer, norm);
++        }
++
++        for (int j = 0; j < count; j++)
++        {
++            const int i = base + j;
++            double corr = corr4[j];
++            // heuristic rule to slightly favour values close to mid of the range
++            double tmp = (double)(2 * i - seekLength) / (double)seekLength;
++            corr = ((corr + 0.1) * (1.0 - 0.25 * tmp * tmp));
++
++            // Checks for the highest correlation value
++            if (corr > bestCorr)
++            {
++                bestCorr = corr;
++                bestOffs = i;
++            }
++        }
++    }
++
++    clearCrossCorrState();
++
++    return bestOffs;
++}
++#endif
++
++#else // __FMA__
+ 
+ // Calculates cross correlation of two buffers
+ double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &anorm)
+@@ -174,6 +293,8 @@ double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &a
+     */
+ }
+ 
++#endif // __FMA__
++
+ 
+ 
+ double TDStretchSSE::calcCrossCorrAccumulate(const float *pV1, const float *pV2, double &norm)
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 index b0c3945..220d859 100644
 --- a/CMakeLists.txt
@@ -769,10 +922,23 @@ index 078d5d3..f9b1b9b 100644
  	if (request->type == Request::Type::Post)
  	{
 diff --git a/common/HostSys.cpp b/common/HostSys.cpp
-index d1ce25b..7ebe768 100644
+index d1ce25b..035baad 100644
 --- a/common/HostSys.cpp
 +++ b/common/HostSys.cpp
-@@ -130,8 +130,17 @@ struct crash_info_t
+@@ -110,7 +110,12 @@ static u32 GetSpinTime()
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2: settable (PS5/WakeSpinUs, set by the host before the emulator's threads start).
++u32 SPIN_TIME_NS = GetSpinTime();
++#else
+ const u32 SPIN_TIME_NS = GetSpinTime();
++#endif
+ 
+ #ifdef __APPLE__
+ // https://alastairs-place.net/blog/2013/01/10/interesting-os-x-crash-report-tidbits/
+@@ -130,8 +135,17 @@ struct crash_info_t
  extern "C" crash_info_t gCRAnnotations CRASH_ANNOTATION = { CRASH_VERSION };
  #endif
  
@@ -790,6 +956,22 @@ index d1ce25b..7ebe768 100644
  #ifdef __APPLE__
  	gCRAnnotations.message = reinterpret_cast<size_t>(msg);
  	// Some macOS's seem to have issues displaying non-static `message`s, so throw it in here too
+diff --git a/common/HostSys.h b/common/HostSys.h
+index 3d6ce3b..14ffbad 100644
+--- a/common/HostSys.h
++++ b/common/HostSys.h
+@@ -178,7 +178,11 @@ extern u64 GetAvailablePhysicalMemory();
+ /// Returns the approximate number of ns that passed
+ extern u32 ShortSpin();
+ /// Number of ns to spin for before sleeping a thread
++#ifdef __PROSPERO__
++extern u32 SPIN_TIME_NS;
++#else
+ extern const u32 SPIN_TIME_NS;
++#endif
+ /// Like C abort() but adds the given message to the crashlog
+ [[noreturn]] void AbortWithMessage(const char* msg);
+ 
 diff --git a/common/Image.cpp b/common/Image.cpp
 index aa96c64..00e993d 100644
 --- a/common/Image.cpp
@@ -847,11 +1029,197 @@ index aa96c64..00e993d 100644
  
  	return handler->buffer_loader(this, buffer, buffer_size);
  }
+diff --git a/common/PS5Counters.h b/common/PS5Counters.h
+new file mode 100644
+index 0000000..75c4092
+--- /dev/null
++++ b/common/PS5Counters.h
+@@ -0,0 +1,102 @@
++// SPDX-FileCopyrightText: 2026 Press5elect
++// SPDX-License-Identifier: GPL-3.0+
++// Additional term (GPL-3.0 section 7(b)): keep the attribution "Crux2 by Press5elect"; see NOTICE.
++//
++// Crux2: counters for where the emulator's threads wait (the boot log's "counters:" line in a test or
++// profiled run, ps5/frontend/ps5_host.cpp). Each block is written by one thread only, with a plain load
++// and store (no locked instruction), and sits on cache lines of its own so that it never shares a line
++// with another thread's writes. The host reads them with relaxed loads and prints the differences.
++// A clock is read only around a wait that sleeps or spins, never on a path that does not wait.
++
++#pragma once
++
++#ifdef __PROSPERO__
++
++#include <atomic>
++#include <cstdint>
++
++extern "C" uint64_t sceKernelReadTsc(void);
++
++namespace PS5Counters
++{
++	using Counter = std::atomic<uint64_t>;
++
++	/// Adds to a counter that only the calling thread writes.
++	__attribute__((always_inline)) inline void Add(Counter& c, uint64_t n = 1)
++	{
++		c.store(c.load(std::memory_order_relaxed) + n, std::memory_order_relaxed);
++	}
++
++	__attribute__((always_inline)) inline void Max(Counter& c, uint64_t v)
++	{
++		if (v > c.load(std::memory_order_relaxed))
++			c.store(v, std::memory_order_relaxed);
++	}
++
++	__attribute__((always_inline)) inline uint64_t Ticks() { return sceKernelReadTsc(); }
++
++	/// Written by the VU thread (MTVU.cpp).
++	struct alignas(64) VUThread
++	{
++		Counter wakes;           ///< returns from the wait for work
++		Counter wake_ready;      ///< ... that found work at once
++		Counter wake_spun;       ///< ... that found it while spinning
++		Counter wake_slept;      ///< ... that slept
++		Counter commands;        ///< ring commands run
++		Counter programs;        ///< VU1 programs run (MTVU_VU_EXECUTE)
++		Counter micro_writes;    ///< microprogram uploads (MTVU_VU_WRITE_MICRO)
++		Counter xgkick_posts;    ///< XGKICK packets handed to the graphics thread
++		Counter xgkick_post_waiting; ///< ... with the graphics thread already waiting for one
++		Counter xgkick_post_asleep;  ///< ... with it asleep (the post was a system call)
++		Counter micro_writes_same;   ///< microprogram uploads equal to micro memory (PS5/SameMicroSkip on)
++	};
++
++	/// Written by the graphics thread (MTGS.cpp).
++	struct alignas(64) GSThread
++	{
++		Counter xgkick_ready;    ///< XGKICK packets the graphics thread took (ready at once: this - waited)
++		Counter xgkick_waited;   ///< ... for which it had to wait
++		Counter xgkick_slept;    ///< ... and the wait slept (spun: waited - slept)
++		Counter xgkick_ticks;    ///< counter ticks spent in those waits
++		Counter xgkick_hist_count;     ///< waits noted in xgkick_hist_ticks
++		Counter xgkick_hist_ticks[256]; ///< the last 256 waits' lengths, for the histogram (read at report time)
++	};
++
++	/// Written by the EE thread (MTVU.cpp, the host's frame).
++	struct alignas(64) EEThread
++	{
++		Counter vu_kicks;        ///< work handed to the VU thread (NotifyOfWork)
++		Counter vu_kick_woke;    ///< ... that had to wake it from sleep (a system call)
++		Counter waitvu;          ///< waits for the VU thread to finish
++		Counter waitvu_ticks;    ///< counter ticks in them
++		Counter waitonsize;      ///< waits for room in the ring
++		Counter ring_samples;    ///< frames the ring was looked at
++		Counter ring_words;      ///< sum of the ring's used words at those moments
++		Counter ring_words_max;  ///< the most seen
++	};
++
++	/// Written by the EE thread (vtlb.cpp's fault handler runs on the thread that faulted: the EE thread's
++	/// writes to guest memory; iR5900.cpp, iR3000A.cpp: the IOP runs on the EE thread too).
++	struct alignas(64) EEMemory
++	{
++		Counter code_write_faults;  ///< writes to a protected code page (its blocks are cleared)
++		Counter backpatches;        ///< fastmem accesses rewritten to the slow path
++		Counter reprotects;         ///< manual pages put back under write protection
++		Counter page_resets;        ///< dyna_page_reset: a manual page run often enough
++		Counter block_discards;     ///< dyna_block_discard: a manual block found changed
++		Counter ee_recompiles;      ///< EE blocks compiled
++		Counter iop_recompiles;     ///< IOP blocks compiled
++		Counter iop_clears;         ///< IOP stores that cleared compiled code (recClearIOP)
++	};
++
++	extern VUThread vu;
++	extern EEMemory mem;
++	extern GSThread gs;
++	extern EEThread ee;
++
++	/// Counter ticks a second (set by the host at boot; 0 before).
++	extern uint64_t ticks_per_second;
++
++} // namespace PS5Counters
++
++#endif
+diff --git a/common/Perf.cpp b/common/Perf.cpp
+index dd15011..d23bfe7 100644
+--- a/common/Perf.cpp
++++ b/common/Perf.cpp
+@@ -207,6 +207,27 @@ namespace Perf
+ 			std::snprintf(full_symbol, std::size(full_symbol), "%s%016" PRIX64, prefix, key);
+ 		RegisterMethod(ptr, size, full_symbol);
+ 	}
++#elif defined(__PROSPERO__)
++	// Crux2: the named stubs (dispatchers, VIF unpack, microVU's entry points) go to the console
++	// profiler's table of generated code (ps5/frontend/ps5_profiler.cpp); blocks are named by their
++	// code area there, not one by one. `symbol` is a string literal at every caller.
++	extern "C" void ps5px_profile_code_region(const char* name, const void* start, size_t size) __attribute__((weak));
++	void Group::Register(const void* ptr, size_t size, const char* symbol)
++	{
++		if (ps5px_profile_code_region)
++			ps5px_profile_code_region(symbol, ptr, size);
++	}
++	// Each compiled block, for the console profiler's busiest guest blocks (0 EE, 1 IOP, 2 microVU0, 3 microVU1).
++	extern "C" void ps5px_profile_block(int table, const void* start, size_t size, u32 pc) __attribute__((weak));
++	void Group::RegisterPC(const void* ptr, size_t size, u32 pc)
++	{
++		if (!ps5px_profile_block)
++			return;
++		const int table = (this == &ee) ? 0 : (this == &iop) ? 1 : (this == &vu0) ? 2 : (this == &vu1) ? 3 : -1;
++		if (table >= 0)
++			ps5px_profile_block(table, ptr, size, pc);
++	}
++	void Group::RegisterKey(const void* ptr, size_t size, const char* prefix, u64 key) {}
+ #else
+ 	void Group::Register(const void* ptr, size_t size, const char* symbol) {}
+ 	void Group::RegisterPC(const void* ptr, size_t size, u32 pc) {}
 diff --git a/common/Semaphore.cpp b/common/Semaphore.cpp
-index 8dc2f79..2214e97 100644
+index 8dc2f79..0ea3a35 100644
 --- a/common/Semaphore.cpp
 +++ b/common/Semaphore.cpp
-@@ -137,7 +137,7 @@ void Threading::WorkSema::Reset()
+@@ -60,8 +60,15 @@ void Threading::WorkSema::WaitForWork()
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++int Threading::WorkSema::WaitForWorkWithSpin()
++#else
+ void Threading::WorkSema::WaitForWorkWithSpin()
++#endif
+ {
++#ifdef __PROSPERO__
++	int outcome = 0; // Crux2: 0 work was there, 1 it came while spinning, 2 slept
++#endif
+ 	s32 value = m_state.load(std::memory_order_relaxed);
+ 	pxAssert(!IsDead(value));
+ 	while (IsReadyForSleep(value))
+@@ -71,6 +78,9 @@ void Threading::WorkSema::WaitForWorkWithSpin()
+ 			if (value & STATE_FLAG_WAITING_EMPTY)
+ 				m_empty_sema.Post();
+ 			value = STATE_SPINNING;
++#ifdef __PROSPERO__
++			outcome = 1;
++#endif
+ 			break;
+ 		}
+ 	}
+@@ -82,6 +92,9 @@ void Threading::WorkSema::WaitForWorkWithSpin()
+ 			if (!m_state.compare_exchange_weak(value, STATE_SLEEPING, std::memory_order_relaxed))
+ 				continue;
+ 			m_sema.Wait();
++#ifdef __PROSPERO__
++			outcome = 2;
++#endif
+ 			break;
+ 		}
+ 		waited += ShortSpin();
+@@ -89,6 +102,9 @@ void Threading::WorkSema::WaitForWorkWithSpin()
+ 	}
+ 	// Clear back to STATE_RUNNING_0 (but preserve waiting empty flag)
+ 	m_state.fetch_and(STATE_FLAG_WAITING_EMPTY, std::memory_order_acquire);
++#ifdef __PROSPERO__
++	return outcome;
++#endif
+ }
+ 
+ bool Threading::WorkSema::WaitForEmpty()
+@@ -137,7 +153,7 @@ void Threading::WorkSema::Reset()
  	m_state = STATE_RUNNING_0;
  }
  
@@ -912,7 +1280,7 @@ index 9f621f4..fb78865 100644
  	template <typename T>
  	void EnumEntry(const char* section, const char* var, T& value, const char* const* enumArray = nullptr, const T defvalue = (T)0)
 diff --git a/common/Threading.h b/common/Threading.h
-index 70b6ed0..c59516b 100644
+index 70b6ed0..9f00089 100644
 --- a/common/Threading.h
 +++ b/common/Threading.h
 @@ -7,6 +7,8 @@
@@ -924,7 +1292,7 @@ index 70b6ed0..c59516b 100644
  #elif !defined(_WIN32)
  #include <semaphore.h>
  #endif
-@@ -132,6 +134,13 @@ namespace Threading
+@@ -132,14 +134,28 @@ namespace Threading
  		void* m_sema;
  #elif defined(__APPLE__)
  		semaphore_t m_sema;
@@ -938,6 +1306,83 @@ index 70b6ed0..c59516b 100644
  #else
  		sem_t m_sema;
  #endif
+ 	public:
+ 		KernelSemaphore();
+ 		~KernelSemaphore();
++#ifdef __PROSPERO__
++		/// Crux2: true when a thread asleep on it was woken (a system call), for common/PS5Counters.h.
++		bool Post();
++		/// Crux2: true when the wait slept (it did not get the count while spinning).
++		bool Wait();
++#else
+ 		void Post();
+ 		void Wait();
++#endif
+ 		bool TryWait();
+ 	};
+ 
+@@ -201,12 +217,29 @@ namespace Threading
+ 				m_sema.Post();
+ 		}
+ 
++#ifdef __PROSPERO__
++		/// Crux2: NotifyOfWork that says whether the worker was asleep (it had to be woken).
++		bool NotifyOfWorkWoke()
++		{
++			s32 old = m_state.fetch_add(2, std::memory_order_release);
++			if (old != STATE_SLEEPING)
++				return false;
++			m_sema.Post();
++			return true;
++		}
++#endif
++
+ 		/// Checks if there's any work in the queue
+ 		bool CheckForWork();
+ 		/// Wait for work to be added to the queue
+ 		void WaitForWork();
+ 		/// Wait for work to be added to the queue, spinning for a bit before sleeping the thread
++#ifdef __PROSPERO__
++		/// Crux2: 0 work was there, 1 it came while spinning, 2 the thread slept (common/PS5Counters.h).
++		int WaitForWorkWithSpin();
++#else
+ 		void WaitForWorkWithSpin();
++#endif
+ 		/// Wait for the worker thread to finish processing all entries in the queue or die
+ 		/// Returns false if the thread is dead
+ 		bool WaitForEmpty();
+@@ -231,6 +264,23 @@ namespace Threading
+ 		UserspaceSemaphore() = default;
+ 		~UserspaceSemaphore() = default;
+ 
++#ifdef __PROSPERO__
++		/// Crux2: 0 nobody was waiting, 1 a thread was waiting (spinning), 2 it was asleep and was woken.
++		int Post()
++		{
++			if (m_counter.fetch_add(1, std::memory_order_release) < 0)
++				return m_sema.Post() ? 2 : 1;
++			return 0;
++		}
++
++		/// Crux2: 0 the count was there, 1 it came while spinning, 2 the thread slept.
++		int Wait()
++		{
++			if (m_counter.fetch_sub(1, std::memory_order_acquire) <= 0)
++				return m_sema.Wait() ? 2 : 1;
++			return 0;
++		}
++#else
+ 		void Post()
+ 		{
+ 			if (m_counter.fetch_add(1, std::memory_order_release) < 0)
+@@ -242,6 +292,7 @@ namespace Threading
+ 			if (m_counter.fetch_sub(1, std::memory_order_acquire) <= 0)
+ 				m_sema.Wait();
+ 		}
++#endif
+ 
+ 		bool TryWait()
+ 		{
 diff --git a/common/WindowInfo.cpp b/common/WindowInfo.cpp
 index d26d5fc..b66f9ff 100644
 --- a/common/WindowInfo.cpp
@@ -2538,7 +2983,7 @@ index 9d00abc..75bae81 100644
 +	set_source_files_properties(FPU.cpp MMI.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 +endif()
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index 21adcf1..623c6fa 100644
+index 21adcf1..96be4e0 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -9,9 +9,12 @@
@@ -2603,7 +3048,16 @@ index 21adcf1..623c6fa 100644
  };
  
  enum class GSHWAutoFlushLevel : u8
-@@ -677,7 +722,10 @@ struct Pcsx2Config
+@@ -656,6 +701,8 @@ struct Pcsx2Config
+ 			EnableFastmem : 1;
+ 		bool
+ 			PauseOnTLBMiss : 1;
++		bool
++			IopInlineRamStores : 1; // Crux2: IOP stores to RAM without iopMemWrite* (rpsxStore)
+ 		BITFIELD_END
+ 
+ 		RecompilerOptions();
+@@ -677,7 +724,10 @@ struct Pcsx2Config
  	{
  		BITFIELD32()
  		bool
@@ -2615,7 +3069,7 @@ index 21adcf1..623c6fa 100644
  		BITFIELD_END
  
  		RecompilerOptions Recompiler;
-@@ -875,6 +923,12 @@ struct Pcsx2Config
+@@ -875,6 +925,12 @@ struct Pcsx2Config
  		GSDumpCompressionMethod GSDumpCompression = GSDumpCompressionMethod::Zstandard;
  		GSHardwareDownloadMode HWDownloadMode = GSHardwareDownloadMode::Enabled;
  		GSCASMode CASMode = DEFAULT_CAS_MODE;
@@ -2628,7 +3082,7 @@ index 21adcf1..623c6fa 100644
  		u8 Dithering = 2;
  		u8 MaxAnisotropy = 0;
  		u8 TVShader = 0;
-@@ -940,6 +994,8 @@ struct Pcsx2Config
+@@ -940,6 +996,8 @@ struct Pcsx2Config
  
  		std::string Adapter;
  		std::string HWDumpDirectory;
@@ -2637,7 +3091,7 @@ index 21adcf1..623c6fa 100644
  		std::string SWDumpDirectory;
  
  		GSOptions();
-@@ -1533,11 +1589,15 @@ namespace EmuFolders
+@@ -1533,11 +1591,15 @@ namespace EmuFolders
  #define CHECK_VU_SIGN_OVERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0SignOverflow : EmuConfig.Cpu.Recompiler.vu1SignOverflow)
  #define CHECK_VU_UNDERFLOW(vunum) (((vunum) == 0) ? EmuConfig.Cpu.Recompiler.vu0Underflow : EmuConfig.Cpu.Recompiler.vu1Underflow)
  
@@ -2653,6 +3107,23 @@ index 21adcf1..623c6fa 100644
  //------------ EE Recompiler defines - Comment to disable a recompiler ---------------
  
  #define SHIFT_RECOMPILE // Speed majorly reduced if disabled
+diff --git a/pcsx2/Counters.cpp b/pcsx2/Counters.cpp
+index 6b66726..06e3021 100644
+--- a/pcsx2/Counters.cpp
++++ b/pcsx2/Counters.cpp
+@@ -748,7 +748,11 @@ __fi void rcntSyncCounter(int i)
+ {
+ 	if (counters[i].mode.ClockSource != 0x3) // don't count hblank sources
+ 	{
+-		const u32 change = (cpuRegs.cycle - counters[i].startCycle) / counters[i].rate;
++		// Crux2: rates 2, 32 and 512 (the hblank source is not divided here) are powers of two;
++		// a shift gives the same quotient as the 64-bit division it replaces.
++		const u64 elapsed = cpuRegs.cycle - counters[i].startCycle;
++		const u32 rate = counters[i].rate;
++		const u32 change = ((rate & (rate - 1)) == 0) ? (elapsed >> std::countr_zero(rate)) : (elapsed / rate);
+ 		counters[i].startCycle += change * counters[i].rate;
+ 
+ 		counters[i].startCycle &= ~((u64)counters[i].rate - 1);
 diff --git a/pcsx2/DEV9/AdapterUtils.cpp b/pcsx2/DEV9/AdapterUtils.cpp
 index 9478c33..7c354fb 100644
 --- a/pcsx2/DEV9/AdapterUtils.cpp
@@ -3496,7 +3967,7 @@ index 89d0504..77d5c7c 100644
  
  }	// End Namespace COP1
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
-index a0b988f..9eafd06 100644
+index a0b988f..f95a981 100644
 --- a/pcsx2/GS/GS.cpp
 +++ b/pcsx2/GS/GS.cpp
 @@ -6,6 +6,9 @@
@@ -3717,7 +4188,7 @@ index a0b988f..9eafd06 100644
  	if (!VMManager::HasValidVM() && GSCapture::IsCapturing())
  		GSCapture::EndCapture();
  }
-@@ -772,6 +880,21 @@ void GSgetStats(SmallStringBase& info)
+@@ -772,6 +880,26 @@ void GSgetStats(SmallStringBase& info)
  				(int)std::ceil(pm.Get(GSPerfMon::TextureCopiesROV)),
  				(int)std::ceil(pm.Get(GSPerfMon::TextureUploads)));
  		}
@@ -3727,6 +4198,11 @@ index a0b988f..9eafd06 100644
 +		// setups, RC copies of a target the draw reads, BS feedback barriers skipped (nothing written
 +		// since the last one), RR copies of a target reused (source unchanged since the copy), PK render
 +		// passes kept for ordered view draws (an unbound attachment's feedback flag no longer ends them).
++		// UK kilobytes of textures uploaded, PU palette textures uploaded, SC texture sources created, SB
++		// command buffers submitted (Crux2).
++		info.append_format(" | {} UK | {} PU | {} SC | {} SB", (int)std::ceil(pm.Get(GSPerfMon::TextureUploadKB)),
++			(int)std::ceil(pm.Get(GSPerfMon::PaletteUploads)), (int)std::ceil(pm.Get(GSPerfMon::SourcesCreated)),
++			(int)std::ceil(pm.Get(GSPerfMon::Submissions)));
 +		info.append_format(" | {} XB | {} FD | {} DP | {} RC | {} BS | {} RR | {} PK",
 +			(int)std::ceil(pm.Get(GSPerfMon::BarriersExternal)),
 +			(int)std::ceil(pm.Get(GSPerfMon::FeedbackDecompress)),
@@ -3739,7 +4215,7 @@ index a0b988f..9eafd06 100644
  	}
  }
  
-@@ -1027,6 +1150,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
+@@ -1027,6 +1155,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
  	s_fh = NULL;
  }
  
@@ -3802,7 +4278,7 @@ index a0b988f..9eafd06 100644
  #else
  
  #include <sys/mman.h>
-@@ -1226,7 +1405,13 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
+@@ -1226,7 +1410,13 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
  	[](s32 pressed) {
  		if (!pressed)
  		{
@@ -3870,11 +4346,113 @@ index d944b77..9b8303b 100644
  
  		if (m_shutdown)
  			m_shutdown();
+diff --git a/pcsx2/GS/GSLocalMemory.cpp b/pcsx2/GS/GSLocalMemory.cpp
+index 231f3ad..c8ac8b1 100644
+--- a/pcsx2/GS/GSLocalMemory.cpp
++++ b/pcsx2/GS/GSLocalMemory.cpp
+@@ -460,6 +460,7 @@ bool GSLocalMemory::IsPageAligned(u32 psm, const GSVector4i& rc)
+ 	return (rc & pgmsk).eq(GSVector4i::zero());
+ }
+ 
++#ifndef __PROSPERO__
+ u32 GSLocalMemory::GetStartBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
+ {
+ 	u32 result = m_psm[psm].info.bn(rect.x, rect.y, bp, bw); // Valid only for color formats
+@@ -492,6 +493,8 @@ u32 GSLocalMemory::GetEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
+ 	return result;
+ }
+ 
++#endif
++
+ u32 GSLocalMemory::GetUnwrappedEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
+ {
+ 	const u32 result = GetEndBlockAddress(bp, bw, psm, rect);
+diff --git a/pcsx2/GS/GSLocalMemory.h b/pcsx2/GS/GSLocalMemory.h
+index d4786e4..c439a04 100644
+--- a/pcsx2/GS/GSLocalMemory.h
++++ b/pcsx2/GS/GSLocalMemory.h
+@@ -1145,3 +1145,39 @@ constexpr inline GSOffset GSOffset::fromKnownPSM(u32 bp, u32 bw, GS_PSM psm)
+ 	}
+ 	return GSOffset(GSLocalMemory::swizzle32, bp, bw, psm);
+ }
++
++#ifdef __PROSPERO__
++// Crux2: called billions of times by the texture cache and the renderer (the profile); out of line they were
++// a call each. The same code, in the header.
++inline __forceinline u32 GSLocalMemory::GetStartBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
++{
++	u32 result = m_psm[psm].info.bn(rect.x, rect.y, bp, bw); // Valid only for color formats
++
++	// If rect is page aligned, we can assume it's the start of the page. Z formats don't place block 0
++	// in the top-left, so we have to round them down.
++	const GSVector2i page_size = GSLocalMemory::m_psm[psm].pgs;
++	if ((rect.x & (page_size.x - 1)) == 0 && (rect.y & (page_size.y - 1)) == 0)
++	{
++		constexpr u32 page_mask = (1 << 5) - 1;
++		result &= ~page_mask;
++	}
++
++	return result;
++}
++
++inline __forceinline u32 GSLocalMemory::GetEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
++{
++	u32 result = m_psm[psm].info.bn(rect.z - 1, rect.w - 1, bp, bw); // Valid only for color formats
++
++	// If rect is page aligned, we can assume it's the start of the next block-1 as the max block position.
++	// Using real end point for Z formats causes problems because it's a lower value.
++	const GSVector2i page_size = GSLocalMemory::m_psm[psm].pgs;
++	if ((rect.z & (page_size.x - 1)) == 0 && (rect.w & (page_size.y - 1)) == 0)
++	{
++		constexpr u32 page_mask = (1 << 5) - 1;
++		result = (((result + page_mask) & ~page_mask)) - 1;
++	}
++
++	return result;
++}
++#endif
+diff --git a/pcsx2/GS/GSLocalMemoryMultiISA.cpp b/pcsx2/GS/GSLocalMemoryMultiISA.cpp
+index 897a251..91ee30f 100644
+--- a/pcsx2/GS/GSLocalMemoryMultiISA.cpp
++++ b/pcsx2/GS/GSLocalMemoryMultiISA.cpp
+@@ -233,6 +233,9 @@ void GSLocalMemoryFunctions::WriteImageBlock(GSLocalMemory& mem, int l, int r, i
+ {
+ 	u32 bp = BITBLTBUF.DBP;
+ 	u32 bw = BITBLTBUF.DBW;
++	// Crux2: m_vm8 does not change during the copy, but the block stores (vector types, which may
++	// alias anything) made the compiler reload it from mem for every block. Read it once.
++	u8* const vm = mem.vm8();
+ 
+ 	for (int offset = srcpitch * bsy; h >= bsy; h -= bsy, y += bsy, src += offset)
+ 	{
+@@ -240,14 +243,14 @@ void GSLocalMemoryFunctions::WriteImageBlock(GSLocalMemory& mem, int l, int r, i
+ 		{
+ 			switch (psm)
+ 			{
+-				case PSMCT32: GSBlock::WriteBlock32<alignment, 0xffffffff>(mem.BlockPtr32(x, y, bp, bw), &src[x * 4], srcpitch); break;
+-				case PSMCT16: GSBlock::WriteBlock16<alignment>(mem.BlockPtr16(x, y, bp, bw), &src[x * 2], srcpitch); break;
+-				case PSMCT16S: GSBlock::WriteBlock16<alignment>(mem.BlockPtr16S(x, y, bp, bw), &src[x * 2], srcpitch); break;
+-				case PSMT8: GSBlock::WriteBlock8<alignment>(mem.BlockPtr8(x, y, bp, bw), &src[x], srcpitch); break;
+-				case PSMT4: GSBlock::WriteBlock4<alignment>(mem.BlockPtr4(x, y, bp, bw), &src[x >> 1], srcpitch); break;
+-				case PSMZ32: GSBlock::WriteBlock32<alignment, 0xffffffff>(mem.BlockPtr32Z(x, y, bp, bw), &src[x * 4], srcpitch); break;
+-				case PSMZ16: GSBlock::WriteBlock16<alignment>(mem.BlockPtr16Z(x, y, bp, bw), &src[x * 2], srcpitch); break;
+-				case PSMZ16S: GSBlock::WriteBlock16<alignment>(mem.BlockPtr16SZ(x, y, bp, bw), &src[x * 2], srcpitch); break;
++				case PSMCT32: GSBlock::WriteBlock32<alignment, 0xffffffff>(&vm[GSLocalMemory::BlockNumber32(x, y, bp, bw) << 8], &src[x * 4], srcpitch); break;
++				case PSMCT16: GSBlock::WriteBlock16<alignment>(&vm[GSLocalMemory::BlockNumber16(x, y, bp, bw) << 8], &src[x * 2], srcpitch); break;
++				case PSMCT16S: GSBlock::WriteBlock16<alignment>(&vm[GSLocalMemory::BlockNumber16S(x, y, bp, bw) << 8], &src[x * 2], srcpitch); break;
++				case PSMT8: GSBlock::WriteBlock8<alignment>(&vm[GSLocalMemory::BlockNumber8(x, y, bp, bw) << 8], &src[x], srcpitch); break;
++				case PSMT4: GSBlock::WriteBlock4<alignment>(&vm[GSLocalMemory::BlockNumber4(x, y, bp, bw) << 8], &src[x >> 1], srcpitch); break;
++				case PSMZ32: GSBlock::WriteBlock32<alignment, 0xffffffff>(&vm[GSLocalMemory::BlockNumber32Z(x, y, bp, bw) << 8], &src[x * 4], srcpitch); break;
++				case PSMZ16: GSBlock::WriteBlock16<alignment>(&vm[GSLocalMemory::BlockNumber16Z(x, y, bp, bw) << 8], &src[x * 2], srcpitch); break;
++				case PSMZ16S: GSBlock::WriteBlock16<alignment>(&vm[GSLocalMemory::BlockNumber16SZ(x, y, bp, bw) << 8], &src[x * 2], srcpitch); break;
+ 				// TODO
+ 				default: ASSUME(0);
+ 			}
 diff --git a/pcsx2/GS/GSPerfMon.h b/pcsx2/GS/GSPerfMon.h
-index d4defa8..d74eb92 100644
+index d4defa8..194d6a4 100644
 --- a/pcsx2/GS/GSPerfMon.h
 +++ b/pcsx2/GS/GSPerfMon.h
-@@ -26,6 +26,13 @@ public:
+@@ -26,6 +26,17 @@ public:
  		TextureCopiesROV, // Overlaps with regular texture copies.
  		DrawCallsROV, // Overlaps with regular draw calls.
  		BarriersROV, // Overlaps with regular barriers.
@@ -3885,14 +4463,61 @@ index d4defa8..d74eb92 100644
 +		BarriersSkipped, // In-pass feedback barriers left out: nothing wrote the attachment since the last one (Crux2).
 +		RTCopiesReused, // Hazard/downscale copies reused: same source, region and settings, source not written since (Crux2).
 +		ROVPassesKept, // Render pass ends avoided: an ordered view draw differed only in an unbound attachment's feedback flag (Crux2).
++		TextureUploadKB, // Kilobytes of texture data uploaded (Crux2).
++		PaletteUploads, // Palette textures made and uploaded (GPU palette conversion) (Crux2).
++		SourcesCreated, // Texture cache sources created (Crux2).
++		Submissions, // Command buffers submitted to the GPU (Crux2).
  		CounterLast,
  
  		// Reused counters for HW.
+diff --git a/pcsx2/GS/GSRegs.h b/pcsx2/GS/GSRegs.h
+index c8d2b89..a82fc2e 100644
+--- a/pcsx2/GS/GSRegs.h
++++ b/pcsx2/GS/GSRegs.h
+@@ -69,6 +69,7 @@ enum GIF_REG_COMPLEX
+ {
+ 	GIF_REG_STQRGBAXYZF2 = 0x00,
+ 	GIF_REG_STQRGBAXYZ2 = 0x01,
++	GIF_REG_UVXYZ2 = 0x02, // PS5
+ };
+ 
+ enum GIF_A_D_REG
+@@ -1116,7 +1117,8 @@ struct alignas(32) GIFPath
+ 		TYPE_UNKNOWN,
+ 		TYPE_ADONLY,
+ 		TYPE_STQRGBAXYZF2,
+-		TYPE_STQRGBAXYZ2
++		TYPE_STQRGBAXYZ2,
++		TYPE_UVXYZ2, // PS5: UV then XYZ2 (two registers), see GSState::Transfer
+ 	};
+ 
+ 	__forceinline void SetTag(const void* mem)
+@@ -1157,6 +1159,10 @@ struct alignas(32) GIFPath
+ 					case 1:
+ 						break;
+ 					case 2:
++#ifdef __PROSPERO__
++						if (regs.U32[0] == 0x00000503)
++							type = TYPE_UVXYZ2;
++#endif
+ 						break;
+ 					case 3:
+ 						// many games, TODO: formats mixed with NOPs (xeno2: 040f010f02, 04010f020f, mgs3: 04010f0f02, 0401020f0f, 04010f020f)
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 88fdbb3..6b19de0 100644
+index 88fdbb3..c1e4e72 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
-@@ -1494,6 +1494,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -224,7 +224,8 @@ void GSState::SetPrimHandlers()
+ 	m_fpGIFRegHandlerXYZ[P][2] = &GSState::GIFRegHandlerXYZ2<P, 0, auto_flush>; \
+ 	m_fpGIFRegHandlerXYZ[P][3] = &GSState::GIFRegHandlerXYZ2<P, 1, auto_flush>; \
+ 	m_fpGIFPackedRegHandlerSTQRGBAXYZF2[P] = &GSState::GIFPackedRegHandlerSTQRGBAXYZF2<P, auto_flush>; \
+-	m_fpGIFPackedRegHandlerSTQRGBAXYZ2[P] = &GSState::GIFPackedRegHandlerSTQRGBAXYZ2<P, auto_flush>;
++	m_fpGIFPackedRegHandlerSTQRGBAXYZ2[P] = &GSState::GIFPackedRegHandlerSTQRGBAXYZ2<P, auto_flush>; \
++	m_fpGIFPackedRegHandlerUVXYZ2[P] = &GSState::GIFPackedRegHandlerUVXYZ2<P, auto_flush>;
+ 
+ 	SetHandlerXYZ(GS_POINTLIST, true);
+ 	SetHandlerXYZ(GS_LINELIST, auto_flush);
+@@ -1494,6 +1495,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -3906,7 +4531,7 @@ index 88fdbb3..6b19de0 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1516,6 +1523,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -1516,6 +1524,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  		r += 3;
  	}
  
@@ -3917,7 +4542,7 @@ index 88fdbb3..6b19de0 100644
  	m_q = r[-3].STQ.Q; // remember the last one, STQ outputs this to the temp Q each time
  }
  
-@@ -1528,6 +1539,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1528,6 +1540,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -3931,7 +4556,7 @@ index 88fdbb3..6b19de0 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1549,6 +1567,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1549,9 +1568,32 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  		r += 3;
  	}
  
@@ -3942,7 +4567,29 @@ index 88fdbb3..6b19de0 100644
  	m_q = r[-3].STQ.Q; // remember the last one, STQ outputs this to the temp Q each time
  }
  
-@@ -2317,6 +2339,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
++// PS5: a packed loop of UV then XYZ2, nothing else. The two handlers the generic loop would look up
++// for every register, in the same order: Transfer takes this only while the UV entry is the plain
++// handler, and UpdateVertexKick sets this table entry with the XYZ2 one, for the same primitive.
++template <u32 prim, bool auto_flush>
++void GSState::GIFPackedRegHandlerUVXYZ2(const GIFPackedReg* RESTRICT r, u32 size)
++{
++	pxAssert(size > 0 && size % 2 == 0);
++
++	const GIFPackedReg* RESTRICT r_end = r + size;
++
++	while (r < r_end)
++	{
++		[[clang::always_inline]] GIFPackedRegHandlerUV(&r[0]);
++		[[clang::always_inline]] GIFPackedRegHandlerXYZ2<prim, 0, auto_flush>(&r[1]);
++
++		r += 2;
++	}
++}
++
+ void GSState::GIFPackedRegHandlerNOP(const GIFPackedReg* RESTRICT r, u32 size)
+ {
+ }
+@@ -2317,6 +2359,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
  
  void GSState::Flush(GSFlushReason reason)
  {
@@ -3952,7 +4599,7 @@ index 88fdbb3..6b19de0 100644
  	SetDrawBuffDirty();
  
  	FlushWrite();
-@@ -2327,6 +2352,9 @@ void GSState::Flush(GSFlushReason reason)
+@@ -2327,6 +2372,9 @@ void GSState::Flush(GSFlushReason reason)
  
  void GSState::FlushDraw(GSFlushReason reason)
  {
@@ -3962,7 +4609,7 @@ index 88fdbb3..6b19de0 100644
  	FlushWrite();
  
  	if (m_index->tail > 0)
-@@ -3348,6 +3376,44 @@ void GSState::ReadbackTextureCache()
+@@ -3348,6 +3396,44 @@ void GSState::ReadbackTextureCache()
  {
  }
  
@@ -4007,8 +4654,32 @@ index 88fdbb3..6b19de0 100644
  template void GSState::Transfer<0>(const u8* mem, u32 size);
  template void GSState::Transfer<1>(const u8* mem, u32 size);
  template void GSState::Transfer<2>(const u8* mem, u32 size);
-@@ -3412,6 +3478,19 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3410,8 +3496,43 @@ void GSState::Transfer(const u8* mem, u32 size)
+ 
+ 						switch (path.type)
  						{
++#ifdef __PROSPERO__
++							case GIFPath::TYPE_UVXYZ2:
++								// Only while the table holds the two handlers it calls (not with the even sprite
++								// position fix, nor between ResetHandlers and the next PRIM, which leave others).
++								if (m_fpGIFPackedRegHandlers[GIF_REG_UV] == &GSState::GIFPackedRegHandlerUV &&
++									m_fpGIFPackedRegHandlers[GIF_REG_XYZ2] == m_ps5_uvxyz2_xyz)
++								{
++									// The same as the generic loop below for this vertex-only format.
++									PS5PackedVertexOnly(path);
++									m_ps5_autoflush_scope = true;
++									m_ps5_autoflush_known = false;
++
++									(this->*m_fpGIFPackedRegHandlersC[GIF_REG_UVXYZ2])((GIFPackedReg*)mem, total);
++
++									m_ps5_autoflush_scope = false;
++
++									mem += total * sizeof(GIFPackedReg);
++
++									break;
++								}
++								[[fallthrough]];
++#endif
  							case GIFPath::TYPE_UNKNOWN:
  							{
 +#ifdef __PROSPERO__
@@ -4027,7 +4698,7 @@ index 88fdbb3..6b19de0 100644
  								u32 reg = 0;
  
  								do
-@@ -3422,6 +3501,10 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3422,6 +3543,10 @@ void GSState::Transfer(const u8* mem, u32 size)
  
  									reg = reg & ((int)(reg - path.nreg) >> 31); // resets reg back to 0 when it becomes equal to path.nreg
  								} while (--total > 0);
@@ -4038,7 +4709,16 @@ index 88fdbb3..6b19de0 100644
  							}
  							break;
  							case GIFPath::TYPE_ADONLY: // very common
-@@ -5460,7 +5543,49 @@ __forceinline void GSState::HandleAutoFlush()
+@@ -3832,6 +3957,8 @@ void GSState::UpdateVertexKick()
+ 
+ 	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[prim];
+ 	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[prim];
++	m_fpGIFPackedRegHandlersC[GIF_REG_UVXYZ2] = m_fpGIFPackedRegHandlerUVXYZ2[prim];
++	m_ps5_uvxyz2_xyz = m_fpGIFPackedRegHandlerXYZ[prim][2];
+ }
+ 
+ static void GrowBuffer(void** pbuff, size_t old_size, size_t new_size, bool vertices)
+@@ -5460,7 +5587,49 @@ __forceinline void GSState::HandleAutoFlush()
  	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
  	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
  	int tex_layer = 0;
@@ -4088,11 +4768,51 @@ index 88fdbb3..6b19de0 100644
  	{
  		int  n = 1;
  		u32 buff[3];
+@@ -5867,7 +6036,7 @@ __forceinline void GSState::VertexKick(u32 skip)
+ 	u32 next = vtx_buff.next;
+ 	u32 xy_tail = vtx_buff.xy_tail;
+ 
+-	if (GSIsHardwareRenderer() && GSLocalMemory::m_psm[m_context->ZBUF.PSM].bpp == 32)
++	if (GSConfig.UserHacks_Limit24BitDepth != GSLimit24BitDepth::Disabled && GSIsHardwareRenderer() && GSLocalMemory::m_psm[m_context->ZBUF.PSM].bpp == 32)
+ 	{
+ 		if (GSConfig.UserHacks_Limit24BitDepth == GSLimit24BitDepth::PrioritizeUpper)
+ 			m_v.XYZ.Z = ((m_v.XYZ.Z >> 8) & ~0xFF) | (m_v.XYZ.Z & 0xFF);
+@@ -6090,11 +6259,8 @@ __forceinline void GSState::VertexKick(u32 skip)
+ 
+ 	// Update rectangle for the current draw. Needs exclusive endpoints.
+ 	const GSVector4i draw_rect = bbox.sra32<4>() + GSVector4i(0, 0, 1, 1);
+-	if (idx_buff.tail != n)
+-		temp_draw_rect = temp_draw_rect.runion(draw_rect);
+-	else
+-		temp_draw_rect = draw_rect;
+-	temp_draw_rect = temp_draw_rect.rintersect(m_context->scissor.in);
++	const GSVector4i new_draw_rect = (idx_buff.tail != n) ? temp_draw_rect.runion(draw_rect) : draw_rect;
++	temp_draw_rect = new_draw_rect.rintersect(m_context->scissor.in); // one store (the pointer read cannot be told apart from it)
+ 
+ 	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
+ 	if (max_vertices != 0 && vtx_buff.tail >= max_vertices)
 diff --git a/pcsx2/GS/GSState.h b/pcsx2/GS/GSState.h
-index 3e0b354..2425430 100644
+index 3e0b354..2cfa206 100644
 --- a/pcsx2/GS/GSState.h
 +++ b/pcsx2/GS/GSState.h
-@@ -299,6 +299,18 @@ public:
+@@ -52,12 +52,15 @@ private:
+ 
+ 	typedef void (GSState::*GIFPackedRegHandlerC)(const GIFPackedReg* RESTRICT r, u32 size);
+ 
+-	GIFPackedRegHandlerC m_fpGIFPackedRegHandlersC[2] = {};
++	GIFPackedRegHandlerC m_fpGIFPackedRegHandlersC[3] = {};
+ 	GIFPackedRegHandlerC m_fpGIFPackedRegHandlerSTQRGBAXYZF2[8] = {};
+ 	GIFPackedRegHandlerC m_fpGIFPackedRegHandlerSTQRGBAXYZ2[8] = {};
++	GIFPackedRegHandlerC m_fpGIFPackedRegHandlerUVXYZ2[8] = {};
++	GIFPackedRegHandler m_ps5_uvxyz2_xyz = nullptr; // the XYZ2 handler m_fpGIFPackedRegHandlersC[GIF_REG_UVXYZ2] calls
+ 
+ 	template<u32 prim, bool auto_flush> void GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u32 size);
+ 	template<u32 prim, bool auto_flush> void GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32 size);
++	template<u32 prim, bool auto_flush> void GIFPackedRegHandlerUVXYZ2(const GIFPackedReg* RESTRICT r, u32 size);
+ 	void GIFPackedRegHandlerNOP(const GIFPackedReg* RESTRICT r, u32 size);
+ 
+ 	template<int i> void ApplyTEX0(GIFRegTEX0& TEX0);
+@@ -299,6 +302,18 @@ public:
  	bool m_nativeres = false;
  	bool m_mipmap = false;
  	bool m_texflush_flag = false;
@@ -4112,10 +4832,10 @@ index 3e0b354..2425430 100644
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
 diff --git a/pcsx2/GS/GSUtil.cpp b/pcsx2/GS/GSUtil.cpp
-index c217846..544f2f8 100644
+index c217846..c39e4e3 100644
 --- a/pcsx2/GS/GSUtil.cpp
 +++ b/pcsx2/GS/GSUtil.cpp
-@@ -194,6 +194,13 @@ const char* GSUtil::GetPerfMonCounterName(GSPerfMon::counter_t counter, bool hw)
+@@ -194,6 +194,17 @@ const char* GSUtil::GetPerfMonCounterName(GSPerfMon::counter_t counter, bool hw)
  			"TextureCopiesROV",
  			"DrawCallsROV",
  			"BarriersROV",
@@ -4125,7 +4845,11 @@ index c217846..544f2f8 100644
 +			"RTCopies",
 +			"BarriersSkipped",
 +			"RTCopiesReused",
-+			"ROVPassesKept"
++			"ROVPassesKept",
++			"TextureUploadKB",
++			"PaletteUploads",
++			"SourcesCreated",
++			"Submissions"
  		};
  		static_assert(std::size(names_hw) == static_cast<std::size_t>(GSPerfMon::CounterLastHW));
  		return counter < std::size(names_hw) ? names_hw[counter] : "";
@@ -5074,7 +5798,7 @@ index 6f9c805..aa0b906 100644
  
  	void AgePool();
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
-index 35ab6fc..8913f37 100644
+index 35ab6fc..e1f63f9 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 @@ -14,6 +14,12 @@
@@ -5098,7 +5822,7 @@ index 35ab6fc..8913f37 100644
  #include <array>
  #include <deque>
  #include <thread>
-@@ -38,6 +45,21 @@ static constexpr std::array<PresentShader, 8> s_tv_shader_indices = {
+@@ -38,6 +45,22 @@ static constexpr std::array<PresentShader, 8> s_tv_shader_indices = {
  	PresentShader::COMPLEX_FILTER, PresentShader::LOTTES_FILTER,
  	PresentShader::SUPERSAMPLE_4xRGSS, PresentShader::SUPERSAMPLE_AUTO};
  
@@ -5112,15 +5836,16 @@ index 35ab6fc..8913f37 100644
 +{
 +	if (s_ps5_aa_tick++ % 30 != 0)
 +		return;
-+	s_ps5_downsample = Host::GetBaseIntSettingValue("PS5", "Downsample", 0);
-+	s_ps5_smaa = Host::GetBaseBoolSettingValue("PS5", "SMAA", false);
++	// (Through the game's settings: a game can have its own anti-aliasing.)
++	s_ps5_downsample = Host::GetIntSettingValue("PS5", "Downsample", 0);
++	s_ps5_smaa = Host::GetBoolSettingValue("PS5", "SMAA", false);
 +}
 +#endif
 +
  static std::deque<std::thread> s_screenshot_threads;
  static std::mutex s_screenshot_threads_mutex;
  
-@@ -59,7 +81,148 @@ GSRenderer::GSRenderer()
+@@ -59,7 +82,148 @@ GSRenderer::GSRenderer()
  	s_last_draw_rect = GSVector4::zero();
  }
  
@@ -5269,7 +5994,7 @@ index 35ab6fc..8913f37 100644
  
  void GSRenderer::Reset(bool hardware_reset)
  {
-@@ -81,6 +244,26 @@ void GSRenderer::UpdateRenderFixes()
+@@ -81,6 +245,26 @@ void GSRenderer::UpdateRenderFixes()
  
  bool GSRenderer::Merge(int field)
  {
@@ -5296,7 +6021,7 @@ index 35ab6fc..8913f37 100644
  	GSVector2i fs(0, 0);
  	GSTexture* tex[3] = { nullptr, nullptr, nullptr };
  	float tex_scale[3] = { 0.0f, 0.0f, 0.0f };
-@@ -444,7 +627,13 @@ static GSVector4i CalculateDrawSrcRect(const GSTexture* src, const GSVector2i re
+@@ -444,7 +628,13 @@ static GSVector4i CalculateDrawSrcRect(const GSTexture* src, const GSVector2i re
  {
  	const GSVector2i size(src->GetSize());
  	const GSVector2 scale = GSVector2(size.x, size.y) / GSVector2(real_size.x, real_size.y).max(GSVector2(0.1f, 0.1f));
@@ -5310,7 +6035,7 @@ index 35ab6fc..8913f37 100644
  	const int left = static_cast<int>(static_cast<float>(GSConfig.Crop[0] * scale.x) * upscale);
  	const int top = static_cast<int>(static_cast<float>(GSConfig.Crop[1] * scale.y) * upscale);
  	const int right =  size.x - static_cast<int>(static_cast<float>(GSConfig.Crop[2] * scale.x) * upscale);
-@@ -604,7 +793,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -604,7 +794,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  	const bool fb_sprite_frame = (fb_sprite_blits > 0);
  
  	bool skip_frame = false;
@@ -5325,7 +6050,7 @@ index 35ab6fc..8913f37 100644
  	{
  		bool is_unique_frame;
  		switch (PerformanceMetrics::GetInternalFPSMethod())
-@@ -633,6 +828,10 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -633,6 +829,10 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  
  	const bool blank_frame = !Merge(field);
  
@@ -5336,7 +6061,7 @@ index 35ab6fc..8913f37 100644
  	m_last_draw_n = s_n;
  	m_last_transfer_n = s_transfer_n;
  	m_background_blurred = false;
-@@ -659,6 +858,9 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -659,6 +859,9 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  		GSVector4i src_rect;
  		GSVector4 src_uv, draw_rect;
  		GSTexture* current = g_gs_device->GetCurrent();
@@ -5346,7 +6071,7 @@ index 35ab6fc..8913f37 100644
  		if (current && !blank_frame)
  		{
  			src_rect = CalculateDrawSrcRect(current, m_real_size);
-@@ -668,18 +870,55 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -668,18 +871,55 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  				GetVideoMode() == GSVideoMode::SDTV_480P);
  			s_last_draw_rect = draw_rect;
  
@@ -5405,7 +6130,7 @@ index 35ab6fc..8913f37 100644
  				}
  				else if (!cas_log_once)
  				{
-@@ -689,8 +928,123 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -689,8 +929,123 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  					cas_log_once = true;
  				}
  			}
@@ -5529,7 +6254,7 @@ index 35ab6fc..8913f37 100644
  		if (BeginPresentFrame(false))
  		{
  			if (current && !blank_frame)
-@@ -709,8 +1063,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -709,8 +1064,13 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();
  			PerformanceMetrics::OnGPUPresent(gpu_time, gpu_stats.vs_invocations, gpu_stats.ps_invocations);
  		}
@@ -5543,7 +6268,7 @@ index 35ab6fc..8913f37 100644
  	}
  
  	// snapshot
-@@ -774,6 +1133,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -774,6 +1134,15 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  					(m_dump_frames == 1) ? TRANSLATE_SV("GS", "single frame") : TRANSLATE_SV("GS", "multi-frame"), compression_str,
  					Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -5559,7 +6284,7 @@ index 35ab6fc..8913f37 100644
  		}
  
  		const bool internal_resolution = (GSConfig.ScreenshotSize >= GSScreenshotSize::InternalResolution);
-@@ -804,7 +1172,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
+@@ -804,7 +1173,18 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
  			Host::AddKeyedOSDMessage("GSDump",
  				fmt::format(TRANSLATE_FS("GS", "Saved GS dump to '{}'."), Path::GetFileName(m_dump->GetPath())),
  				Host::OSD_INFO_DURATION);
@@ -5578,7 +6303,7 @@ index 35ab6fc..8913f37 100644
  		}
  		else if (!last)
  		{
-@@ -960,6 +1339,15 @@ std::string GSGetBaseVideoFilename()
+@@ -960,6 +1340,15 @@ std::string GSGetBaseVideoFilename()
  
  void GSRenderer::StopGSDump()
  {
@@ -5594,7 +6319,7 @@ index 35ab6fc..8913f37 100644
  	m_snapshot = {};
  	m_dump_frames = 0;
  }
-@@ -1000,7 +1388,11 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1000,7 +1389,11 @@ void GSRenderer::PresentCurrentFrame()
  			GetVideoMode() == GSVideoMode::SDTV_480P);
  		s_last_draw_rect = draw_rect;
  		const bool refresh_blur = !m_background_blurred;
@@ -5606,7 +6331,7 @@ index 35ab6fc..8913f37 100644
  		m_background_blurred = blur_scale > 0.0f && g_gs_device->GaussianBlur(current, src_uv, draw_rect, blur_scale, refresh_blur);
  	}
  
-@@ -1011,9 +1403,35 @@ void GSRenderer::PresentCurrentFrame()
+@@ -1011,9 +1404,35 @@ void GSRenderer::PresentCurrentFrame()
  			const u64 current_time = Common::Timer::GetCurrentValue();
  			const float shader_time = static_cast<float>(Common::Timer::ConvertValueToSeconds(current_time - m_shader_time_start));
  
@@ -5755,7 +6480,7 @@ index 5a734ac..0ab7999 100644
  
  	void GenerateMipmapsIfNeeded();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 6161dc8..d7ae9a8 100644
+index 6161dc8..05eacaf 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -11,6 +11,9 @@
@@ -5851,17 +6576,20 @@ index 6161dc8..d7ae9a8 100644
  	if (GSConfig.LoadTextureReplacements)
  		GSTextureReplacements::ProcessAsyncLoadedTextures();
  
-@@ -7750,6 +7797,21 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
+@@ -7750,6 +7797,24 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
  	}
  }
  
 +#ifdef __PROSPERO__
 +// PS5: draws in the ordered view that needed it and that only continued it; read and reset by each
-+// test window (ps5_host.cpp).
++// test window (ps5_host.cpp). They are counted from the first window on: outside a test run the
++// split is never read, and working it out is a scan of the draw's primitives (below).
 +static u64 s_ps5_rov_needed = 0, s_ps5_rov_continued = 0;
++static bool s_ps5_rov_counting = false;
 +
 +std::string GSRendererHW::PS5TakeROVWindow(u32 frames)
 +{
++	s_ps5_rov_counting = true;
 +	const double f = frames ? static_cast<double>(frames) : 1.0;
 +	std::string line = fmt::format("ordered view: {:.0f} draws a frame needed it, {:.0f} continued it without needing it",
 +		s_ps5_rov_needed / f, s_ps5_rov_continued / f);
@@ -5873,7 +6601,24 @@ index 6161dc8..d7ae9a8 100644
  void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
  {
  	const GSDevice::FeatureSupport& features = g_gs_device->Features();
-@@ -7826,6 +7888,19 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+@@ -7806,7 +7871,16 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+ 
+ 	// Get the number of barriers that would be used with the current config.
+ 	u32 barriers = 1; 
++#ifdef __PROSPERO__
++	// PS5: the count decides only whether the ordered view is switched on or off for this draw
++	// (activate, below: never while the wanted use equals the current one) and, in a test run, the
++	// needed/continued split. For every other draw it changes nothing, and finding it is a walk over
++	// the draw's primitives up to the second overlap (GetPrimitiveOverlapDrawlistImpl).
++	const bool ps5_rov_change = use_rov_color != color_is_rov || use_rov_depth != depth_is_rov;
++	if (full_barrier && (ps5_rov_change || (s_ps5_rov_counting && (color_is_rov || depth_is_rov))))
++#else
+ 	if (full_barrier)
++#endif
+ 	{
+ 		if (m_drawlist.size() > 0)
+ 		{
+@@ -7826,6 +7900,22 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
  	// Heuristic: only activate ROV if we save at least one draw call by doing so.
  	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
  
@@ -5883,7 +6628,10 @@ index 6161dc8..d7ae9a8 100644
 +	// game this was measured with, every draw in the view needed it.
 +	{
 +		const bool wanted = ((color_write && barriers_color) || (depth_write && barriers_depth)) && barriers >= 2;
-+		if (color_is_rov || depth_is_rov)
++		if (!s_ps5_rov_counting)
++		{
++		}
++		else if (color_is_rov || depth_is_rov)
 +			(wanted ? s_ps5_rov_needed : s_ps5_rov_continued)++;
 +		else if (activate)
 +			s_ps5_rov_needed++;
@@ -5893,7 +6641,7 @@ index 6161dc8..d7ae9a8 100644
  	if (!color_is_rov && !depth_is_rov && !activate)
  	{
  		// Not enough barriers or no feedback to activate, and ROV is not already active.
-@@ -8804,6 +8879,38 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8804,6 +8894,38 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  
  	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
  		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
@@ -5932,7 +6680,7 @@ index 6161dc8..d7ae9a8 100644
  	const bool clear = src_target->m_texture->IsRenderTarget();
  	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
  	if (!src_copy) [[unlikely]]
-@@ -8814,6 +8921,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8814,6 +8936,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  		return;
  	}
  
@@ -5941,7 +6689,7 @@ index 6161dc8..d7ae9a8 100644
  	if (m_downscale_source)
  	{
  		// Can't use box filtering on depth (yet), or fractional scales.
-@@ -8855,6 +8964,19 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8855,6 +8979,19 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  
  		g_gs_device->StretchRectAuto(src_target->m_texture, src_rect, src_copy.get(), dst_rect, Nearest);
  	}
@@ -5961,7 +6709,7 @@ index 6161dc8..d7ae9a8 100644
  	m_conf.tex = src_copy.get();
  }
  
-@@ -11273,6 +11395,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
+@@ -11273,6 +11410,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
  			const GSVector4i copy_rect = config.drawarea.rintersect(src->GetRect());
  			g_gs_device->CopyRect(src, copy, copy_rect - copy_rect.xyxy(), copy_rect.x, copy_rect.y);
  			config.tex = copy;
@@ -6038,7 +6786,7 @@ index 6adcc67..5ac11a5 100644
  	std::vector<GSVertexSW> m_sw_vertex_buffer;
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index b9b6870..bf761bf 100644
+index b9b6870..d362baa 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 @@ -17,6 +17,7 @@
@@ -6105,7 +6853,30 @@ index b9b6870..bf761bf 100644
  void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target)
  {
  	const u32 bp = off.bp();
-@@ -4948,6 +4998,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4848,6 +4898,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+ 		for (int pgs = 0; pgs < pages; pgs++)
+ 		{
+ 			auto& list = m_src.m_map[((bp >> 5) + pgs) & 0x1ff];
++#ifdef __PROSPERO__
++			// PS5: most pages hold no source. The count is in the list itself (one array of 512);
++			// begin() reads the list's own buffer, a line of its own for every page asked.
++			if (!list.empty())
++#endif
+ 			for (auto i = list.begin(); i != list.end();)
+ 			{
+ 				Source* s = *i;
+@@ -4888,6 +4943,10 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+ 
+ 	off.loopPages(rect, [this, &rect, bp, bw, psm, &found](u32 page) {
+ 		auto& list = m_src.m_map[page];
++#ifdef __PROSPERO__
++		if (list.empty()) // PS5: as above
++			return;
++#endif
+ 		for (auto i = list.begin(); i != list.end();)
+ 		{
+ 			Source* s = *i;
+@@ -4948,6 +5007,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  		}
  	});
  
@@ -6117,7 +6888,15 @@ index b9b6870..bf761bf 100644
  	if (!target)
  		return;
  
-@@ -7826,14 +7881,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
+@@ -6223,6 +6287,7 @@ void GSTextureCache::IncAge()
+ //Fixme: Several issues in here. Not handling depth stencil, pitch conversion doesnt work.
+ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA, const GIFRegCLAMP& CLAMP, Target* dst, int x_offset, int y_offset, const GSVector2i* lod, const GSVector4i* src_range, GSTexture* gpu_clut, SourceRegion region, bool force_temp)
+ {
++	g_perfmon.Put(GSPerfMon::SourcesCreated, 1);
+ 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[TEX0.PSM];
+ 	Source* src = new Source(TEX0, TEXA);
+ 
+@@ -7826,14 +7891,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
  	if (m_target) // Yeah keep dreaming
  		return;
  
@@ -6153,7 +6932,7 @@ index b9b6870..bf761bf 100644
  	Update(rect, layer);
  
  	m_TEX0 = old_TEX0;
-@@ -8567,6 +8643,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8567,6 +8653,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  	}
  
  	m_surfaces.clear();
@@ -6163,7 +6942,7 @@ index b9b6870..bf761bf 100644
  
  	for (FastList<Source*>& item : m_map)
  	{
-@@ -8577,6 +8656,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8577,6 +8666,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  void GSTextureCache::SourceMap::RemoveAt(Source* s, bool delete_source)
  {
  	m_surfaces.erase(s);
@@ -6173,6 +6952,14 @@ index b9b6870..bf761bf 100644
  
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
+@@ -8941,6 +9033,7 @@ void GSTextureCache::Palette::InitializeTexture()
+ {
+ 	if (!m_tex_palette)
+ 	{
++		g_perfmon.Put(GSPerfMon::PaletteUploads, 1);
+ 		// A palette texture is always created with dimensions 256x1 (also in the case that m_pal is 16, thus a 16x1 texture
+ 		// would be enough to store the CLUT data) because the coordinates that the shader uses for
+ 		// sampling such texture are always normalized by 255.
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.h b/pcsx2/GS/Renderers/HW/GSTextureCache.h
 index d28b642..45bb09d 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.h
@@ -6222,7 +7009,7 @@ index d28b642..45bb09d 100644
  	struct TargetHeightElem
  	{
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
-index 77a28df..eccb4d0 100644
+index 77a28df..f216cfe 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 @@ -1,6 +1,9 @@
@@ -6235,7 +7022,7 @@ index 77a28df..eccb4d0 100644
  #include "common/AlignedMalloc.h"
  #include "common/Buffer.h"
  #include "common/Console.h"
-@@ -20,10 +23,12 @@
+@@ -20,16 +23,21 @@
  #include "GS/Renderers/HW/GSTextureReplacements.h"
  #include "VMManager.h"
  
@@ -6248,7 +7035,16 @@ index 77a28df..eccb4d0 100644
  #include <functional>
  #include <mutex>
  #include <unordered_map>
-@@ -157,8 +162,114 @@ namespace GSTextureReplacements
+ #include <unordered_set>
+ #include <tuple>
+ #include <thread>
++#ifdef __PROSPERO__
++extern "C" void ps5px_log(const char* format, ...);
++#endif
+ 
+ // this is a #define instead of a variable to avoid warnings from non-literal format strings
+ #define TEXTURE_FILENAME_FORMAT_STRING "%" PRIx64 "-%08x"
+@@ -157,8 +165,114 @@ namespace GSTextureReplacements
  	static std::condition_variable s_worker_thread_cv;
  	static std::deque<std::pair<std::function<void()>, bool>> s_worker_thread_queue;
  	static bool s_worker_thread_running = false;
@@ -6363,7 +7159,24 @@ index 77a28df..eccb4d0 100644
  TextureName GSTextureReplacements::CreateTextureName(const GSTextureCache::HashCacheKey& hash, u32 miplevel)
  {
  	TextureName name;
-@@ -402,7 +513,7 @@ void GSTextureReplacements::ReloadReplacementMap()
+@@ -394,6 +508,16 @@ static void AddReplacementTexture(TextureName key, const char* filename, std::st
+ 
+ void GSTextureReplacements::ReloadReplacementMap()
+ {
++#ifdef __PROSPERO__
++	// Crux2: a precache under way is given up first (its items return at once, as at the budget). What it
++	// loaded is cleared below anyway, and the wait for it held this thread (the graphics thread, which also
++	// draws the interface) until the whole pack was read: tens of seconds to minutes from a drive or a share,
++	// after a game with a pack closed, a texture setting changed or a pack download ended.
++	{
++		std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
++		s_precache_full = true;
++	}
++#endif
+ 	SyncWorkerThread();
+ 
+ 	// clear out the caches
+@@ -402,7 +526,7 @@ void GSTextureReplacements::ReloadReplacementMap()
  		s_replacement_textures_without_clut_hash.clear();
  
  		std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
@@ -6372,7 +7185,7 @@ index 77a28df..eccb4d0 100644
  		s_pending_async_load_textures.clear();
  		s_async_loaded_textures.clear();
  	}
-@@ -412,9 +523,19 @@ void GSTextureReplacements::ReloadReplacementMap()
+@@ -412,9 +536,19 @@ void GSTextureReplacements::ReloadReplacementMap()
  		return;
  
  	const std::string texture_dir = GetGameTextureDirectory();
@@ -6392,7 +7205,7 @@ index 77a28df..eccb4d0 100644
  
  	FileSystem::FindResultsArray files;
  
-@@ -481,6 +602,10 @@ void GSTextureReplacements::ReloadReplacementMap()
+@@ -481,6 +615,10 @@ void GSTextureReplacements::ReloadReplacementMap()
  
  	if (!s_replacement_texture_filenames.empty())
  	{
@@ -6403,7 +7216,7 @@ index 77a28df..eccb4d0 100644
  		if (GSConfig.PrecacheTextureReplacements)
  			PrecacheReplacementTextures();
  
-@@ -562,6 +687,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
+@@ -562,6 +700,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
  		if (it != s_replacement_texture_cache.end())
  		{
  			// replacement is cached, can immediately upload to host GPU
@@ -6411,7 +7224,7 @@ index 77a28df..eccb4d0 100644
  			*alpha_minmax = it->second.alpha_minmax;
  			return CreateReplacementTexture(it->second, mipmap);
  		}
-@@ -586,7 +712,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
+@@ -586,7 +725,7 @@ GSTexture* GSTextureReplacements::LookupReplacementTexture(const GSTextureCache:
  
  		// insert into cache
  		std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
@@ -6420,7 +7233,7 @@ index 77a28df..eccb4d0 100644
  
  		// and upload to gpu
  		*alpha_minmax = rtex.alpha_minmax;
-@@ -751,6 +877,17 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+@@ -751,6 +890,17 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
  
  	s_pending_async_load_textures.emplace(name, cache_only);
  	QueueWorkerThreadItem([name, filename, mipmap]() {
@@ -6438,7 +7251,7 @@ index 77a28df..eccb4d0 100644
  		// actually load the file, this is what will take the time
  		std::optional<ReplacementTexture> replacement(LoadReplacementTexture(filename, !mipmap));
  
-@@ -770,7 +907,21 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+@@ -770,7 +920,21 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
  		// insert into the cache and queue for later injection
  		if (replacement.has_value())
  		{
@@ -6461,7 +7274,7 @@ index 77a28df..eccb4d0 100644
  			s_async_loaded_textures.emplace_back(name, mipmap);
  		}
  		else
-@@ -784,6 +935,7 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
+@@ -784,6 +948,7 @@ void GSTextureReplacements::QueueAsyncReplacementTextureLoad(const TextureName&
  void GSTextureReplacements::PrecacheReplacementTextures()
  {
  	std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
@@ -6469,7 +7282,7 @@ index 77a28df..eccb4d0 100644
  
  	// predict whether the requests will come with mipmaps
  	// TODO: This will be wrong for hw mipmap games like Jak.
-@@ -806,7 +958,7 @@ void GSTextureReplacements::ClearReplacementTextures()
+@@ -806,7 +971,7 @@ void GSTextureReplacements::ClearReplacementTextures()
  	s_replacement_textures_without_clut_hash.clear();
  
  	std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
@@ -6478,7 +7291,7 @@ index 77a28df..eccb4d0 100644
  	s_pending_async_load_textures.clear();
  	s_async_loaded_textures.clear();
  }
-@@ -878,8 +1030,12 @@ void GSTextureReplacements::ProcessAsyncLoadedTextures()
+@@ -878,8 +1043,12 @@ void GSTextureReplacements::ProcessAsyncLoadedTextures()
  		GSTexture* tex = CreateReplacementTexture(it->second, mipmap);
  		if (tex)
  			g_texture_cache->InjectHashCacheTexture(HashCacheKeyFromTextureName(name), tex, it->second.alpha_minmax);
@@ -6491,8 +7304,33 @@ index 77a28df..eccb4d0 100644
  }
  
  void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash, const GIFRegTEX0& TEX0,
+@@ -1042,6 +1211,10 @@ void GSTextureReplacements::SyncWorkerThread()
+ 		return;
+ 
+ 	// not the most efficient by far, but it only gets called on config changes, so whatever
++#ifdef __PROSPERO__
++	const auto start = std::chrono::steady_clock::now();
++	const size_t queued = s_worker_thread_queue.size();
++#endif
+ 	for (;;)
+ 	{
+ 		if (s_worker_thread_queue.empty())
+@@ -1051,6 +1224,13 @@ void GSTextureReplacements::SyncWorkerThread()
+ 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+ 		lock.lock();
+ 	}
++#ifdef __PROSPERO__
++	// Crux2: a long wait here holds the graphics thread (and the interface): said in the log.
++	const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
++	if (waited >= 100)
++		ps5px_log("texture replacements: the graphics thread waited %lld ms for the loading thread (%zu items were queued)",
++			static_cast<long long>(waited), queued);
++#endif
+ }
+ 
+ void GSTextureReplacements::CancelPendingLoadsAndDumps()
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index f9aab2a..1d90952 100644
+index f9aab2a..b174bda 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -24,10 +24,15 @@
@@ -6620,7 +7458,15 @@ index f9aab2a..1d90952 100644
  
  	const bool wants_timestamps = m_gpu_timing_enabled || resources.spin_id >= 0;
  
-@@ -2336,6 +2395,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
+@@ -1374,6 +1433,7 @@ void GSDeviceVK::WaitForCommandBufferCompletion(u32 index)
+ 
+ void GSDeviceVK::SubmitCommandBuffer(VKSwapChain* present_swap_chain)
+ {
++	g_perfmon.Put(GSPerfMon::Submissions, 1);
+ 	FrameResources& resources = m_frame_resources[m_current_frame];
+ 
+ 	// End the current command buffer.
+@@ -2336,6 +2396,10 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
  	if (!CompileCASPipelines())
  		return false;
  
@@ -6631,7 +7477,7 @@ index f9aab2a..1d90952 100644
  	if (!CompileImGuiPipeline())
  		return false;
  
-@@ -2360,6 +2423,11 @@ void GSDeviceVK::Destroy()
+@@ -2360,6 +2424,11 @@ void GSDeviceVK::Destroy()
  
  	if (m_device != VK_NULL_HANDLE)
  	{
@@ -6643,7 +7489,7 @@ index f9aab2a..1d90952 100644
  		DestroySpinResources();
  		DestroyResources();
  	}
-@@ -2540,6 +2608,11 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2540,6 +2609,11 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  		return PresentResult::FrameSkipped;
  	}
  
@@ -6655,7 +7501,7 @@ index f9aab2a..1d90952 100644
  	// End the pipeline statistics for this cmdbuffer before postprocessing.
  	FrameResources& resources = m_frame_resources[m_current_frame];
  	if (resources.pipeline_statistics_query == QueryState::Querying)
-@@ -2600,9 +2673,16 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2600,9 +2674,16 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  
  	GSVector4i render_area(0, 0, swap_chain_texture->GetWidth(), swap_chain_texture->GetHeight());
  
@@ -6674,7 +7520,7 @@ index f9aab2a..1d90952 100644
  	{
  		return GSDevice::PresentResult::FrameSkipped;
  	}
-@@ -2617,9 +2697,14 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
+@@ -2617,9 +2698,14 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
  
  void GSDeviceVK::EndPresent()
  {
@@ -6691,7 +7537,7 @@ index f9aab2a..1d90952 100644
  	m_swap_chain->GetCurrentTexture()->TransitionToLayout(GetCurrentCommandBuffer(), GSTextureVK::Layout::PresentSrc);
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
-@@ -2971,6 +3056,23 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2971,6 +3057,23 @@ bool GSDeviceVK::CheckFeatures()
  	                 m_device_features.fragmentStoresAndAtomics &&
  	                 has_rov_storage_flags &&
  	                 !m_features.framebuffer_fetch;
@@ -6715,7 +7561,7 @@ index f9aab2a..1d90952 100644
  
  	return true;
  }
-@@ -2978,6 +3080,9 @@ bool GSDeviceVK::CheckFeatures()
+@@ -2978,6 +3081,9 @@ bool GSDeviceVK::CheckFeatures()
  void GSDeviceVK::DrawPrimitive()
  {
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6725,7 +7571,7 @@ index f9aab2a..1d90952 100644
  	vkCmdDraw(GetCurrentCommandBuffer(), m_vertex.count, 1, m_vertex.start, 0);
  }
  
-@@ -2990,6 +3095,9 @@ void GSDeviceVK::DrawIndexedPrimitive(int offset, int count)
+@@ -2990,6 +3096,9 @@ void GSDeviceVK::DrawIndexedPrimitive(int offset, int count)
  {
  	pxAssert(offset + count <= (int)m_index.count);
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6735,7 +7581,7 @@ index f9aab2a..1d90952 100644
  	vkCmdDrawIndexed(GetCurrentCommandBuffer(), count, 1, m_index.start + offset, m_vertex.start, 0);
  }
  
-@@ -2998,6 +3106,9 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
+@@ -2998,6 +3107,9 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
  	pxAssert(offset + count <= (int)m_index.count);
  
  	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -6745,7 +7591,7 @@ index f9aab2a..1d90952 100644
  	if (vs_indexing)
  	{
  		SetVSPushConstants(m_vertex.start, m_index.start + offset);
-@@ -3066,6 +3177,13 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+@@ -3066,6 +3178,13 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
  		tex = GSTextureVK::Create(usage, format, width, height, levels);
  	}
  
@@ -6759,17 +7605,38 @@ index f9aab2a..1d90952 100644
  	return tex.release();
  }
  
-@@ -3114,6 +3232,9 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
+@@ -3114,6 +3233,10 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
  			ca.colorAttachment = 0;
  
  			const VkClearRect cr = {{{0, 0}, {static_cast<u32>(r.width()), static_cast<u32>(r.height())}}, 0u, 1u};
 +#ifdef __PROSPERO__
 +			PS5NoteDraw(3);
++			PS5SectionWhat(251); // (PS5Sections::WhatAttachmentClear)
 +#endif
  			vkCmdClearAttachments(GetCurrentCommandBuffer(), 1, &ca, 1, &cr);
  
  			return;
-@@ -3448,6 +3569,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
+@@ -3307,6 +3430,9 @@ void GSDeviceVK::DoMultiStretchRects(
+ 	SetUtilityTexture(rects[0].src, rects[0].filter == Biln ? m_linear_sampler : m_point_sampler);
+ 
+ 	SetPipeline(GetConvertPipeline(shader.SetMask(rects[0].wmask.wrgba)));
++#ifdef __PROSPERO__
++	PS5NoteConversion();
++#endif
+ 
+ 	if (ApplyUtilityState())
+ 		DrawIndexedPrimitive();
+@@ -3394,6 +3520,9 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
+ void GSDeviceVK::DrawStretchRect(const GSVector4& sRect, const GSVector4& dRect, const GSVector2i& ds)
+ {
+ 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
++#ifdef __PROSPERO__
++	PS5NoteConversion();
++#endif
+ 
+ 	// ia
+ 	const float inv_x = 2.0f / ds.x;
+@@ -3448,6 +3577,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
  	vkCmdBlitImage(GetCurrentCommandBuffer(), sTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
  		dTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ib,
  		filter == Biln ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
@@ -6779,17 +7646,18 @@ index f9aab2a..1d90952 100644
  }
  
  void GSDeviceVK::UpdateCLUTTexture(
-@@ -3830,6 +3954,9 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3830,6 +3962,10 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				cr.rect.extent.width  = size.x;
  				cr.rect.extent.height = size.y;
  				cr.layerCount = 1u;
 +#ifdef __PROSPERO__
 +				PS5NoteDraw(3);
++				PS5SectionWhat(251); // (PS5Sections::WhatAttachmentClear)
 +#endif
  				vkCmdClearAttachments(GetCurrentCommandBuffer(), num_clear_values, clear_values.data(), 1, &cr);
  			}
  		}
-@@ -3890,6 +4017,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3890,6 +4026,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				}
  			}
  		}
@@ -6811,7 +7679,7 @@ index f9aab2a..1d90952 100644
  	}
  
  	// Invalidate DS as RT if we're updating DS alone.
-@@ -4111,6 +4253,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4111,6 +4262,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -6821,7 +7689,7 @@ index f9aab2a..1d90952 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4863,6 +5008,9 @@ void GSDeviceVK::RenderImGui()
+@@ -4863,6 +5017,9 @@ void GSDeviceVK::RenderImGui()
  
  			if (ApplyUtilityState())
  			{
@@ -6831,7 +7699,7 @@ index f9aab2a..1d90952 100644
  				vkCmdDrawIndexed(GetCurrentCommandBuffer(), pcmd->ElemCount, 1, m_index.start + pcmd->IdxOffset,
  					vertex_offset + pcmd->VtxOffset, 0);
  			}
-@@ -4897,6 +5045,238 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4897,6 +5054,238 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -7070,7 +7938,7 @@ index f9aab2a..1d90952 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4982,6 +5362,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4982,6 +5371,19 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -7090,7 +7958,7 @@ index f9aab2a..1d90952 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -5041,6 +5434,9 @@ void GSDeviceVK::DestroyResources()
+@@ -5041,6 +5443,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -7100,7 +7968,15 @@ index f9aab2a..1d90952 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5165,7 +5561,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5155,6 +5560,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+ 	AddMacro(ss, "PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
+ 	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
+ 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
++
+ 	ss << m_tfx_source;
+ 
+ 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
+@@ -5165,7 +5571,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -7148,7 +8024,7 @@ index f9aab2a..1d90952 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5174,39 +5610,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5174,39 +5620,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -7189,7 +8065,7 @@ index f9aab2a..1d90952 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5299,6 +5714,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5299,6 +5724,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	if (p.ds_as_rt)
  		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
  			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
@@ -7198,7 +8074,7 @@ index f9aab2a..1d90952 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5316,8 +5733,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5316,8 +5743,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -7217,7 +8093,7 @@ index f9aab2a..1d90952 100644
  	return pipeline;
  }
  
-@@ -5328,6 +5755,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
+@@ -5328,6 +5765,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
  		return false;
  
  	SetPipeline(pipeline);
@@ -7233,7 +8109,7 @@ index f9aab2a..1d90952 100644
  
  	return ApplyTFXState();
  }
-@@ -5336,6 +5772,10 @@ void GSDeviceVK::InitializeState()
+@@ -5336,6 +5782,10 @@ void GSDeviceVK::InitializeState()
  {
  	m_current_framebuffer = FramebufferInfo();
  	m_current_render_pass = VK_NULL_HANDLE;
@@ -7244,7 +8120,7 @@ index f9aab2a..1d90952 100644
  
  	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
  		m_tfx_textures[i] = m_null_texture.get();
-@@ -5457,6 +5897,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
+@@ -5457,6 +5907,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
  	rp.framebuffer = fb;
  	rp.renderArea.extent.width  = swap_chain_texture->GetWidth();
  	rp.renderArea.extent.height = swap_chain_texture->GetHeight();
@@ -7254,7 +8130,7 @@ index f9aab2a..1d90952 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &rp, VK_SUBPASS_CONTENTS_INLINE);
  }
  
-@@ -5631,6 +6074,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
+@@ -5631,6 +6084,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
  
  			vkTex->CommitClear();
  
@@ -7271,7 +8147,7 @@ index f9aab2a..1d90952 100644
  			if (vkTex->GetLayout() != layout)
  			{
  				update_layout = true;
-@@ -5669,9 +6122,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
+@@ -5669,9 +6132,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
  void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  {
  	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
@@ -7290,7 +8166,7 @@ index f9aab2a..1d90952 100644
  		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
  		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
  	}
-@@ -5680,7 +6142,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
+@@ -5680,7 +6152,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  		vkTex = m_null_texture.get();
  	}
  
@@ -7303,7 +8179,7 @@ index f9aab2a..1d90952 100644
  		return;
  
  	m_utility_texture = vkTex;
-@@ -5728,6 +6194,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5728,6 +6204,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -7313,7 +8189,7 @@ index f9aab2a..1d90952 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5736,6 +6205,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5736,6 +6215,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -7323,7 +8199,7 @@ index f9aab2a..1d90952 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5748,6 +6220,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5748,6 +6230,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -7333,18 +8209,19 @@ index f9aab2a..1d90952 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5758,6 +6233,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5758,6 +6243,11 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
 +#ifdef __PROSPERO__
 +	PS5NoteDraw(3); // the load op's clear writes the attachments
 +	PS5SectionBegin(false);
++	PS5SectionWhat(250); // (PS5Sections::WhatClear)
 +#endif
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5797,6 +6276,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5797,6 +6287,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -7355,7 +8232,7 @@ index f9aab2a..1d90952 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5811,13 +6294,23 @@ void GSDeviceVK::EndRenderPass()
+@@ -5811,13 +6305,23 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -7379,7 +8256,7 @@ index f9aab2a..1d90952 100644
  
  	m_is_presenting = false;
  }
-@@ -5842,6 +6335,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
+@@ -5842,6 +6346,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
  
  void GSDeviceVK::SetPipeline(VkPipeline pipeline)
  {
@@ -7390,7 +8267,7 @@ index f9aab2a..1d90952 100644
  	if (m_current_pipeline == pipeline)
  		return;
  
-@@ -6047,6 +6544,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -6047,6 +6555,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -7403,7 +8280,7 @@ index f9aab2a..1d90952 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6112,6 +6615,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+@@ -6112,6 +6626,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
  GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -7411,7 +8288,7 @@ index f9aab2a..1d90952 100644
  
  	// How this is done:
  	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-@@ -6210,6 +6714,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6210,6 +6725,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  	}
  
  	g_perfmon.Put(GSPerfMon::Barriers, 1);
@@ -7419,7 +8296,7 @@ index f9aab2a..1d90952 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6233,7 +6738,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6233,7 +6749,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -7444,7 +8321,7 @@ index f9aab2a..1d90952 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6474,6 +6996,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6474,6 +7007,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		pipe.feedback_loop_flags = flags;
  	}
  
@@ -7510,17 +8387,18 @@ index f9aab2a..1d90952 100644
  	if (fb.rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6605,6 +7186,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6605,6 +7197,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
 +#ifdef __PROSPERO__
 +		PS5NoteDraw(3);
++		PS5SectionWhat(251); // (PS5Sections::WhatAttachmentClear)
 +#endif
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6627,6 +7211,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6627,6 +7223,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -7534,7 +8412,7 @@ index f9aab2a..1d90952 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? fb.rt : nullptr,
-@@ -6854,9 +7445,283 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6854,9 +7457,283 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -7818,7 +8696,7 @@ index f9aab2a..1d90952 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6867,7 +7732,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6867,7 +7744,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -7827,7 +8705,7 @@ index f9aab2a..1d90952 100644
  
  	if (full_barrier)
  	{
-@@ -6877,11 +7742,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6877,11 +7754,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -7848,7 +8726,7 @@ index f9aab2a..1d90952 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6893,8 +7767,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6893,8 +7779,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -7862,7 +8740,7 @@ index f9aab2a..1d90952 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index f849fbf..31d47db 100644
+index f849fbf..efe4dde 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -49,6 +49,8 @@ public:
@@ -7888,7 +8766,7 @@ index f849fbf..31d47db 100644
  	};
  	enum TFX_DESCRIPTOR_SET : u32
  	{
-@@ -475,6 +481,50 @@ private:
+@@ -475,6 +481,52 @@ private:
  	VkRenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
  
  	std::array<VkPipeline, NUM_CAS_PIPELINES> m_cas_pipelines = {};
@@ -7923,6 +8801,8 @@ index f849fbf..31d47db 100644
 +	void PS5SectionsRead(u32 index);
 +	void PS5SectionBegin(bool present);
 +	void PS5SectionMark(u8 kind);
++	void PS5SectionWhat(u8 what);   // what a conversion pass did (the first named): ShaderConvert + 1, or WhatClear
++	void PS5NoteConversion();       // a utility draw: named by the convert pipeline bound, when it is one
 +	void PS5SectionEnd();
 +	void PS5NoteCompression(GSTexture* tex);
 +	// Crux2: the last passes before the screen (GSDeviceVK_PS5.cpp): debanding, and HDR10 output (the
@@ -7939,7 +8819,7 @@ index f849fbf..31d47db 100644
  	VkPipeline m_imgui_pipeline = VK_NULL_HANDLE;
  
  	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
-@@ -495,6 +545,22 @@ private:
+@@ -495,6 +547,22 @@ private:
  
  	bool DoCAS(
  		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
@@ -7962,7 +8842,7 @@ index f849fbf..31d47db 100644
  
  	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
  	void ClearSamplerCache() final;
-@@ -502,6 +568,9 @@ private:
+@@ -502,6 +570,9 @@ private:
  	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
  	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
  	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
@@ -7972,7 +8852,7 @@ index f849fbf..31d47db 100644
  	VkPipeline GetTFXPipeline(const PipelineSelector& p);
  
  	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
-@@ -520,6 +589,8 @@ private:
+@@ -520,6 +591,8 @@ private:
  	bool CompileMergePipelines();
  	bool CompilePostProcessingPipelines();
  	bool CompileCASPipelines();
@@ -7981,7 +8861,7 @@ index f849fbf..31d47db 100644
  
  	bool CompileImGuiPipeline();
  	void RenderImGui();
-@@ -534,6 +605,9 @@ protected:
+@@ -534,6 +607,9 @@ protected:
  	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
  		PresentShader shader, Filter filter) override;
  public:
@@ -7991,7 +8871,7 @@ index f849fbf..31d47db 100644
  	GSDeviceVK();
  	~GSDeviceVK() override;
  
-@@ -574,6 +648,31 @@ public:
+@@ -574,6 +650,31 @@ public:
  	bool IsPresenting() const;
  
  	bool SetGPUTimingEnabled(bool enabled) override;
@@ -8023,7 +8903,7 @@ index f849fbf..31d47db 100644
  	void StartGPUTiming(u32 index);
  	void EndGPUTiming(u32 index);
  	void ReadGPUTiming(u32 index);
-@@ -651,6 +750,59 @@ public:
+@@ -651,6 +752,59 @@ public:
  	void FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_region);
  	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
  		bool one_barrier, bool full_barrier);
@@ -8083,7 +8963,7 @@ index f849fbf..31d47db 100644
  
  	//////////////////////////////////////////////////////////////////////////
  	// Vulkan State
-@@ -774,6 +926,10 @@ private:
+@@ -774,6 +928,10 @@ private:
  
  	const GSTextureVK* m_utility_texture = nullptr;
  	VkSampler m_utility_sampler = VK_NULL_HANDLE;
@@ -8096,10 +8976,10 @@ index f849fbf..31d47db 100644
  	PipelineLayout m_current_pipeline_layout = PipelineLayout::Undefined;
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 new file mode 100644
-index 0000000..9eb5372
+index 0000000..6170cb6
 --- /dev/null
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
-@@ -0,0 +1,1995 @@
+@@ -0,0 +1,2144 @@
 +// Crux2 - the console's picture tools on PCSX2's Vulkan device: AMD FSR 3's optical flow for frame
 +// generation and NVIDIA Image Scaling (ps5/frontend/ps5_compute_fx.h, compute shaders), and the
 +// look: a libretro preset run as a chain of passes (ps5/frontend/ps5_slang.h and
@@ -9018,21 +9898,40 @@ index 0000000..9eb5372
 +		AA = 5, // downsampling and SMAA (ps5_aa.glsl; marked by their passes)
 +		KINDS = 6
 +	};
++	// What a conversion pass did, for the test window's breakdown: 0 unnamed (no convert pipeline drew in
++	// it), 1 + ShaderConvert, or a clear by the pass's load op.
++	static constexpr u8 WhatClear = 250;
++	static constexpr u8 WhatAttachmentClear = 251; // vkCmdClearAttachments inside a pass
++	static constexpr u8 WhatMerge = 252;           // the two circuits merged (DoMerge)
++	static constexpr u8 WhatInterlace = 253;       // deinterlacing (DoInterlace)
++	static constexpr u8 WhatPost = 254;            // FXAA, shade boost, a present shader
++	static constexpr u32 WHATS = 256;
 +
 +	VkQueryPool pool = VK_NULL_HANDLE;
++	// Fragment shader invocations of each timed pass (a pipeline statistics query beside its timestamps):
++	// pixels shaded, for time a pixel by kind. Only while the overlay's own statistics query (one for the
++	// whole command buffer) is off: two queries of one type cannot be active at once.
++	VkQueryPool stats_pool = VK_NULL_HANDLE;
 +	struct Buffer
 +	{
 +		bool on = false; // timing was on as the buffer began
++		bool stats = false; // fragment invocations counted in this buffer
 +		bool open = false;
++		bool presented = false; // a frame was counted for this buffer (its first present pass)
 +		u32 count = 0;
 +		u32 untimed = 0;
 +		u8 kind[MAX] = {};
++		u8 what[MAX] = {};
 +	};
 +	std::array<Buffer, NUM_COMMAND_BUFFERS> buffers;
 +
 +	// The window being summed (GS thread).
 +	double ms[KINDS] = {};
 +	u64 passes[KINDS] = {};
++	double what_ms[WHATS] = {}; // conversion passes by what they did
++	u64 what_passes[WHATS] = {};
++	u64 pixels[KINDS] = {};      // fragment shader invocations by kind (buffers with `stats`)
++	double pixels_ms[KINDS] = {}; // the time of the passes those were counted in
 +	double total_ms = 0;
 +	u64 buffers_read = 0;
 +	u64 untimed = 0;
@@ -9049,6 +9948,7 @@ index 0000000..9eb5372
 +
 +	// The timestamps of one command buffer, read back (here, not on the stack: MAX * 2 * 8 bytes).
 +	std::array<u64, MAX * 2> times = {};
++	std::array<u64, MAX> invocations = {};
 +
 +	// Surface compression found for render targets, said once per size and kind.
 +	std::vector<u64> said;
@@ -9068,6 +9968,15 @@ index 0000000..9eb5372
 +		ps5px_log("graphics: the GPU's time by kind of work cannot be measured (no query pool)");
 +		s->pool = VK_NULL_HANDLE;
 +	}
++	if (s->pool != VK_NULL_HANDLE && m_gpu_pipeline_statistics_supported)
++	{
++		VkQueryPoolCreateInfo stats = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
++		stats.queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS;
++		stats.queryCount = NUM_COMMAND_BUFFERS * PS5Sections::MAX;
++		stats.pipelineStatistics = VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT;
++		if (vkCreateQueryPool(m_device, &stats, nullptr, &s->stats_pool) != VK_SUCCESS)
++			s->stats_pool = VK_NULL_HANDLE;
++	}
 +	if (m_optional_extensions.vk_ext_image_compression_control)
 +		s->get_layout2 = reinterpret_cast<PFN_vkGetImageSubresourceLayout2EXT>(
 +			vkGetDeviceProcAddr(m_device, "vkGetImageSubresourceLayout2EXT"));
@@ -9083,6 +9992,8 @@ index 0000000..9eb5372
 +		return;
 +	if (m_ps5_sections->pool != VK_NULL_HANDLE)
 +		vkDestroyQueryPool(m_device, m_ps5_sections->pool, nullptr);
++	if (m_ps5_sections->stats_pool != VK_NULL_HANDLE)
++		vkDestroyQueryPool(m_device, m_ps5_sections->stats_pool, nullptr);
 +	delete m_ps5_sections;
 +	m_ps5_sections = nullptr;
 +}
@@ -9095,12 +10006,18 @@ index 0000000..9eb5372
 +	PS5Sections::Buffer& b = s->buffers[index];
 +	b.on = m_gpu_timing_enabled;
 +	b.open = false;
++	b.presented = false;
 +	b.count = 0;
 +	b.untimed = 0;
++	b.stats = b.on && s->stats_pool != VK_NULL_HANDLE && !m_gpu_pipeline_statistics_enabled;
 +	if (b.on)
 +		vkCmdResetQueryPool(m_frame_resources[index].command_buffers[1], s->pool, index * PS5Sections::MAX * 2,
 +			PS5Sections::MAX * 2);
++	if (b.stats)
++		vkCmdResetQueryPool(m_frame_resources[index].command_buffers[1], s->stats_pool, index * PS5Sections::MAX,
++			PS5Sections::MAX);
 +}
++
 +
 +void GSDeviceVK::PS5SectionBegin(bool present)
 +{
@@ -9110,8 +10027,12 @@ index 0000000..9eb5372
 +	PS5Sections::Buffer& b = s->buffers[m_current_frame];
 +	if (!b.on)
 +		return;
-+	if (present)
++	// One frame for a buffer that presents, however many present passes it has: with HDR output the
++	// picture is presented through the interface's and the HDR10 passes too, and each counted as a frame
++	// had the GPU's time a frame shown at a third of what it was.
++	if (present && !b.presented)
 +	{
++		b.presented = true;
 +		s->frames++;
 +		s->osd_frames++;
 +	}
@@ -9124,8 +10045,49 @@ index 0000000..9eb5372
 +	}
 +	vkCmdWriteTimestamp(GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, s->pool,
 +		(m_current_frame * PS5Sections::MAX + b.count) * 2);
++	// (Begun before the pass, ended after it: outside the render pass both times, as Vulkan asks of a query
++	// that spans one.)
++	if (b.stats)
++		vkCmdBeginQuery(GetCurrentCommandBuffer(), s->stats_pool, m_current_frame * PS5Sections::MAX + b.count, 0);
 +	b.kind[b.count] = present ? PS5Sections::Present : PS5Sections::Conversion;
++	b.what[b.count] = 0;
 +	b.open = true;
++}
++
++void GSDeviceVK::PS5SectionWhat(u8 what)
++{
++	PS5Sections* s = m_ps5_sections;
++	if (!s)
++		return;
++	PS5Sections::Buffer& b = s->buffers[m_current_frame];
++	// (The first named, but a conversion drawn into a pass that began with a clear names it instead.)
++	if (b.on && b.open && (b.what[b.count] == 0 || (b.what[b.count] == PS5Sections::WhatClear && what != PS5Sections::WhatClear)))
++		b.what[b.count] = what;
++}
++
++void GSDeviceVK::PS5NoteConversion()
++{
++	PS5Sections* s = m_ps5_sections;
++	if (!s || !s->buffers[m_current_frame].on || m_current_pipeline == VK_NULL_HANDLE)
++		return;
++	// (A few dozen utility draws a frame, only while GPU timing is on: a scan of the convert pipelines.)
++	for (u32 i = 0; i < m_convert.size(); i++)
++	{
++		if (m_convert[i] == m_current_pipeline)
++		{
++			PS5SectionWhat(static_cast<u8>(static_cast<u32>(ShaderConvertSelector::Get(i).Shader()) + 1));
++			return;
++		}
++	}
++	const auto in = [this](const auto& pipelines) {
++		return std::find(std::begin(pipelines), std::end(pipelines), m_current_pipeline) != std::end(pipelines);
++	};
++	if (in(m_merge))
++		PS5SectionWhat(PS5Sections::WhatMerge);
++	else if (in(m_interlace))
++		PS5SectionWhat(PS5Sections::WhatInterlace);
++	else if (in(m_present) || m_current_pipeline == m_fxaa_pipeline || m_current_pipeline == m_shadeboost_pipeline)
++		PS5SectionWhat(PS5Sections::WhatPost);
 +}
 +
 +void GSDeviceVK::PS5SectionMark(u8 kind)
@@ -9146,6 +10108,8 @@ index 0000000..9eb5372
 +	PS5Sections::Buffer& b = s->buffers[m_current_frame];
 +	if (!b.open)
 +		return;
++	if (b.stats)
++		vkCmdEndQuery(GetCurrentCommandBuffer(), s->stats_pool, m_current_frame * PS5Sections::MAX + b.count);
 +	vkCmdWriteTimestamp(GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, s->pool,
 +		(m_current_frame * PS5Sections::MAX + b.count) * 2 + 1);
 +	b.count++;
@@ -9183,14 +10147,26 @@ index 0000000..9eb5372
 +	if (vkGetQueryPoolResults(m_device, s->pool, index * PS5Sections::MAX * 2, b.count * 2, sizeof(u64) * b.count * 2, t.data(),
 +			sizeof(u64), VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
 +		return;
++	const bool stats = b.stats && vkGetQueryPoolResults(m_device, s->stats_pool, index * PS5Sections::MAX, b.count,
++		sizeof(u64) * b.count, s->invocations.data(), sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
 +	for (u32 i = 0; i < b.count; i++)
 +	{
 +		const u64 begin = t[i * 2], end = t[i * 2 + 1];
 +		if (begin == 0 || end < begin)
 +			continue;
 +		const u8 kind = b.kind[i];
++		if (stats)
++		{
++			s->pixels[kind] += s->invocations[i];
++			s->pixels_ms[kind] += static_cast<double>(end - begin) * period;
++		}
 +		s->ms[kind] += static_cast<double>(end - begin) * period;
 +		s->passes[kind]++;
++		if (kind == PS5Sections::Conversion)
++		{
++			s->what_ms[b.what[i]] += static_cast<double>(end - begin) * period;
++			s->what_passes[b.what[i]]++;
++		}
 +		s->osd_ms[kind] += static_cast<double>(end - begin) * period;
 +		s->osd_passes[kind]++;
 +	}
@@ -9260,6 +10236,59 @@ index 0000000..9eb5372
 +		part(PS5Sections::Conversion), part(PS5Sections::AA), part(PS5Sections::Present), between / frames);
 +	if (s->untimed)
 +		line += fmt::format(" ({} passes past {} in a command buffer not timed)", s->untimed, PS5Sections::MAX);
++	// Pixels shaded by kind of pass (fragment shader invocations, where counted), and the time each took a
++	// million of them. (Why passes ended is not counted: the counting in EndRenderPass, inlined into RenderHW,
++	// voided RenderHW's trained profile.)
++	{
++		static constexpr const char* names[PS5Sections::KINDS] = {"conversions", "other draws", "barriers", "ordered view", "present", "AA"};
++		std::string px;
++		for (u32 k = 0; k < PS5Sections::KINDS; k++)
++		{
++			if (s->pixels[k] == 0)
++				continue;
++			const double mpx = static_cast<double>(s->pixels[k]) / 1e6;
++			px += fmt::format("{}{} {:.1f} M ({:.2f} ms a million)", px.empty() ? "" : ", ", names[k], mpx / frames,
++				s->pixels_ms[k] / mpx);
++		}
++		if (!px.empty())
++			line += " | pixels shaded a frame: " + px;
++		for (u64& v : s->pixels)
++			v = 0;
++		for (double& v : s->pixels_ms)
++			v = 0;
++
++	}
++	// The conversion passes by what they did, the costliest first (at most five).
++	{
++		std::array<u32, PS5Sections::WHATS> order;
++		u32 n = 0;
++		for (u32 w = 0; w < PS5Sections::WHATS; w++)
++		{
++			if (s->what_passes[w] != 0)
++				order[n++] = w;
++		}
++		std::sort(order.begin(), order.begin() + n, [s](u32 a, u32 b) { return s->what_ms[a] > s->what_ms[b]; });
++		if (n != 0)
++			line += " | conversions:";
++		for (u32 i = 0; i < std::min<u32>(n, 5); i++)
++		{
++			const u32 w = order[i];
++			const std::string name = (w == PS5Sections::WhatClear) ? std::string("clear") :
++			                         (w == PS5Sections::WhatAttachmentClear) ? std::string("clear-in-pass") :
++			                         (w == PS5Sections::WhatMerge) ? std::string("merge") :
++			                         (w == PS5Sections::WhatInterlace) ? std::string("deinterlace") :
++			                         (w == PS5Sections::WhatPost) ? std::string("post") :
++			                         (w == 0) ? std::string("unnamed") :
++			                         (w - 1 < static_cast<u32>(ShaderConvert::Count)) ? std::string(ShaderConvertName(static_cast<ShaderConvert>(w - 1))) :
++			                                                                              fmt::format("#{}", w);
++			line += fmt::format("{} {} {:.2f} ms in {:.1f}", i ? "," : "", name, s->what_ms[w] / frames,
++				static_cast<double>(s->what_passes[w]) / frames);
++		}
++		for (double& v : s->what_ms)
++			v = 0;
++		for (u64& v : s->what_passes)
++			v = 0;
++	}
 +	for (double& v : s->ms)
 +		v = 0;
 +	for (u64& n : s->passes)
@@ -9661,7 +10690,7 @@ index 0000000..9eb5372
 +		f.want_hdr = Host::GetBaseBoolSettingValue("PS5", "HDR", false);
 +		f.white = static_cast<float>(PS5Hdr::WhiteOf(Host::GetBaseIntSettingValue("PS5", "HDRWhite", PS5Hdr::DEFAULT_WHITE)));
 +		f.peak = static_cast<float>(PS5Hdr::PeakOf(Host::GetBaseIntSettingValue("PS5", "HDRPeak", PS5Hdr::DEFAULT_PEAK)));
-+		f.deband = std::clamp(Host::GetBaseIntSettingValue("PS5", "Deband", 0), 0, 2);
++		f.deband = std::clamp(Host::GetIntSettingValue("PS5", "Deband", 0), 0, 2); // (a game can have its own)
 +		const int filter = PS5Hdr::FilterOf(Host::GetBaseIntSettingValue("PS5", "ColourFilter", 0));
 +		if (filter != f.filter)
 +			ps5px_log("picture: colour filter %s", PS5Hdr::FILTER_CHOICES[filter]);
@@ -10096,7 +11125,7 @@ index 0000000..9eb5372
 +	return true;
 +}
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
-index bdf5356..ab90a1a 100644
+index bdf5356..991a48f 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSTextureVK.cpp
 @@ -226,8 +226,26 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Create(Usage usage, Format format, int
@@ -10137,7 +11166,15 @@ index bdf5356..ab90a1a 100644
  
  	if (old_layout != Layout::CopyDst && old_layout != Layout::Undefined)
  		TransitionSubresourcesToLayout(cmdbuf, level, 1, Layout::CopyDst, old_layout);
-@@ -516,6 +537,31 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
+@@ -447,6 +468,7 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
+ 	const u32 width = r.width();
+ 	const u32 height = r.height();
+ 	const u32 upload_pitch = Common::AlignUpPow2(pitch, GSDeviceVK::GetInstance()->GetBufferCopyRowPitchAlignment());
++	g_perfmon.Put(GSPerfMon::TextureUploadKB, static_cast<double>(upload_pitch) * height / 1024.0);
+ 	const u32 required_size = CalcUploadSize(height, upload_pitch);
+ 
+ 	// If the texture is larger than half our streaming buffer size, use a separate buffer.
+@@ -516,6 +538,32 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
  	return true;
  }
  
@@ -10145,6 +11182,7 @@ index bdf5356..ab90a1a 100644
 +void GSTextureVK::PS5UpdateFromBuffer(VkBuffer buffer, u32 width, u32 height)
 +{
 +	g_perfmon.Put(GSPerfMon::TextureUploads, 1);
++	g_perfmon.Put(GSPerfMon::TextureUploadKB, static_cast<double>(CalcUploadPitch(width)) * height / 1024.0);
 +	const VkCommandBuffer cmdbuf = GetCommandBufferForUpdate();
 +	GL_PUSH("GSTextureVK::PS5UpdateFromBuffer(%ux%u)", width, height);
 +
@@ -10169,7 +11207,15 @@ index bdf5356..ab90a1a 100644
  bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
  {
  	if (layer >= m_mipmap_levels || IsCompressedFormat())
-@@ -688,8 +734,25 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
+@@ -567,6 +615,7 @@ void GSTextureVK::Unmap()
+ 	const u32 pitch =
+ 		Common::AlignUpPow2(CalcUploadPitch(width), GSDeviceVK::GetInstance()->GetBufferCopyRowPitchAlignment());
+ 	const u32 required_size = CalcUploadSize(height, pitch);
++	g_perfmon.Put(GSPerfMon::TextureUploadKB, required_size / 1024.0);
+ 	VKStreamBuffer& buffer = GSDeviceVK::GetInstance()->GetTextureUploadBuffer();
+ 	const u32 buffer_offset = buffer.GetCurrentOffset();
+ 	buffer.CommitMemory(required_size);
+@@ -688,8 +737,25 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
  	SetState(GSTexture::State::Dirty);
  }
  
@@ -10195,7 +11241,7 @@ index bdf5356..ab90a1a 100644
  	m_layout = new_layout;
  }
  
-@@ -706,6 +769,11 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
+@@ -706,6 +772,11 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
  	TransitionSubresourcesToLayout(command_buffer, 0, m_mipmap_levels, m_layout, new_layout);
  
  	m_layout = new_layout;
@@ -10207,7 +11253,7 @@ index bdf5356..ab90a1a 100644
  }
  
  void GSTextureVK::TransitionSubresourcesToLayout(
-@@ -758,6 +826,25 @@ void GSTextureVK::TransitionSubresourcesToLayout(
+@@ -758,6 +829,25 @@ void GSTextureVK::TransitionSubresourcesToLayout(
  	dependency.pImageMemoryBarriers = &barrier;
  
  	vkCmdPipelineBarrier2KHR(command_buffer, &dependency);
@@ -10279,6 +11325,93 @@ index 458b69e..4f4c187 100644
  
  	// Contains the fence counter when the texture was last used.
  	// When this matches the current fence counter, the texture was used this command buffer.
+diff --git a/pcsx2/GS/Renderers/Vulkan/VKBuilders.cpp b/pcsx2/GS/Renderers/Vulkan/VKBuilders.cpp
+index e412126..2485411 100644
+--- a/pcsx2/GS/Renderers/Vulkan/VKBuilders.cpp
++++ b/pcsx2/GS/Renderers/Vulkan/VKBuilders.cpp
+@@ -889,7 +889,9 @@ Vulkan::DescriptorSetUpdateBuilder::DescriptorSetUpdateBuilder()
+ 
+ void Vulkan::DescriptorSetUpdateBuilder::Clear()
+ {
+-	m_writes = {};
++	// Only the first m_num_writes entries are ever read (vkUpdateDescriptorSets and
++	// vkCmdPushDescriptorSetKHR take the count), and each Add*() zeroes the entry it fills,
++	// so the whole array (1 KiB) is not zeroed here: that ran twice for every draw.
+ 	m_num_writes = 0;
+ }
+ 
+@@ -925,6 +927,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddImageDescriptorWrite(VkDescriptorSet
+ 	ii.sampler = VK_NULL_HANDLE;
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -943,6 +946,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddSamplerDescriptorWrite(VkDescriptorS
+ 	ii.sampler = sampler;
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -957,6 +961,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddSamplerDescriptorWrites(
+ 	pxAssert(m_num_writes < MAX_WRITES && (m_num_image_infos + num_samplers) < MAX_IMAGE_INFOS);
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -984,6 +989,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddCombinedImageSamplerDescriptorWrite(
+ 	ii.sampler = sampler;
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -999,6 +1005,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddCombinedImageSamplerDescriptorWrites
+ 	pxAssert(m_num_writes < MAX_WRITES && (m_num_image_infos + num_views) < MAX_IMAGE_INFOS);
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -1026,6 +1033,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddBufferDescriptorWrite(
+ 	bi.range = size;
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -1043,6 +1051,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddBufferViewDescriptorWrite(
+ 	bi = view;
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -1057,6 +1066,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddInputAttachmentDescriptorWrite(
+ 	pxAssert(m_num_writes < MAX_WRITES && m_num_image_infos < MAX_IMAGE_INFOS);
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
+@@ -1076,6 +1086,7 @@ void Vulkan::DescriptorSetUpdateBuilder::AddStorageImageDescriptorWrite(
+ 	pxAssert(m_num_writes < MAX_WRITES && m_num_image_infos < MAX_IMAGE_INFOS);
+ 
+ 	VkWriteDescriptorSet& dw = m_writes[m_num_writes++];
++	dw = {};
+ 	dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+ 	dw.dstSet = set;
+ 	dw.dstBinding = binding;
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp b/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
 index e094dd9..523d6f8 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKLoader.cpp
@@ -10398,7 +11531,7 @@ index 5f8b2ba..f4dabdd 100644
  
  void dyn_shaderc::Close()
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
-index c0a6a4c..4ef24b6 100644
+index c0a6a4c..c8d2355 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.cpp
 @@ -1,6 +1,7 @@
@@ -10409,37 +11542,50 @@ index c0a6a4c..4ef24b6 100644
  #include "GS/Renderers/Vulkan/GSDeviceVK.h"
  #include "GS/Renderers/Vulkan/VKBuilders.h"
  #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
-@@ -19,6 +20,9 @@ VKStreamBuffer::VKStreamBuffer(VKStreamBuffer&& move)
+@@ -19,6 +20,10 @@ VKStreamBuffer::VKStreamBuffer(VKStreamBuffer&& move)
  	, m_allocation(move.m_allocation)
  	, m_buffer(move.m_buffer)
  	, m_host_pointer(move.m_host_pointer)
++	, m_needs_flush(move.m_needs_flush)
 +#ifdef __PROSPERO__
 +	, m_ps5_prefetch(move.m_ps5_prefetch)
 +#endif
  	, m_tracked_fences(std::move(move.m_tracked_fences))
  {
  	move.m_size = 0;
-@@ -47,6 +51,9 @@ VKStreamBuffer& VKStreamBuffer::operator=(VKStreamBuffer&& move)
+@@ -47,6 +52,10 @@ VKStreamBuffer& VKStreamBuffer::operator=(VKStreamBuffer&& move)
  	std::swap(m_current_gpu_position, move.m_current_gpu_position);
  	std::swap(m_buffer, move.m_buffer);
  	std::swap(m_host_pointer, move.m_host_pointer);
++	std::swap(m_needs_flush, move.m_needs_flush);
 +#ifdef __PROSPERO__
 +	std::swap(m_ps5_prefetch, move.m_ps5_prefetch);
 +#endif
  	std::swap(m_tracked_fences, move.m_tracked_fences);
  
  	return *this;
-@@ -84,6 +91,9 @@ bool VKStreamBuffer::Create(VkBufferUsageFlags usage, u32 size)
+@@ -84,6 +93,13 @@ bool VKStreamBuffer::Create(VkBufferUsageFlags usage, u32 size)
  	m_allocation = new_allocation;
  	m_buffer = new_buffer;
  	m_host_pointer = static_cast<u8*>(ai.pMappedData);
++
++	VkMemoryPropertyFlags mem_flags = 0;
++	vmaGetAllocationMemoryProperties(GSDeviceVK::GetInstance()->GetAllocator(), new_allocation, &mem_flags);
++	m_needs_flush = (mem_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0;
 +#ifdef __PROSPERO__
 +	m_ps5_prefetch = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) == 0;
 +#endif
  	return true;
  }
  
-@@ -186,6 +196,23 @@ void VKStreamBuffer::CommitMemory(u32 final_num_bytes)
+@@ -181,11 +197,29 @@ void VKStreamBuffer::CommitMemory(u32 final_num_bytes)
+ 	pxAssert(final_num_bytes <= m_current_space);
+ 
+ 	// For non-coherent mappings, flush the memory range
+-	vmaFlushAllocation(GSDeviceVK::GetInstance()->GetAllocator(), m_allocation, m_current_offset, final_num_bytes);
++	if (m_needs_flush)
++		vmaFlushAllocation(GSDeviceVK::GetInstance()->GetAllocator(), m_allocation, m_current_offset, final_num_bytes);
+ 
  	m_current_offset += final_num_bytes;
  	m_current_space -= final_num_bytes;
  	UpdateCurrentFencePosition();
@@ -10464,13 +11610,16 @@ index c0a6a4c..4ef24b6 100644
  
  void VKStreamBuffer::UpdateCurrentFencePosition()
 diff --git a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
-index 1e8c6eb..970cefe 100644
+index 1e8c6eb..52f51f5 100644
 --- a/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
 +++ b/pcsx2/GS/Renderers/Vulkan/VKStreamBuffer.h
-@@ -52,6 +52,11 @@ private:
+@@ -52,6 +52,14 @@ private:
  	VmaAllocation m_allocation = VK_NULL_HANDLE;
  	VkBuffer m_buffer = VK_NULL_HANDLE;
  	u8* m_host_pointer = nullptr;
++	// Whether the memory needs vmaFlushAllocation after a write (not HOST_COHERENT). VMA itself
++	// does nothing for coherent memory; this skips the call. Every RADV host-visible type is coherent.
++	bool m_needs_flush = true;
 +#ifdef __PROSPERO__
 +	// PS5: whether CommitMemory asks the processor for the lines the next write will fill
 +	// (VKStreamBuffer.cpp). Not for the vertex buffer, which is written with non-temporal stores.
@@ -11388,7 +12537,7 @@ index 7b91ed5..793699b 100644
  
  		while (!s_svg_texture_load_queue.empty())
 diff --git a/pcsx2/ImGui/ImGuiManager.cpp b/pcsx2/ImGui/ImGuiManager.cpp
-index 53abe0f..21a7919 100644
+index 53abe0f..28dd7c3 100644
 --- a/pcsx2/ImGui/ImGuiManager.cpp
 +++ b/pcsx2/ImGui/ImGuiManager.cpp
 @@ -113,6 +113,12 @@ struct ControllerNavState
@@ -11520,7 +12669,95 @@ index 53abe0f..21a7919 100644
  	ImGuiFullscreen::SetFont(s_standard_font);
  	return true;
  }
-@@ -1228,16 +1328,25 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+@@ -901,14 +1001,47 @@ void ImGuiManager::AcquirePendingOSDMessages(Common::Timer::Value current_time)
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2: PCSX2's messages drawn as the console interface's toasts (ps5/frontend/bigpicture/bp_draw.cpp)
++// while the on-screen display has Crux2's style ([PS5] OsdStyle 0, the default; 1 is PCSX2's own).
++namespace bp
++{
++	ImVec2 osdMessageSize(const char* s);
++	void osdMessageDraw(ImDrawList* dl, float x_px, float y_px, const char* s, float shown);
++	float osdMessageSpacing();
++} // namespace bp
++
++static bool PS5Crux2MessageStyle()
++{
++	// (Looked at twice a second, as the overlay looks at it: a setting is not read every frame.)
++	static Common::Timer s_checked;
++	static bool s_crux2 = true;
++	static bool s_known = false;
++	if (!s_known || s_checked.GetTimeSeconds() >= 0.5)
++	{
++		s_checked.Reset();
++		s_known = true;
++		s_crux2 = Host::GetBaseIntSettingValue("PS5", "OsdStyle", 0) == 0;
++	}
++	return s_crux2;
++}
++#endif
++
+ void ImGuiManager::DrawOSDMessages(Common::Timer::Value current_time)
+ {
+ 	static constexpr float MOVE_DURATION = 0.5f;
++#ifdef __PROSPERO__
++	const bool ps5_crux2 = PS5Crux2MessageStyle();
++#endif
+ 
+ 	ImFont* const font = s_standard_font;
+ 	const float font_size = GetFontSizeStandard();
+ 	const float scale = s_global_scale;
++#ifdef __PROSPERO__
++	const float spacing = ps5_crux2 ? bp::osdMessageSpacing() : std::ceil(5.0f * scale);
++#else
+ 	const float spacing = std::ceil(5.0f * scale);
++#endif
+ 	const float margin = std::ceil(GSConfig.OsdMargin * scale);
+ 	const float padding = std::ceil(8.0f * scale);
+ 	const float rounding = std::ceil(5.0f * scale);
+@@ -1004,9 +1137,17 @@ void ImGuiManager::DrawOSDMessages(Common::Timer::Value current_time)
+ 		if (actual_y >= s_window_height)
+ 			break;
+ 
++#ifdef __PROSPERO__
++		const ImVec2 size = ps5_crux2 ? bp::osdMessageSize(msg.text.c_str()) : [&]() {
++			const ImVec2 text_size(
++				font->CalcTextSizeA(font_size, max_width, max_width, msg.text.c_str(), msg.text.c_str() + msg.text.length()));
++			return ImVec2(text_size.x + padding * 2.0f, text_size.y + padding * 2.0f);
++		}();
++#else
+ 		const ImVec2 text_size(
+ 			font->CalcTextSizeA(font_size, max_width, max_width, msg.text.c_str(), msg.text.c_str() + msg.text.length()));
+ 		const ImVec2 size(text_size.x + padding * 2.0f, text_size.y + padding * 2.0f);
++#endif
+ 
+ 		// For bottom positions, adjust actual_y to try to account for message height
+ 		float final_y = actual_y;
+@@ -1022,10 +1163,21 @@ void ImGuiManager::DrawOSDMessages(Common::Timer::Value current_time)
+ 		const ImVec4 text_rect(pos.x + padding, pos.y + padding, pos.x + size.x - padding, pos.y + size.y - padding);
+ 
+ 		ImDrawList* dl = ImGui::GetBackgroundDrawList();
++#ifdef __PROSPERO__
++		if (ps5_crux2)
++		{
++			bp::osdMessageDraw(dl, pos.x, pos.y, msg.text.c_str(), static_cast<float>(opacity) / 255.0f);
++		}
++		else
++		{
++#endif
+ 		dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(0x21, 0x21, 0x21, opacity), rounding);
+ 		dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(0x48, 0x48, 0x48, opacity), rounding);
+ 		dl->AddText(font, font_size, ImVec2(text_rect.x, text_rect.y), IM_COL32(0xff, 0xff, 0xff, opacity), msg.text.c_str(),
+ 			msg.text.c_str() + msg.text.length(), max_width, &text_rect);
++#ifdef __PROSPERO__
++		}
++#endif
+ 
+ 		// Stack direction depends on the position upward for bottom positions, downward for others
+ 		if (GSConfig.OsdMessagesPos == OsdOverlayPos::BottomLeft ||
+@@ -1228,16 +1380,25 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
  		ImGuiKey_GamepadL1, // L1
  		ImGuiKey_GamepadL2, // L2
  		ImGuiKey_GamepadR1, // R1
@@ -11546,7 +12783,7 @@ index 53abe0f..21a7919 100644
  	const bool is_dpad_h = (key == GenericInputBinding::DPadLeft || key == GenericInputBinding::DPadRight);
  	const bool is_dpad_v = (key == GenericInputBinding::DPadUp || key == GenericInputBinding::DPadDown);
  	if (is_dpad_h || is_dpad_v)
-@@ -1252,6 +1361,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
+@@ -1252,6 +1413,11 @@ bool ImGuiManager::ProcessGenericInputEvent(GenericInputBinding key, InputLayout
  			return false;
  	}
  
@@ -11558,7 +12795,7 @@ index 53abe0f..21a7919 100644
  	MTGS::RunOnGSThread(
  		[key = key_map[static_cast<u32>(key)], value, layout]() mutable {
  			if (s_gamepad_swap_noth_west)
-@@ -1317,6 +1431,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
+@@ -1317,6 +1483,12 @@ void ImGuiManager::ProcessGenericAxisEvent(GenericInputBinding negative_key, Gen
  	// Treat as binary like the D-pad: either fully pressed or released, with a deadzone.
  	bool* neg_active_ptr = state ? (is_x_axis ? &state->x_neg_active : &state->y_neg_active) : nullptr;
  	bool* pos_active_ptr = state ? (is_x_axis ? &state->x_pos_active : &state->y_pos_active) : nullptr;
@@ -11812,8 +13049,25 @@ index 4faad6c..d1cb291 100644
 +	return reached;
 +}
 +#endif
+diff --git a/pcsx2/IopCounters.cpp b/pcsx2/IopCounters.cpp
+index b3eb155..535f4e2 100644
+--- a/pcsx2/IopCounters.cpp
++++ b/pcsx2/IopCounters.cpp
+@@ -91,7 +91,11 @@ static void psxRcntSync(int cntidx)
+ 
+ 	if (psxRcntCanCount(cntidx) && psxCounters[cntidx].rate != PSXHBLANK)
+ 	{
+-		const u32 change = (psxRegs.cycle - psxCounters[cntidx].startCycle) / psxCounters[cntidx].rate;
++		// Crux2: the counter rates (1, 8, 16, 256) are powers of two; a shift gives the same
++		// quotient as the 64-bit division it replaces. Other rates (PSXPIXEL) still divide.
++		const u64 elapsed = psxRegs.cycle - psxCounters[cntidx].startCycle;
++		const u32 rate = psxCounters[cntidx].rate;
++		const u32 change = ((rate & (rate - 1)) == 0) ? (elapsed >> std::countr_zero(rate)) : (elapsed / rate);
+ 		if (change > 0)
+ 		{
+ 			psxCounters[cntidx].count += change;
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa0..2d551a3 100644
+index 59f5aa0..97808fc 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
 @@ -1,6 +1,9 @@
@@ -11826,7 +13080,14 @@ index 59f5aa0..2d551a3 100644
  #include "GS.h"
  #include "Gif_Unit.h"
  #include "MTGS.h"
-@@ -15,9 +18,21 @@
+@@ -11,13 +14,28 @@
+ 
+ #include "common/FPControl.h"
+ #include "common/ScopedGuard.h"
++#ifdef __PROSPERO__
++#include "common/PS5Counters.h"
++#endif
+ #include "common/StringUtil.h"
  #include "common/WrappedMemCopy.h"
  
  #include <list>
@@ -11848,7 +13109,7 @@ index 59f5aa0..2d551a3 100644
  // Uncomment this to enable profiling of the GS RingBufferCopy function.
  //#define PCSX2_GSRING_SAMPLING_STATS
  
-@@ -123,6 +138,10 @@ void MTGS::StartThread()
+@@ -123,6 +141,10 @@ void MTGS::StartThread()
  	pxAssertRel(!s_open_flag.load(), "GS thread should not be opened when starting");
  	s_sem_event.Reset();
  	s_shutdown_flag.store(false, std::memory_order_release);
@@ -11859,7 +13120,7 @@ index 59f5aa0..2d551a3 100644
  	s_thread.Start(&MTGS::ThreadEntryPoint);
  }
  
-@@ -210,6 +229,9 @@ void MTGS::ResetGS(bool hardware_reset)
+@@ -210,6 +232,9 @@ void MTGS::ResetGS(bool hardware_reset)
  		s_ReadPos = s_WritePos.load();
  		s_QueuedFrameCount = 0;
  		s_VsyncSignalListener = 0;
@@ -11869,7 +13130,7 @@ index 59f5aa0..2d551a3 100644
  	}
  
  	MTGS_LOG("MTGS: Sending Reset...");
-@@ -236,6 +258,151 @@ struct RingCmdPacket_Vsync
+@@ -236,6 +261,151 @@ struct RingCmdPacket_Vsync
  	u32 pad[3];
  };
  
@@ -12021,7 +13282,7 @@ index 59f5aa0..2d551a3 100644
  void MTGS::PostVsyncStart(bool registers_written)
  {
  	// Optimization note: Typically regset1 isn't needed.  The regs in that area are typically
-@@ -271,18 +438,48 @@ void MTGS::PostVsyncStart(bool registers_written)
+@@ -271,18 +441,48 @@ void MTGS::PostVsyncStart(bool registers_written)
  	// If those are needed back, it's better to increase the VsyncQueueSize via PCSX_vm.ini.
  	// (The Xenosaga engine is known to run into this, due to it throwing bulks of data in one frame followed by 2 empty frames.)
  
@@ -12070,7 +13331,7 @@ index 59f5aa0..2d551a3 100644
  	{
  		if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
  			GSReadLocalMemoryUnsync(mem, qwc, vif1.BITBLTBUF._u64, vif1.TRXPOS._u64, vif1.TRXREG._u64);
-@@ -322,9 +519,34 @@ void MTGS::MainLoop()
+@@ -322,9 +522,34 @@ void MTGS::MainLoop()
  
  	std::unique_lock mtvu_lock(s_mtx_RingBufferBusy2);
  
@@ -12106,7 +13367,7 @@ index 59f5aa0..2d551a3 100644
  		{
  			if (!s_sem_event.CheckForWork())
  			{
-@@ -335,7 +557,16 @@ void MTGS::MainLoop()
+@@ -335,7 +560,16 @@ void MTGS::MainLoop()
  		else
  		{
  			mtvu_lock.unlock();
@@ -12123,6 +13384,64 @@ index 59f5aa0..2d551a3 100644
  			mtvu_lock.lock();
  		}
  
+@@ -460,13 +694,31 @@ void MTGS::MainLoop()
+ 				case Command::MTVUGSPacket:
+ 				{
+ 					MTVU_LOG("MTGS - Waiting on semaXGkick!");
++#ifdef __PROSPERO__
++					// (Packets counted here, waits below: ready = packets - waited. No branch is added to this
++					// loop, whose profile-guided layout the build keeps.)
++					PS5Counters::Add(PS5Counters::gs.xgkick_ready);
++#endif
+ 					if (!vu1Thread.semaXGkick.TryWait())
+ 					{
+ 						mtvu_lock.unlock();
+ 						// Wait for MTVU to complete vu1 program
++#ifdef __PROSPERO__
++						const u64 start = PS5Counters::Ticks();
++						const int waited = vu1Thread.semaXGkick.Wait();
++						const u64 ticks = PS5Counters::Ticks() - start;
++						PS5Counters::Add(PS5Counters::gs.xgkick_waited);
++						PS5Counters::Add(PS5Counters::gs.xgkick_slept, static_cast<u32>(waited) >> 1); // 2: slept
++						PS5Counters::Add(PS5Counters::gs.xgkick_ticks, ticks);
++						PS5Counters::gs.xgkick_hist_ticks[PS5Counters::gs.xgkick_hist_count.load(std::memory_order_relaxed) & 255]
++							.store(ticks, std::memory_order_relaxed);
++						PS5Counters::Add(PS5Counters::gs.xgkick_hist_count);
++#else
+ 						vu1Thread.semaXGkick.Wait();
++#endif
+ 						mtvu_lock.lock();
+ 					}
++
+ 					Gif_Path& path = gifUnit.gifPath[GIF_PATH_1];
+ 					GS_Packet gsPack = path.GetGSPacketMTVU(); // Get vu1 program's xgkick packet(s)
+ 					if (gsPack.size)
+@@ -922,8 +1174,25 @@ void MTGS::Freeze(FreezeAction mode, MTGS::FreezeData& data)
+ 	WaitGS(false);
+ }
+ 
++#ifdef __PROSPERO__
++extern "C" int ps5px_on_cpu_thread(void) __attribute__((weak));
++extern "C" void ps5px_log(const char* format, ...);
++#endif
++
+ void MTGS::RunOnGSThread(AsyncCallType func)
+ {
++#ifdef __PROSPERO__
++	// Crux2: the graphics thread's queue has one writer, the emulation thread (its write position and
++	// packets have no lock). A second writer tears packets: the graphics thread then runs garbage or waits
++	// for good (v1.0.21's texture pack jobs and card searches did this). Said once in the boot log.
++	if (ps5px_on_cpu_thread && !ps5px_on_cpu_thread())
++	{
++		static std::atomic_flag s_said = ATOMIC_FLAG_INIT;
++		if (!s_said.test_and_set())
++			ps5px_log("graphics: work was queued for the graphics thread from a thread other than the emulation thread "
++					  "(the queue has one writer): a bug, please send this log");
++	}
++#endif
+ 	SendPointerPacket(Command::AsyncCall, 0, new AsyncCallType(std::move(func)));
+ 
+ 	// wake the gs thread in case it's sleeping
 diff --git a/pcsx2/MTGS.h b/pcsx2/MTGS.h
 index ccd9f27..e6429e2 100644
 --- a/pcsx2/MTGS.h
@@ -12141,27 +13460,38 @@ index ccd9f27..e6429e2 100644
  
  	void RunOnGSThread(AsyncCallType func);
 diff --git a/pcsx2/MTVU.cpp b/pcsx2/MTVU.cpp
-index 3f261dc..c4c82b4 100644
+index 3f261dc..17e9742 100644
 --- a/pcsx2/MTVU.cpp
 +++ b/pcsx2/MTVU.cpp
-@@ -1,6 +1,10 @@
+@@ -1,6 +1,17 @@
  // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
  // SPDX-License-Identifier: GPL-3.0+
  
 +#ifdef __PROSPERO__
 +extern "C" void ps5px_publish_thread_cpu_time(void);
++#include "common/PS5Counters.h"
++#include <cstring>
++void mVU1MicroWriteUnchanged(); // x86/microVU.cpp
++// Crux2 (Settings > PlayStation 5 > Skip Unchanged Microprograms, off): an upload of VU1 microcode equal
++// to what micro memory holds keeps the compiled programs (the EE-side writes in Memory.cpp skip the clear
++// for equal data the same way). Set by the host before a game starts.
++bool g_ps5_same_micro_skip = false;
 +#endif
 +
  #include "Common.h"
  #include "Gif_Unit.h"
  #include "MTVU.h"
-@@ -131,10 +135,20 @@ void VU_Thread::ExecuteRingBuffer()
+@@ -131,13 +142,30 @@ void VU_Thread::ExecuteRingBuffer()
  
  	for (;;)
  	{
 +#ifdef __PROSPERO__
 +		// PS5: as the graphics thread does (MTGS.cpp): a short look for more work before sleeping.
-+		semaEvent.WaitForWorkWithSpin();
++		{
++			const int waited = semaEvent.WaitForWorkWithSpin();
++			PS5Counters::Add(PS5Counters::vu.wakes);
++			PS5Counters::Add(waited == 0 ? PS5Counters::vu.wake_ready : waited == 1 ? PS5Counters::vu.wake_spun : PS5Counters::vu.wake_slept);
++		}
 +#else
  		semaEvent.WaitForWork();
 +#endif
@@ -12176,7 +13506,82 @@ index 3f261dc..c4c82b4 100644
  		while (m_ato_read_pos.load(std::memory_order_relaxed) != GetWritePos())
  		{
  			u32 tag = Read();
-@@ -435,7 +449,14 @@ bool VU_Thread::IsDone()
++#ifdef __PROSPERO__
++			PS5Counters::Add(PS5Counters::vu.commands);
++#endif
+ 			switch (tag)
+ 			{
+ 				case MTVU_VU_EXECUTE:
+@@ -152,7 +180,17 @@ void VU_Thread::ExecuteRingBuffer()
+ 					CpuVU1->SetStartPC(VU1.VI[REG_TPC].UL << 3);
+ 					CpuVU1->Execute(vu1RunCycles);
+ 					gifUnit.gifPath[GIF_PATH_1].FinishGSPacketMTVU();
++#ifdef __PROSPERO__
++					{
++						const int posted = semaXGkick.Post(); // Tell MTGS a path1 packet is complete
++						PS5Counters::Add(PS5Counters::vu.programs);
++						PS5Counters::Add(PS5Counters::vu.xgkick_posts);
++						if (posted)
++							PS5Counters::Add(posted == 2 ? PS5Counters::vu.xgkick_post_asleep : PS5Counters::vu.xgkick_post_waiting);
++					}
++#else
+ 					semaXGkick.Post(); // Tell MTGS a path1 packet is complete
++#endif
+ 					vuCycles[vuCycleIdx].store(VU1.cycle, std::memory_order_release);
+ 					vuCycleIdx = (vuCycleIdx + 1) & 3;
+ 					break;
+@@ -161,6 +199,17 @@ void VU_Thread::ExecuteRingBuffer()
+ 				{
+ 					u32 vu_micro_addr = Read();
+ 					u32 size = Read();
++#ifdef __PROSPERO__
++					PS5Counters::Add(PS5Counters::vu.micro_writes);
++					if (g_ps5_same_micro_skip && CpuVU1 == &CpuMicroVU1 &&
++						std::memcmp(&VU1.Micro[vu_micro_addr], &buffer[m_read_pos], size) == 0)
++					{
++						PS5Counters::Add(PS5Counters::vu.micro_writes_same);
++						mVU1MicroWriteUnchanged();
++						m_read_pos += size_u32(size); // the data is what micro memory holds already
++						break;
++					}
++#endif
+ 					CpuVU1->Clear(vu_micro_addr, size);
+ 					Read(&VU1.Micro[vu_micro_addr], size);
+ 					break;
+@@ -224,6 +273,9 @@ __ri void VU_Thread::WaitOnSize(s32 size)
+ 		if (readPos > m_write_pos + size + _4kb)
+ 			break; // Enough free front space
+ 		{          // Let MTVU run to free up buffer space
++#ifdef __PROSPERO__
++			PS5Counters::Add(PS5Counters::ee.waitonsize);
++#endif
+ 			KickStart();
+ 			// Locking might trigger a full flush of the ring buffer. Yield
+ 			// will be more aggressive, and only flush the minimal size.
+@@ -424,8 +476,22 @@ void VU_Thread::Get_MTVUChanges()
+ 
+ void VU_Thread::KickStart()
+ {
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::ee.vu_kicks);
++	if (semaEvent.NotifyOfWorkWoke())
++		PS5Counters::Add(PS5Counters::ee.vu_kick_woke);
++#else
+ 	semaEvent.NotifyOfWork();
++#endif
++}
++
++#ifdef __PROSPERO__
++// Crux2: the words the VU thread has still to read (the EE thread's view), for PS5Counters.
++u32 VU_Thread::PS5RingUsedWords() const
++{
++	return static_cast<u32>(m_write_pos - m_ato_read_pos.load(std::memory_order_relaxed)) & (buffer_size - 1);
+ }
++#endif
+ 
+ bool VU_Thread::IsDone()
+ {
+@@ -435,7 +501,17 @@ bool VU_Thread::IsDone()
  void VU_Thread::WaitVU()
  {
  	MTVU_LOG("MTVU - WaitVU!");
@@ -12184,13 +13589,65 @@ index 3f261dc..c4c82b4 100644
 +	// PS5: the EE looks for the VU thread to finish for 50 microseconds before it sleeps. Asleep, it
 +	// must be woken by the VU thread, and a wake-up is a system call that cost the VU thread a third of
 +	// its time in a heavy scene (the profile's KernelSemaphore::Post) while the EE had time to spare.
++	const u64 start = PS5Counters::Ticks();
 +	semaEvent.WaitForEmptyWithSpin();
++	PS5Counters::Add(PS5Counters::ee.waitvu);
++	PS5Counters::Add(PS5Counters::ee.waitvu_ticks, PS5Counters::Ticks() - start);
 +#else
  	semaEvent.WaitForEmpty();
 +#endif
  }
  
  void VU_Thread::ExecuteVU(u32 vu_addr, u32 vif_top, u32 vif_itop, u32 fbrst)
+diff --git a/pcsx2/MTVU.h b/pcsx2/MTVU.h
+index 5634601..360c3be 100644
+--- a/pcsx2/MTVU.h
++++ b/pcsx2/MTVU.h
+@@ -24,8 +24,16 @@ class VU_Thread final {
+ 	alignas(__cachelinesize) std::atomic<int> m_ato_read_pos; // Only modified by VU thread
+ 	alignas(__cachelinesize) std::atomic<int> m_ato_write_pos;    // Only modified by EE thread
+ 	alignas(__cachelinesize) int  m_read_pos; // temporary read pos (local to the VU thread)
++#ifdef __PROSPERO__
++	// Crux2: the VU thread writes m_read_pos for every word it reads and the EE thread
++	// m_write_pos for every word it writes; on one line with each other and semaEvent they
++	// moved that line between the two cores for each word. Each on a line of its own.
++	alignas(__cachelinesize) int  m_write_pos; // temporary write pos (local to the EE thread)
++	alignas(__cachelinesize) Threading::WorkSema semaEvent;
++#else
+ 	int  m_write_pos; // temporary write pos (local to the EE thread)
+ 	Threading::WorkSema semaEvent;
++#endif
+ 	std::atomic_bool m_shutdown_flag{false};
+ 
+ 	Threading::Thread m_thread;
+@@ -33,8 +41,15 @@ class VU_Thread final {
+ public:
+ 	alignas(16)  vifStruct        vif;
+ 	alignas(16)  VIFregisters     vifRegs;
++#ifdef __PROSPERO__
++	// Crux2: the graphics thread writes semaXGkick when it waits; apart from the VU thread's
++	// vifRegs and from the cycles and interrupts the VU thread writes and the EE thread reads.
++	alignas(__cachelinesize) Threading::UserspaceSemaphore semaXGkick;
++	alignas(__cachelinesize) std::atomic<unsigned int> vuCycles[4]; // Used for VU cycle stealing hack
++#else
+ 	Threading::UserspaceSemaphore semaXGkick;
+ 	std::atomic<unsigned int> vuCycles[4]; // Used for VU cycle stealing hack
++#endif
+ 	u32 vuCycleIdx;  // Used for VU cycle stealing hack
+ 	u32 vuFBRST;
+ 
+@@ -75,6 +90,11 @@ public:
+ 	// Waits till MTVU is done processing
+ 	void WaitVU();
+ 
++#ifdef __PROSPERO__
++	/// Crux2: the words still to be read in the ring (EE thread only).
++	u32 PS5RingUsedWords() const;
++#endif
++
+ 	void Get_MTVUChanges();
+ 
+ 	void ExecuteVU(u32 vu_addr, u32 vif_top, u32 vif_itop, u32 fbrst);
 diff --git a/pcsx2/PS2Float.cpp b/pcsx2/PS2Float.cpp
 new file mode 100644
 index 0000000..c7c0346
@@ -13317,10 +14774,16 @@ index 255b6ea..be7ca63 100644
 +#endif
  } // namespace Patch
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 51c34b9..25c93ff 100644
+index 51c34b9..5a72065 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
-@@ -537,6 +537,7 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
+@@ -532,11 +532,13 @@ void Pcsx2Config::RecompilerOptions::LoadSave(SettingsWrapper& wrap)
+ 	SettingsWrapBitBool(EnableVU1);
+ 	SettingsWrapBitBool(EnableFastmem);
+ 	SettingsWrapBitBool(PauseOnTLBMiss);
++	SettingsWrapBitBool(IopInlineRamStores);
+ 
+ 	SettingsWrapBitBool(vu0Overflow);
  	SettingsWrapBitBool(vu0ExtraOverflow);
  	SettingsWrapBitBool(vu0SignOverflow);
  	SettingsWrapBitBool(vu0Underflow);
@@ -13328,7 +14791,7 @@ index 51c34b9..25c93ff 100644
  	SettingsWrapBitBool(vu1Overflow);
  	SettingsWrapBitBool(vu1ExtraOverflow);
  	SettingsWrapBitBool(vu1SignOverflow);
-@@ -589,11 +590,17 @@ bool Pcsx2Config::CpuOptions::operator!=(const CpuOptions& right) const
+@@ -589,11 +591,17 @@ bool Pcsx2Config::CpuOptions::operator!=(const CpuOptions& right) const
  
  bool Pcsx2Config::CpuOptions::operator==(const CpuOptions& right) const
  {
@@ -13347,7 +14810,7 @@ index 51c34b9..25c93ff 100644
  	FPUFPCR = DEFAULT_FPU_FP_CONTROL_REGISTER;
  
  	// Rounding defaults to nearest to match old behavior.
-@@ -602,7 +609,6 @@ Pcsx2Config::CpuOptions::CpuOptions()
+@@ -602,7 +610,6 @@ Pcsx2Config::CpuOptions::CpuOptions()
  
  	VU0FPCR = DEFAULT_VU_FP_CONTROL_REGISTER;
  	VU1FPCR = DEFAULT_VU_FP_CONTROL_REGISTER;
@@ -13355,7 +14818,7 @@ index 51c34b9..25c93ff 100644
  }
  
  void Pcsx2Config::CpuOptions::ApplySanityCheck()
-@@ -632,6 +638,9 @@ void Pcsx2Config::CpuOptions::LoadSave(SettingsWrapper& wrap)
+@@ -632,6 +639,9 @@ void Pcsx2Config::CpuOptions::LoadSave(SettingsWrapper& wrap)
  	read_fpcr(VU1FPCR, "VU1");
  
  	SettingsWrapBitBool(ExtraMemory);
@@ -13365,7 +14828,7 @@ index 51c34b9..25c93ff 100644
  
  	Recompiler.LoadSave(wrap);
  }
-@@ -837,6 +846,12 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
+@@ -837,6 +847,12 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
  		OpEqu(GSDumpCompression) &&
  		OpEqu(HWDownloadMode) &&
  		OpEqu(CASMode) &&
@@ -13378,7 +14841,7 @@ index 51c34b9..25c93ff 100644
  		OpEqu(Dithering) &&
  		OpEqu(MaxAnisotropy) &&
  		OpEqu(SWExtraThreads) &&
-@@ -904,6 +919,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
+@@ -904,6 +920,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
  		OpEqu(Adapter) &&
  
  		OpEqu(HWDumpDirectory) &&
@@ -13387,7 +14850,7 @@ index 51c34b9..25c93ff 100644
  		OpEqu(SWDumpDirectory));
  }
  
-@@ -1071,7 +1088,29 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1071,7 +1089,29 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  	SettingsWrapIntEnumEx(GSDumpCompression, "GSDumpCompression");
  	SettingsWrapIntEnumEx(HWDownloadMode, "HWDownloadMode");
  	SettingsWrapIntEnumEx(CASMode, "CASMode");
@@ -13417,7 +14880,7 @@ index 51c34b9..25c93ff 100644
  	SettingsWrapBitfieldEx(Dithering, "dithering_ps2");
  	SettingsWrapBitfieldEx(MaxAnisotropy, "MaxAnisotropy");
  	SettingsWrapBitfieldEx(SWExtraThreads, "extrathreads");
-@@ -1124,6 +1163,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
+@@ -1124,6 +1164,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
  
  	SettingsWrapEntry(Adapter);
  	SettingsWrapEntry(HWDumpDirectory);
@@ -13426,7 +14889,7 @@ index 51c34b9..25c93ff 100644
  	if (!HWDumpDirectory.empty() && !Path::IsAbsolute(HWDumpDirectory))
  		HWDumpDirectory = Path::Combine(EmuFolders::DataRoot, HWDumpDirectory);
  	SettingsWrapEntry(SWDumpDirectory);
-@@ -1369,7 +1410,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
+@@ -1369,7 +1411,13 @@ void Pcsx2Config::DEV9Options::LoadSave(SettingsWrapper& wrap)
  			LoadIPHelper(Mask, maskStr);
  			LoadIPHelper(Gateway, gatewayStr);
  			LoadIPHelper(DNS1, dns1Str);
@@ -13440,6 +14903,42 @@ index 51c34b9..25c93ff 100644
  		}
  
  		SettingsWrapEntry(AutoMask);
+diff --git a/pcsx2/R5900.cpp b/pcsx2/R5900.cpp
+index 0835fc2..81a1d71 100644
+--- a/pcsx2/R5900.cpp
++++ b/pcsx2/R5900.cpp
+@@ -370,7 +370,9 @@ __fi void _cpuEventTest_Shared()
+ 	// be able to read the value before the exception handler clears it).
+ 
+ 	uint mask = intcInterrupt() | dmacInterrupt();
+-	if (cpuIntsEnabled(mask))
++	// Crux2: cpuIntsEnabled(0) is always false (no Status bit is in an empty mask); skip the
++	// Status tests when nothing is pending, as on nearly every event test.
++	if (mask != 0 && cpuIntsEnabled(mask))
+ 		cpuException(mask, cpuRegs.branch);
+ 
+ 	// ---- IOP -------------
+@@ -435,7 +437,20 @@ __fi void _cpuEventTest_Shared()
+ 	CpuVU1->ExecuteBlock();
+ 
+ 	// ---- Schedule Next Event Test --------------
++#ifdef __PROSPERO__
++	// Crux2: the same quotient, worked out again only when PSXCLK changes (PS1 mode) instead of a
++	// conversion and a division at every event test.
++	static u32 s_mutiplierClk = 0;
++	static float s_mutiplier = 0.0f;
++	if (PSXCLK != s_mutiplierClk) [[unlikely]]
++	{
++		s_mutiplierClk = PSXCLK;
++		s_mutiplier = static_cast<float>(PS2CLK) / static_cast<float>(PSXCLK);
++	}
++	const float mutiplier = s_mutiplier;
++#else
+ 	const float mutiplier = static_cast<float>(PS2CLK) / static_cast<float>(PSXCLK);
++#endif
+ 	const int nextIopEventDeta = ((psxRegs.iopNextEventCycle - psxRegs.cycle) * mutiplier);
+ 	// 8 or more cycles behind and there's an event scheduled
+ 	if (EEsCycle >= nextIopEventDeta)
 diff --git a/pcsx2/SIO/Memcard/MemoryCardFile.cpp b/pcsx2/SIO/Memcard/MemoryCardFile.cpp
 index 5cae557..9be7acd 100644
 --- a/pcsx2/SIO/Memcard/MemoryCardFile.cpp
@@ -13956,7 +15455,7 @@ index 3356134..1324012 100644
  
  	static void pad_handle_data(USBDevice* dev, USBPacket* p)
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index f6fda22..ccdca94 100644
+index f6fda22..53c987e 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
 @@ -40,8 +40,17 @@
@@ -14433,7 +15932,7 @@ index f6fda22..ccdca94 100644
  }
  
  void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
-@@ -3722,8 +3972,57 @@ void VMManager::EnsureCPUInfoInitialized()
+@@ -3722,8 +3972,61 @@ void VMManager::EnsureCPUInfoInitialized()
  	std::call_once(s_processor_list_initialized, InitializeProcessorList);
  }
  
@@ -14474,7 +15973,11 @@ index f6fda22..ccdca94 100644
 +			const bool mtvu = EmuConfig.Speedhacks.vuThread;
 +			const u64 ee = u64{1} << 0, vu = u64{1} << 2, gs = (u64{1} << 4) | (u64{1} << 5);
 +			const u64 reserved = 0x3Fu;
-+			const u64 rest = PS5ThreadLayout::kTitleMask & ~reserved;
++			// Crux2 ([PS5] DriverCoreFree, on by default): with the driver's recording thread on core 3 (6 and 7), the
++			// rest kept to 8-12, so that nothing else is scheduled on the driver's core.
++			const bool driver_core_free =
++				PS5ThreadLayout::DriverOwnCore() && Host::GetBaseBoolSettingValue("PS5", "DriverCoreFree", true);
++			const u64 rest = PS5ThreadLayout::kTitleMask & ~reserved & ~(driver_core_free ? PS5ThreadLayout::kParallelGsMask : 0);
 +			const bool restricted = PS5ThreadLayout::RestrictProcess(rest);
 +			s_vm_thread_handle.SetAffinity(ee);
 +			vu1Thread.GetThreadHandle().SetAffinity(mtvu ? vu : rest);
@@ -14482,8 +15985,8 @@ index f6fda22..ccdca94 100644
 +			s_software_renderer_processor_list.clear();
 +			for (u32 c = 6; c <= 12; c++)
 +				s_software_renderer_processor_list.push_back(c);
-+			INFO_LOG("Thread layout: EE on processor 0, VU on {}, GS on 4-5, the rest on 6-12{}", mtvu ? "2" : "6-12 (no MTVU)",
-+				restricted ? "" : " (the rest could not be kept off 0-5)");
++			INFO_LOG("Thread layout: EE on processor 0, VU on {}, GS on 4-5, the rest on {}{}", mtvu ? "2" : (driver_core_free ? "8-12 (no MTVU)" : "6-12 (no MTVU)"),
++				driver_core_free ? "8-12 (the driver's core kept free)" : "6-12", restricted ? "" : " (the rest could not be kept off 0-5)");
 +			return;
 +		}
 +	}
@@ -16242,10 +17745,20 @@ index 1dc3826..fb5ce08 100644
  extern bool IsBIOSAvailable(const std::string& full_path);
  
 diff --git a/pcsx2/vtlb.cpp b/pcsx2/vtlb.cpp
-index 51af0b4..9843612 100644
+index 51af0b4..f08ed80 100644
 --- a/pcsx2/vtlb.cpp
 +++ b/pcsx2/vtlb.cpp
-@@ -937,12 +937,18 @@ static void vtlb_CreateFastmemMapping(u32 vaddr, u32 mainmem_offset, const PageP
+@@ -35,6 +35,9 @@
+ #include <map>
+ #include <unordered_set>
+ #include <unordered_map>
++#ifdef __PROSPERO__
++#include "common/PS5Counters.h"
++#endif
+ 
+ #define FASTMEM_LOG(...)
+ //#define FASTMEM_LOG(...) Console.WriteLn(__VA_ARGS__)
+@@ -937,12 +940,18 @@ static void vtlb_CreateFastmemMapping(u32 vaddr, u32 mainmem_offset, const PageP
  		// current mapping needs to be removed
  		const bool was_coalesced = vtlb_IsHostCoalesced(page);
  
@@ -16265,7 +17778,7 @@ index 51af0b4..9843612 100644
  		for (auto it = range.first; it != range.second;)
  		{
  			auto this_it = it++;
-@@ -1088,7 +1094,9 @@ void vtlb_UpdateFastmemProtection(u32 paddr, u32 size, PageProtectionMode prot)
+@@ -1088,7 +1097,9 @@ void vtlb_UpdateFastmemProtection(u32 paddr, u32 size, PageProtectionMode prot)
  		{
  			FASTMEM_LOG("  valias %08X (size %u)", it->second, VTLB_PAGE_SIZE);
  
@@ -16276,7 +17789,24 @@ index 51af0b4..9843612 100644
  				HostSys::MemProtect(s_fastmem_area->OffsetPointer(it->second), __pagesize, prot);
  		}
  	}
-@@ -1492,7 +1500,8 @@ static __fi void mmap_ClearCpuBlock(uint offset)
+@@ -1471,6 +1482,9 @@ void mmap_MarkCountedRamPage(u32 paddr)
+ 		paddr >> __pageshift);
+ 
+ 	m_PageProtectInfo[rampage].Mode = ProtMode_Write;
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.reprotects);
++#endif
+ 	HostSys::MemProtect(&eeMem->Main[rampage << __pageshift], __pagesize, PageAccess_ReadOnly());
+ 	vtlb_UpdateFastmemProtection(rampage << __pageshift, __pagesize, PageAccess_ReadOnly());
+ }
+@@ -1488,11 +1502,15 @@ static __fi void mmap_ClearCpuBlock(uint offset)
+ 	// manual protection.  Indicates a logic error in the recompiler or protection code.
+ 	pxAssertMsg(m_PageProtectInfo[rampage].Mode != ProtMode_Manual,
+ 		"Attempted to clear a block that is already under manual protection.");
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.code_write_faults);
++#endif
+ 
  	HostSys::MemProtect(&eeMem->Main[rampage << __pageshift], __pagesize, PageAccess_ReadWrite());
  	vtlb_UpdateFastmemProtection(rampage << __pageshift, __pagesize, PageAccess_ReadWrite());
  	m_PageProtectInfo[rampage].Mode = ProtMode_Manual;
@@ -16286,7 +17816,7 @@ index 51af0b4..9843612 100644
  }
  
  PageFaultHandler::HandlerResult PageFaultHandler::HandlePageFault(void* exception_pc, void* fault_address, bool is_write)
-@@ -1507,7 +1516,8 @@ PageFaultHandler::HandlerResult PageFaultHandler::HandlePageFault(void* exceptio
+@@ -1507,7 +1525,8 @@ PageFaultHandler::HandlerResult PageFaultHandler::HandlePageFault(void* exceptio
  
  		uptr ptr = (uptr)PSM(vaddr);
  		uptr offset = (ptr - (uptr)eeMem->Main);
@@ -16296,6 +17826,16 @@ index 51af0b4..9843612 100644
  		{
  			// fprintf(stderr, "Not backpatching code write at %08X\n", vaddr);
  			mmap_ClearCpuBlock(offset);
+@@ -1516,6 +1535,9 @@ PageFaultHandler::HandlerResult PageFaultHandler::HandlePageFault(void* exceptio
+ 		else
+ 		{
+ 			// fprintf(stderr, "Trying backpatching vaddr %08X\n", vaddr);
++#ifdef __PROSPERO__
++			PS5Counters::Add(PS5Counters::mem.backpatches);
++#endif
+ 			return vtlb_BackpatchLoadStore(reinterpret_cast<uptr>(exception_pc),
+ 					   reinterpret_cast<uptr>(fault_address)) ?
+ 					   HandlerResult::ContinueExecution :
 diff --git a/pcsx2/x86/SoftFloatEmitter.h b/pcsx2/x86/SoftFloatEmitter.h
 new file mode 100644
 index 0000000..d53a1f4
@@ -17918,6 +19458,237 @@ index 02a2c07..36e9b02 100644
  
  #endif // FPU_RECOMPILE
  
+diff --git a/pcsx2/x86/iR3000A.cpp b/pcsx2/x86/iR3000A.cpp
+index d483fc0..c51aea8 100644
+--- a/pcsx2/x86/iR3000A.cpp
++++ b/pcsx2/x86/iR3000A.cpp
+@@ -40,6 +40,12 @@
+ #ifdef TRACE_BLOCKS
+ #include <zlib.h>
+ #endif
++#ifdef __PROSPERO__
++#include "common/PS5Counters.h"
++#ifdef __PROSPERO__
++extern "C" void ps5px_profile_blocks_reset(int table) __attribute__((weak));
++#endif
++#endif
+ 
+ using namespace x86Emitter;
+ 
+@@ -977,6 +983,10 @@ void recResetIOP()
+ 	xSetPtr(SysMemory::GetIOPRec());
+ 	_DynGen_Dispatchers();
+ 	recPtr = xGetPtr();
++#ifdef __PROSPERO__
++	if (ps5px_profile_blocks_reset)
++		ps5px_profile_blocks_reset(1); // the IOP's compiled blocks are thrown away (console profiler)
++#endif
+ 
+ 	iopClearRecLUT(reinterpret_cast<BASEBLOCK*>(recLutReserve.data()),
+ 		Ps2MemSize::ExposedIopRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2);
+@@ -1097,6 +1107,9 @@ static __fi u32 psxRecClearMem(u32 pc)
+ 	// if ((u8*)iopJITCompile == pblock->GetFnptr())
+ 	if (pblock->GetFnptr() == (uptr)iopJITCompile)
+ 		return 4;
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.iop_clears);
++#endif
+ 
+ 	pc = HWADDR(pc);
+ 
+@@ -1131,6 +1144,9 @@ static __fi u32 psxRecClearMem(u32 pc)
+ 		recBlocks.Remove(toRemoveFirst, (blockidx - 1));
+ 	}
+ 
++#if !defined(__PROSPERO__) || defined(PCSX2_DEVBUILD)
++	// Crux2: this walk of every IOP block only checks an invariant (it changes nothing), and
++	// release builds ran it on each clear; development builds keep it.
+ 	blockidx = 0;
+ 	while (BASEBLOCKEX* pexblock = recBlocks[blockidx++])
+ 	{
+@@ -1140,18 +1156,54 @@ static __fi u32 psxRecClearMem(u32 pc)
+ 			pxFail("[IOP] Impossible block clearing failure");
+ 		}
+ 	}
++#endif
+ 
+ 	iopClearRecLUT(PSX_GETBLOCK(lowerextent), upperextent - lowerextent);
+ 
+ 	return upperextent - pc;
+ }
+ 
++#ifdef __PROSPERO__
++static __noinline void recClearIOPRange(u32 Addr, u32 Size)
++{
++	u32 pc = Addr;
++	while (pc < Addr + Size * 4)
++		pc += PSXREC_CLEARM(pc);
++}
++
++// Crux2: every IOP store to RAM clears one word, and almost never where a block starts. For
++// that word PSXREC_CLEARM returns 4 without touching anything and the loop ends, so the test
++// is made here first; the walk stays out of line, which keeps this a leaf without the walk's
++// register saves.
++static __fi void recClearIOP(u32 Addr, u32 Size)
++{
++	if (Size == 1 && !(Addr < g_psxMaxRecMem && (psxRecLUT[Addr >> 16] + Addr) &&
++						 PSX_GETBLOCK(Addr)->GetFnptr() != (uptr)iopJITCompile))
++		return;
++
++	recClearIOPRange(Addr, Size);
++}
++
++// Crux2: the clear the inline RAM store path calls (rpsxStore, EmuCore/CPU/Recompiler IopInlineRamStores),
++// only when a block starts at the word.
++void psxRecClearStoredWord(u32 Addr)
++{
++	recClearIOP(Addr, 1);
++}
++
++// Crux2: what the inline RAM store path compares a word's BASEBLOCK with (no block starts there).
++uptr psxRecGetJITCompile()
++{
++	return (uptr)iopJITCompile;
++}
++#else
+ static __fi void recClearIOP(u32 Addr, u32 Size)
+ {
+ 	u32 pc = Addr;
+ 	while (pc < Addr + Size * 4)
+ 		pc += PSXREC_CLEARM(pc);
+ }
++#endif
+ 
+ void psxSetBranchReg()
+ {
+@@ -1619,6 +1671,9 @@ static void PreBlockCheck(u32 blockpc)
+ 
+ static void iopRecRecompile(const u32 startpc)
+ {
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.iop_recompiles);
++#endif
+ 	u32 i;
+ 	u32 link_next_block = 0;
+ 
+diff --git a/pcsx2/x86/iR3000A.h b/pcsx2/x86/iR3000A.h
+index 05765d8..87d456a 100644
+--- a/pcsx2/x86/iR3000A.h
++++ b/pcsx2/x86/iR3000A.h
+@@ -23,6 +23,9 @@ static const int psxInstCycles_Load = 0;
+ #define PSX_LO XMMGPR_LO
+ 
+ extern uptr psxRecLUT[];
++extern u32 g_psxMaxRecMem;
++extern void psxRecClearStoredWord(u32 Addr);
++extern uptr psxRecGetJITCompile();
+ 
+ void _psxFlushConstReg(int reg);
+ void _psxFlushConstRegs();
+diff --git a/pcsx2/x86/iR3000Atables.cpp b/pcsx2/x86/iR3000Atables.cpp
+index af4813e..b53f4ff 100644
+--- a/pcsx2/x86/iR3000Atables.cpp
++++ b/pcsx2/x86/iR3000Atables.cpp
+@@ -1189,20 +1189,81 @@ static void rpsxLW()
+ 	rpsxLoad(32, false);
+ }
+ 
+-static void rpsxSB()
++// Crux2: stores to IOP main RAM written inline instead of through iopMemWrite*, with the same
++// effects in the same order: the write (not made while the cache is isolated, Status bit 16,
++// where iopMemWrite* is left to decide), then the recompiler's clear of the word, called only
++// when a block starts there (the test recClearIOP makes). RAM is what psxMemWLUT[0..0x7f]
++// maps: (addr & 0x1fffffff) >> 16 < 0x80, i.e. bits 23..28 clear, at Main[addr & (ExposedIopRam - 1)].
++static void rpsxStore(int size)
+ {
+ 	rpsxCalcAddressOperand();
+ 	rpsxCalcStoreOperand();
+ 	_psxFlushCall(FLUSH_FULLVTLB);
+-	xFastCall((void*)iopMemWrite8);
++
++	void* const slow_fn = (size == 8) ? (void*)iopMemWrite8 : (size == 16) ? (void*)iopMemWrite16 : (void*)iopMemWrite32;
++	if (!EmuConfig.Cpu.Recompiler.IopInlineRamStores)
++	{
++		xFastCall(slow_fn);
++		return;
++	}
++
++	const xRegister32 word(arg3reg.GetId());
++
++	xTEST(arg1regd, 0x1f800000);
++	xForwardJNZ32 not_ram;
++	xTEST(ptr8[reinterpret_cast<u8*>(&psxRegs.CP0.n.Status) + 2], 0x01);
++	xForwardJNZ32 isolated;
++
++	xMOV(word, arg1regd);
++	xAND(word, Ps2MemSize::ExposedIopRam - 1);
++	const xAddressVoid addr = xComplexAddress(rax, iopMem->Main, arg3reg);
++	switch (size)
++	{
++		case 8:
++			xMOV(ptr8[addr], xRegister8(arg2regd));
++			break;
++		case 16:
++			xMOV(ptr16[addr], xRegister16(arg2regd));
++			break;
++		case 32:
++			xMOV(ptr32[addr], arg2regd);
++			break;
++			jNO_DEFAULT
++	}
++
++	// psxCpu->Clear((addr & 0x1fffffff) & ~3, 1); for RAM that word is addr & 0x007ffffc.
++	xMOV(word, arg1regd);
++	xAND(word, 0x007ffffc);
++	xCMP(word, ptr32[&g_psxMaxRecMem]);
++	xForwardJAE32 no_block1;
++	xMOV(eax, word);
++	xSHR(eax, 16);
++	xMOV(rax, ptr64[xComplexAddress(arg4reg, psxRecLUT, rax * 8)]); // psxRecLUT[word >> 16]
++	xMOV(rax, ptr64[arg3reg * 2 + rax]); // PSX_GETBLOCK(word)->GetFnptr()
++	xMOV64(arg4reg, psxRecGetJITCompile());
++	xCMP(rax, arg4reg);
++	xForwardJE32 no_block2;
++	xMOV(arg1regd, word);
++	xFastCall((void*)psxRecClearStoredWord);
++	xForwardJump32 done;
++
++	not_ram.SetTarget();
++	isolated.SetTarget();
++	xFastCall(slow_fn);
++
++	no_block1.SetTarget();
++	no_block2.SetTarget();
++	done.SetTarget();
++}
++
++static void rpsxSB()
++{
++	rpsxStore(8);
+ }
+ 
+ static void rpsxSH()
+ {
+-	rpsxCalcAddressOperand();
+-	rpsxCalcStoreOperand();
+-	_psxFlushCall(FLUSH_FULLVTLB);
+-	xFastCall((void*)iopMemWrite16);
++	rpsxStore(16);
+ }
+ 
+ static void rpsxSW()
+@@ -1215,10 +1276,7 @@ static void rpsxSW()
+ 		return;
+ 	}
+ 
+-	rpsxCalcAddressOperand();
+-	rpsxCalcStoreOperand();
+-	_psxFlushCall(FLUSH_FULLVTLB);
+-	xFastCall((void*)iopMemWrite32);
++	rpsxStore(32);
+ }
+ 
+ //// SLL
 diff --git a/pcsx2/x86/iR5900.h b/pcsx2/x86/iR5900.h
 index 40841bb..99f08db 100644
 --- a/pcsx2/x86/iR5900.h
@@ -17953,7 +19724,7 @@ index ea33fa9..ff4007d 100644
  			if (m_cfc2_pc != apc)
  				DevCon.WriteLn("CTC2 at %08X paired with CFC2 %08X", apc, m_cfc2_pc);
 diff --git a/pcsx2/x86/ix86-32/iR5900.cpp b/pcsx2/x86/ix86-32/iR5900.cpp
-index 026197c..8707830 100644
+index 026197c..1df715d 100644
 --- a/pcsx2/x86/ix86-32/iR5900.cpp
 +++ b/pcsx2/x86/ix86-32/iR5900.cpp
 @@ -18,6 +18,9 @@
@@ -17966,7 +19737,17 @@ index 026197c..8707830 100644
  #include "common/FastJmp.h"
  #include "common/HeapArray.h"
  #include "common/Perf.h"
-@@ -44,7 +47,6 @@ using namespace R5900;
+@@ -37,6 +40,9 @@
+ #ifdef TRACE_BLOCKS
+ #include <zlib.h>
+ #endif
++#ifdef __PROSPERO__
++#include "common/PS5Counters.h"
++#endif
+ 
+ using namespace x86Emitter;
+ using namespace R5900;
+@@ -44,7 +50,6 @@ using namespace R5900;
  static bool eeRecNeedsReset = false;
  static bool eeCpuExecuting = false;
  static bool eeRecExitRequested = false;
@@ -17974,7 +19755,33 @@ index 026197c..8707830 100644
  
  #define PC_GETBLOCK(x) PC_GETBLOCK_(x, recLUT)
  
-@@ -642,6 +644,10 @@ alignas(16) static u8 manual_counter[Ps2MemSize::TotalRam >> 12];
+@@ -638,10 +643,36 @@ static void recReserve()
+ alignas(16) static u16 manual_page[Ps2MemSize::TotalRam >> 12];
+ alignas(16) static u8 manual_counter[Ps2MemSize::TotalRam >> 12];
+ 
++#ifdef __PROSPERO__
++extern "C" void ps5px_profile_code_region(const char* name, const void* start, size_t size) __attribute__((weak));
++extern "C" void ps5px_profile_blocks_reset(int table) __attribute__((weak));
++#endif
++
++#ifdef __PROSPERO__
++// Crux2: the EE's code at a guest address for the console profiler's block dumps (read from another thread,
++// racily: only words for a log line).
++extern "C" int ps5px_profile_guest_ee_words(u32 pc, u32* out, int count)
++{
++	int n = 0;
++	for (; n < count; n++)
++	{
++		const u32* const word = reinterpret_cast<const u32*>(PSM(pc + n * 4));
++		if (!word)
++			break;
++		out[n] = *word;
++	}
++	return n;
++}
++#endif
++
+ ////////////////////////////////////////////////////
  static void recResetRaw()
  {
  	Console.WriteLn(Color_StrongBlack, "EE/iR5900 Recompiler Reset");
@@ -17985,15 +19792,36 @@ index 026197c..8707830 100644
  
  	if (CHECK_EXTRAMEM != extraRam)
  	{
-@@ -655,6 +661,7 @@ static void recResetRaw()
+@@ -655,7 +686,28 @@ static void recResetRaw()
  	xSetPtr(SysMemory::GetEERec());
  	_DynGen_Dispatchers();
  	vtlb_DynGenDispatchers();
 +	R5900::Dynarec::OpcodeImpl::COP1::GenerateSoftFloatKernels();
  	recPtr = xGetPtr();
++#ifdef __PROSPERO__
++	// Crux2: the code areas, by name, for the console profiler (ps5/frontend/ps5_profiler.cpp): a sample in
++	// generated code is put down to the smallest range that holds it (the stubs Perf registers win).
++	if (ps5px_profile_blocks_reset)
++		ps5px_profile_blocks_reset(0); // the EE's compiled blocks are thrown away
++	if (ps5px_profile_code_region)
++	{
++		using namespace HostMemoryMap;
++		const auto area = [](const char* name, u32 offset, u32 size) { ps5px_profile_code_region(name, SysMemory::GetCodePtr(offset), size); };
++		ps5px_profile_code_region("EE stubs (vtlb, softfloat)", SysMemory::GetEERec(), recPtr - SysMemory::GetEERec());
++		ps5px_profile_code_region("EE blocks", recPtr, SysMemory::GetEERecEnd() - recPtr);
++		area("IOP blocks", IOPrecOffset, IOPrecSize);
++		area("VIF0 unpack blocks", VIF0recOffset, VIF0recSize);
++		area("VIF1 unpack blocks", VIF1recOffset, VIF1recSize);
++		area("microVU0 programs", mVU0recOffset, mVU0recSize);
++		area("microVU1 programs", mVU1recOffset, mVU1recSize);
++		area("VIF unpack kernels", VIFUnpackRecOffset, VIFUnpackRecSize);
++		area("software renderer", SWrecOffset, SWrecSize);
++	}
++#endif
  
  	ClearRecLUT(recLutReserve_RAM.data(),
-@@ -674,7 +681,6 @@ static void recResetRaw()
+ 		Ps2MemSize::ExposedRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2);
+@@ -674,7 +726,6 @@ static void recResetRaw()
  	vtlb_ClearLoadStoreInfo();
  
  	g_branch = 0;
@@ -18001,7 +19829,7 @@ index 026197c..8707830 100644
  
  	memset(manual_page, 0, sizeof(manual_page));
  	memset(manual_counter, 0, sizeof(manual_counter));
-@@ -807,6 +813,10 @@ void R5900::Dynarec::OpcodeImpl::recBREAK()
+@@ -807,6 +858,10 @@ void R5900::Dynarec::OpcodeImpl::recBREAK()
  // Size is in dwords (4 bytes)
  void recClear(u32 addr, u32 size)
  {
@@ -18012,7 +19840,7 @@ index 026197c..8707830 100644
  	if ((addr) >= maxrecmem || !(recLUT[(addr) >> 16] + (addr & ~0xFFFFUL)))
  		return;
  	addr = HWADDR(addr);
-@@ -1317,11 +1327,6 @@ static u32 scaleblockcycles()
+@@ -1317,11 +1372,6 @@ static u32 scaleblockcycles()
  
  #if 0 // Enable this to get some runtime statistics about the scaling result in practice
  	static u32 scaled_overall = 0, unscaled_overall = 0;
@@ -18024,7 +19852,7 @@ index 026197c..8707830 100644
  	u32 unscaled = DEFAULT_SCALED_BLOCKS();
  	if (!unscaled) unscaled = 1;
  
-@@ -1341,11 +1346,6 @@ u32 scaleblockcycles_clear()
+@@ -1341,11 +1391,6 @@ u32 scaleblockcycles_clear()
  
  #if 0 // Enable this to get some runtime statistics about the scaling result in practice
  	static u32 scaled_overall = 0, unscaled_overall = 0;
@@ -18036,7 +19864,27 @@ index 026197c..8707830 100644
  	u32 unscaled = DEFAULT_SCALED_BLOCKS();
  	if (!unscaled) unscaled = 1;
  
-@@ -2189,6 +2189,74 @@ static bool recSkipTimeoutLoop(s32 reg, bool is_timeout_loop)
+@@ -2023,6 +2068,9 @@ static void PreBlockCheck(u32 blockpc)
+ void dyna_block_discard(u32 start, u32 sz)
+ {
+ 	eeRecPerfLog.Write(Color_StrongGray, "Clearing Manual Block @ 0x%08X  [size=%d]", start, sz * 4);
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.block_discards);
++#endif
+ 	recClear(start, sz);
+ }
+ 
+@@ -2031,6 +2079,9 @@ void dyna_block_discard(u32 start, u32 sz)
+ // and the block is re-assigned for write protection.
+ void dyna_page_reset(u32 start, u32 sz)
+ {
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.page_resets);
++#endif
+ 	recClear(start & ~0xfffUL, 0x400);
+ 	manual_counter[start >> 12]++;
+ 	mmap_MarkCountedRamPage(start);
+@@ -2189,8 +2240,79 @@ static bool recSkipTimeoutLoop(s32 reg, bool is_timeout_loop)
  	return true;
  }
  
@@ -18110,8 +19958,13 @@ index 026197c..8707830 100644
 +
  static void recRecompile(const u32 startpc)
  {
++#ifdef __PROSPERO__
++	PS5Counters::Add(PS5Counters::mem.ee_recompiles);
++#endif
  	u32 i = 0;
-@@ -2316,6 +2384,13 @@ static void recRecompile(const u32 startpc)
+ 	u32 willbranch3 = 0;
+ 
+@@ -2316,6 +2438,13 @@ static void recRecompile(const u32 startpc)
  	const int n1 = isBreakpointNeeded(i);
  	const int n2 = isMemcheckNeeded(i);
  	const int n = std::max<int>(n1, n2);
@@ -18126,10 +19979,10 @@ index 026197c..8707830 100644
  	{
  		s_nEndBlock = i + n * 4;
 diff --git a/pcsx2/x86/microVU.cpp b/pcsx2/x86/microVU.cpp
-index 0f628f7..2f72f35 100644
+index 0f628f7..c801f81 100644
 --- a/pcsx2/x86/microVU.cpp
 +++ b/pcsx2/x86/microVU.cpp
-@@ -3,9 +3,11 @@
+@@ -3,9 +3,14 @@
  
  #include "microVU.h"
  
@@ -18138,12 +19991,15 @@ index 0f628f7..2f72f35 100644
  #include "common/AlignedMalloc.h"
 -#include "common/Perf.h"
 -#include "common/StringUtil.h"
++#ifdef __PROSPERO__
++extern "C" void ps5px_profile_blocks_reset(int table) __attribute__((weak));
++#endif
 +
 +static constexpr size_t mVUsoftDivCapTailReserve = 256;
  
  //------------------------------------------------------------------
  // Micro VU - Main Functions
-@@ -24,13 +26,35 @@ void mVUinit(microVU& mVU, uint vuIndex)
+@@ -24,13 +29,35 @@ void mVUinit(microVU& mVU, uint vuIndex)
  	mVU.progMemMask  =  mVU.progSize-1;
  	mVU.cache        = vuIndex ? SysMemory::GetVU1Rec() : SysMemory::GetVU0Rec();
  	mVU.prog.x86end  = (vuIndex ? SysMemory::GetVU1RecEnd() : SysMemory::GetVU0RecEnd()) - (mVUcacheSafeZone * _1mb);
@@ -18180,7 +20036,7 @@ index 0f628f7..2f72f35 100644
  	if (THREAD_VU1)
  	{
  		DevCon.Warning("mVU Reset");
-@@ -49,7 +73,29 @@ void mVUreset(microVU& mVU, bool resetReserve)
+@@ -49,7 +76,29 @@ void mVUreset(microVU& mVU, bool resetReserve)
  	mVUGenerateWaitMTVU(mVU);
  	mVUGenerateCopyPipelineState(mVU);
  	mVUGenerateCompareState(mVU);
@@ -18211,7 +20067,83 @@ index 0f628f7..2f72f35 100644
  	mVU.regs().nextBlockCycles = 0;
  	memset(&mVU.prog.lpState, 0, sizeof(mVU.prog.lpState));
  	mVU.profiler.Reset(mVU.index);
-@@ -331,7 +377,7 @@ void recMicroVU1::Shutdown()
+@@ -64,6 +113,11 @@ void mVUreset(microVU& mVU, bool resetReserve)
+ 	// Setup Dynarec Cache Limits for Each Program
+ 	mVU.prog.x86start = xGetAlignedCallTarget();
+ 	mVU.prog.x86ptr   = mVU.prog.x86start;
++#ifdef __PROSPERO__
++	mVU.prog.quickUsedCount = 0; // every entry is nulled below
++	if (ps5px_profile_blocks_reset)
++		ps5px_profile_blocks_reset(mVU.index ? 3 : 2); // the console profiler's block table
++#endif
+ 
+ 	for (u32 i = 0; i < (mVU.progSize / 2); i++)
+ 	{
+@@ -105,14 +159,34 @@ __fi void mVUclear(mV, u32 addr, u32 size)
+ 	{
+ 		mVU.prog.cleared = 1; // Next execution searches/creates a new microprogram
+ 		std::memset(&mVU.prog.lpState, 0, sizeof(mVU.prog.lpState)); // Clear pipeline state
++#ifdef __PROSPERO__
++		// Crux2: only the entries set since the last clear; the others are null already.
++		for (u32 n = 0; n < mVU.prog.quickUsedCount; n++)
++		{
++			mVU.prog.quick[mVU.prog.quickUsed[n]].block = NULL;
++			mVU.prog.quick[mVU.prog.quickUsed[n]].prog = NULL;
++		}
++		mVU.prog.quickUsedCount = 0;
++#else
+ 		for (u32 i = 0; i < (mVU.progSize / 2); i++)
+ 		{
+ 			mVU.prog.quick[i].block = NULL; // Clear current quick-reference block
+ 			mVU.prog.quick[i].prog = NULL; // Clear current quick-reference prog
+ 		}
++#endif
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2 (PS5/SameMicroSkip): an MTVU microprogram upload equal to VU1's micro memory leaves every cached
++// program valid; what a clear would also do is reset the pipeline state (MTVU.cpp).
++void mVU1MicroWriteUnchanged()
++{
++	if (!microVU1.prog.cleared)
++		std::memset(&microVU1.prog.lpState, 0, sizeof(microVU1.prog.lpState));
++}
++#endif
++
+ //------------------------------------------------------------------
+ // Micro VU - Private Functions
+ //------------------------------------------------------------------
+@@ -257,8 +331,18 @@ _mVUt __fi void* mVUsearchProg(u32 startPC, uptr pState)
+ 			{
+ 				quick.block = it[0]->block[startPC / 8];
+ 				quick.prog  = it[0];
++#ifdef __PROSPERO__
++				mVU.prog.quickUsed[mVU.prog.quickUsedCount++] = static_cast<u16>(mVU.regs().start_pc / 8);
++				// Crux2: already at the front, the list stays as it is (the same order as erase + push_front).
++				if (it != list->begin())
++				{
++					list->erase(it);
++					list->push_front(quick.prog);
++				}
++#else
+ 				list->erase(it);
+ 				list->push_front(quick.prog);
++#endif
+ 
+ 				// Sanity check, in case for some reason the program compilation aborted half way through (JALR for example)
+ 				if (quick.block == nullptr)
+@@ -277,6 +361,9 @@ _mVUt __fi void* mVUsearchProg(u32 startPC, uptr pState)
+ 		void* entryPoint = mVUblockFetch(mVU,  startPC, pState);
+ 		quick.block      = mVU.prog.cur->block[startPC/8];
+ 		quick.prog       = mVU.prog.cur;
++#ifdef __PROSPERO__
++		mVU.prog.quickUsed[mVU.prog.quickUsedCount++] = static_cast<u16>(mVU.regs().start_pc / 8);
++#endif
+ 		list->push_front(mVU.prog.cur);
+ 		//mVUprintUniqueRatio(mVU);
+ 		return entryPoint;
+@@ -331,7 +418,7 @@ void recMicroVU1::Shutdown()
  
  void recMicroVU0::Reset()
  {
@@ -18220,7 +20152,7 @@ index 0f628f7..2f72f35 100644
  }
  
  void recMicroVU0::Step()
-@@ -342,7 +388,7 @@ void recMicroVU1::Reset()
+@@ -342,7 +429,7 @@ void recMicroVU1::Reset()
  {
  	vu1Thread.WaitVU();
  	vu1Thread.Get_MTVUChanges();
@@ -18229,7 +20161,7 @@ index 0f628f7..2f72f35 100644
  }
  
  void recMicroVU0::SetStartPC(u32 startPC)
-@@ -418,68 +464,3 @@ bool SaveStateBase::vuJITFreeze()
+@@ -418,68 +505,3 @@ bool SaveStateBase::vuJITFreeze()
  	Freeze(microVU1.prog.lpState);
  	return IsOkay();
  }
@@ -18299,7 +20231,7 @@ index 0f628f7..2f72f35 100644
 -
 -#endif
 diff --git a/pcsx2/x86/microVU.h b/pcsx2/x86/microVU.h
-index 0950a0d..9332dd8 100644
+index 0950a0d..249cee6 100644
 --- a/pcsx2/x86/microVU.h
 +++ b/pcsx2/x86/microVU.h
 @@ -20,6 +20,9 @@
@@ -18312,7 +20244,18 @@ index 0950a0d..9332dd8 100644
  #include "common/Perf.h"
  
  class microBlockManager;
-@@ -78,6 +81,42 @@ struct microProgManager
+@@ -74,10 +77,53 @@ struct microProgManager
+ 	u8*                x86start;           // Start of program's rec-cache
+ 	u8*                x86end;             // Limit of program's rec-cache
+ 	microRegInfo       lpState;            // Pipeline state from where program left off (useful for continuing execution)
++#ifdef __PROSPERO__
++	// Crux2: the indices of quick[] set since the last clear, so that a clear nulls those and not all
++	// 2048 (a 32 KB memset, the whole L1 data cache, about 1600 times a second on the VU thread).
++	// An entry is set only in mVUsearchProg, at most once between clears (it stays set until one).
++	u16                quickUsed[mProgSize/2];
++	u32                quickUsedCount;
++#endif
+ };
  
  static const uint mVUcacheSafeZone =  3; // Safe-Zone for program recompilation (in megabytes)
  
@@ -18355,7 +20298,7 @@ index 0950a0d..9332dd8 100644
  struct microVU
  {
  
-@@ -108,6 +147,23 @@ struct microVU
+@@ -108,6 +154,23 @@ struct microVU
  	u8* compareStateF;// Function Ptr to search which compares all state.
  	u8* waitMTVU;     // Ptr to function to save registers/sync VU1 thread
  	u8* copyPLState;  // Ptr to function to copy pipeline state into microVU
@@ -18379,7 +20322,7 @@ index 0950a0d..9332dd8 100644
  	u8* resumePtrXG;  // Ptr to recompiled code position to resume xgkick
  	u32 code;         // Contains the current Instruction
  	u32 divFlag;      // 1 instance of I/D flags
-@@ -146,7 +202,6 @@ private:
+@@ -146,7 +209,6 @@ private:
  	int qListI, fListI;
  
  public:
@@ -18387,7 +20330,7 @@ index 0950a0d..9332dd8 100644
  	microBlockManager()
  	{
  		qListI = fListI = 0;
-@@ -249,28 +304,6 @@ public:
+@@ -249,28 +311,6 @@ public:
  		}
  		return nullptr;
  	}
@@ -18416,7 +20359,7 @@ index 0950a0d..9332dd8 100644
  };
  
  // microVU rec structs
-@@ -279,11 +312,10 @@ alignas(16) microVU microVU1;
+@@ -279,11 +319,10 @@ alignas(16) microVU microVU1;
  
  // Debug Helper
  int mVUdebugNow = 0;
@@ -18429,7 +20372,7 @@ index 0950a0d..9332dd8 100644
  extern void* mVUblockFetch(microVU& mVU, u32 startPC, uptr pState);
  _mVUt extern void* mVUcompileJIT(u32 startPC, uptr ptr);
  
-@@ -299,7 +331,6 @@ extern void mVUdeleteProg(microVU& mVU, microProgram*& prog);
+@@ -299,7 +338,6 @@ extern void mVUdeleteProg(microVU& mVU, microProgram*& prog);
  _mVUt extern void* mVUsearchProg(u32 startPC, uptr pState);
  extern void* mVUexecuteVU0(u32 startPC, u32 cycles);
  extern void* mVUexecuteVU1(u32 startPC, u32 cycles);

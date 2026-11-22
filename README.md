@@ -254,7 +254,7 @@ them goes to it. Triangle on the home shows only what is changed, everywhere, un
 Elsewhere in this guide, "Settings > Picture > Graphics" and the like name an area and its section;
 the search finds any setting by a word of its name or description.
 
-**A game's own settings** (Its settings on a game's page, or Game settings in the quick menu) are the same
+**Game Specific Settings** (on a game's page, or in the quick menu) are the same
 screens for that game, opening on Games and saves, whose first section is the game itself (its
 serial, its file, what the database recommends, clearing its settings). A setting the game does not
 have uses the global setting and is shown fainter; changing it gives the game a value of its own,
@@ -420,7 +420,7 @@ Disc images as `.iso`, `.chd`, `.cso`, `.zso`, `.gz`, `.bin`, `.mdf`, `.nrg` and
 
 Each place below has its chip in the library's filter row (All shows every place at once). The games are looked for when Crux2 starts and after
 each game; **Square** in the library (or Settings > Games and saves > Game List > **Scan For New Games**) looks again.
-Settings > Games and saves > Folders > **Add Search Directory** opens a folder browser (USB drives, network shares, the
+Settings > Games and saves > Folders > **Add Search Directory** opens a folder browser (USB drives, the M.2 storage, network shares, the
 console's storage) and adds a folder anywhere; it and its subfolders are searched, and the games
 stay where they are.
 
@@ -434,7 +434,11 @@ Games are read from a folder named `crux2`, `ps2`, `ps2iso` or `playstation2` at
 drive (capital letters or not; folders named `pspcsx2` and `pcsx2` are read as well), or from a
 folder added in Settings > Games and saves > Folders. Only those folders are scanned, not the whole drive.
 
-A title cannot see USB drives from inside its sandbox. When Crux2 starts, it sends the bundled
+The console's M.2 storage (`/mnt/ext1`) and the internal storage's `/mnt/ext0` are read the same way:
+the same folder names at their top, or a folder added in the folder browser. Games found there are
+under the library's Internal chip.
+
+A title cannot see USB drives or the M.2 storage from inside its sandbox. When Crux2 starts, it sends the bundled
 `sandbox-elevator.elf` to the payload loader on port 9021, which lets this one title (by its ID)
 out of its sandbox. If the loader is not running, Crux2 says so in the boot log and carries on
 without USB drives; nothing else changes.
@@ -541,9 +545,9 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   the console's menu before that message can lose up to the last two seconds of a save: wait for
   it, or pause first. Settings are written when the menus close, and at a game's start, quit and
   crash (*new*).
-- **Speed hacks are as PCSX2 ships them.** If a game falls short of full speed, the first thing
-  to try is Settings > Emulation > Emulation > **Enable Multithreaded VU1 (MTVU)** (at More): safe for most games, wrong for a
-  few.
+- **Speed hacks are as PCSX2 ships them.** **Enable Multithreaded VU1 (MTVU)** (Settings > Emulation >
+  Emulation, at More) is on, as PCSX2 sets it on a machine with enough cores: safe for most games, wrong
+  for a few. If a game hangs, try it off for that game.
 - **The performance overlay** (Settings > Picture > On-Screen Display; off until a figure is switched on).
   **Performance Overlay Size** picks how much of it there is: *Minimal*, a small pill with the frame rate;
   *Compact* (the default when you switch the FPS on), one bar with the frame rate and the GPU, EE,
@@ -673,10 +677,10 @@ Settings > Picture > Graphics > **Anti-Aliasing** is one choice for all of them:
 
 - **FXAA**: quick, a little soft.
 - **SMAA**: sharper edges for a little GPU time.
-- **SSAA**: the game drawn larger than the screen and made screen-sized from every texel each pixel
-  covers, the least shimmer. Choosing it raises the internal resolution to about 1.5 times the
-  screen's (8x at 4K) and turns FSR 1 off, which would otherwise enlarge a smaller picture; it costs
-  the most. **SSAA filter**: **Soft** (each pixel's texels averaged, no halo) or **Sharp** (a Lanczos
+- **SSAA**: the picture of the internal resolution you chose made screen-sized from every texel each
+  pixel covers, the least shimmer. It works when that picture is larger than the screen (6x and up at
+  4K); the resolution is left as you set it. FSR 1, which would enlarge a smaller picture, is off while
+  SSAA is chosen and comes back after. **SSAA filter**: **Soft** (each pixel's texels averaged, no halo) or **Sharp** (a Lanczos
   filter, crisper edges with a halo of a few percent).
 - **SSAA + SMAA**: SSAA, then SMAA over the screen-sized picture for the edges it leaves.
 

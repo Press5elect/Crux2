@@ -2108,6 +2108,23 @@ public:
 		return page;
 	}
 
+	// The memory cards folder's cards, listed at most every three seconds or after the pages change.
+	// (Listing opens every card, and loads a folder card's saves; the Memory cards page is made each
+	// frame it is shown, and the interface's frame is the GS thread's: listing per frame stalled the
+	// interface and the game when choosing a slot's card.)
+	const std::vector<AvailableMcdInfo>& Cards()
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if (!m_cards_made || m_cards_pages != m_pages || now - m_cards_listed >= std::chrono::seconds(3))
+		{
+			m_cards = FileMcd_GetAvailableCards(true);
+			m_cards_listed = now;
+			m_cards_pages = m_pages;
+			m_cards_made = true;
+		}
+		return m_cards;
+	}
+
 	bp::Page memoryCardsPage(int layer) override
 	{
 		// v1.5.0: the cards first, each opening its menu (bp_cards.cpp); then what can be made or
@@ -2139,17 +2156,9 @@ public:
 				[this] { bp::openCardManager(this); }, bp::Option::AllGames);
 			// (Counting lists the folder and opens every card: at most every two seconds, not each
 			// frame the row is drawn. A card made or removed in the manager shows soon after.)
-			manager.info = [] {
-				static std::string text;
-				static std::chrono::steady_clock::time_point counted;
-				const auto now = std::chrono::steady_clock::now();
-				if (text.empty() || now - counted >= std::chrono::seconds(2))
-				{
-					const size_t cards = FileMcd_GetAvailableCards(true).size();
-					text = cards == 1 ? std::string("1 card") : fmt::format("{} cards", cards);
-					counted = now;
-				}
-				return text;
+			manager.info = [this] {
+				const size_t cards = Cards().size();
+				return cards == 1 ? std::string("1 card") : fmt::format("{} cards", cards);
 			};
 			page.rows.push_back(std::move(manager));
 		}
@@ -2181,7 +2190,7 @@ public:
 			const std::string current = held(slot), other = held(1 - slot);
 			static constexpr const char* sizes[] = {"", "8 MB", "16 MB", "32 MB", "64 MB", "PlayStation 1"};
 			bool listed = current.empty();
-			for (AvailableMcdInfo& info : FileMcd_GetAvailableCards(true))
+			for (const AvailableMcdInfo& info : Cards())
 			{
 				// The card the other slot holds is not offered: one file, one slot.
 				if (!other.empty() && info.name == other && info.name != current)
@@ -2195,7 +2204,7 @@ public:
 				else
 					card.names.emplace_back(title);
 				listed |= (info.name == current);
-				card.strings.push_back(std::move(info.name));
+				card.strings.push_back(info.name);
 			}
 			if (!listed)
 			{
@@ -2767,12 +2776,8 @@ public:
 		std::vector<std::pair<std::string, std::string>> places;
 		if (PS5Platform::IsElevated())
 		{
-			for (unsigned drive = 0; drive < 8; drive++)
-			{
-				const std::string root = "/mnt/usb" + std::to_string(drive);
-				if (FileSystem::DirectoryExists(root.c_str()))
-					places.emplace_back(fmt::format("USB drive {} ({})", drive + 1, root), root);
-			}
+			for (const PS5Platform::Drive& drive : PS5Platform::Drives())
+				places.emplace_back(fmt::format("{} ({})", drive.label, drive.root), drive.root);
 		}
 		for (unsigned i = 0;; i++)
 		{
@@ -4619,7 +4624,7 @@ public:
 			deband.names = {"Off", "Low", "High"};
 			deband.ints = {0, 1, 2};
 			deband.defInt = 0;
-			deband.flags = A;
+			deband.flags = 0; // (a game can have its own: GSDeviceVK_PS5.cpp reads it through the game's settings)
 			rows.push_back(std::move(deband));
 			// Crux2: the colour filter on the game's picture (ps5_final.glsl, after debanding, before HDR's
 			// encode). From Porpoise aa6ec1f (GPL-3.0-or-later): its choices.
@@ -4904,6 +4909,17 @@ public:
 				"Clears newly allocated graphics memory with non-temporal writes instead of clearing and flushing it. Reduces the "
 				"time spent creating textures.",
 				"PS5", "StreamZero", true, A | bp::Option::Expert | bp::Option::Restart));
+			rows.push_back(Toggle("Skip unchanged microprograms",
+				"Keeps the VU1 recompiler's programs when a game uploads microcode that equals what VU1 already holds. "
+				"A game that changes microcode while VU1 runs it may draw wrongly. Not yet tested on a console.",
+				"PS5", "SameMicroSkip", false, A | bp::Option::Expert | bp::Option::Restart));
+			rows.push_back(Toggle("Coarse thread times",
+				"Threads note their processor time at most once a millisecond instead of each time they wake. Reading it is a "
+				"system call on the console. The thread loads shown may lag by up to a millisecond of work.",
+				"PS5", "CoarseThreadTimes", false, A | bp::Option::Expert | bp::Option::Restart));
+			rows.push_back(Range("Wake-up spin time",
+				"How long a thread waiting for work keeps checking before it sleeps. Longer can wake threads sooner and "
+				"costs processor time.", "PS5", "WakeSpinUs", 50, 0, 1000, 50, " us", A | bp::Option::Expert | bp::Option::Restart));
 			rows.push_back(Range("Wait for the GPU: checking for",
 				"How long the driver keeps checking whether the GPU is done before it starts sleeping between checks.", "PS5", "GpuWaitSpinUs", 1500, 0, 5000, 250,
 				" us", A | bp::Option::Advanced | bp::Option::Restart));
@@ -5447,10 +5463,10 @@ public:
 	void PickOwnLook(int layer)
 	{
 		std::vector<std::string> folders = {Path::Combine(ps5px_title_dir(), "shaders")};
-		for (int i = 0; i < 8; i++)
+		for (const PS5Platform::Drive& drive : PS5Platform::Drives())
 		{
 			for (const char* top : {"Crux2", "PS2", "crux2", "ps2"})
-				folders.push_back(fmt::format("/mnt/usb{}/{}/shaders", i, top));
+				folders.push_back(fmt::format("{}/{}/shaders", drive.root, top));
 		}
 		std::vector<std::string> found;
 		for (const std::string& folder : folders)
@@ -5559,15 +5575,13 @@ public:
 		places.emplace_back("Internal storage (the title's games folder)", Path::Combine(ps5px_title_dir(), "games"));
 		if (!PS5Platform::OutsideFolder().empty())
 			places.emplace_back("Internal storage (Crux2's folder, games)", Path::Combine(PS5Platform::OutsideFolder(), "games"));
-		// (USB drives are there outside the sandbox, or through the console's FTP server at /mnt.)
+		// (Drives are there outside the sandbox, or through the console's FTP server at /mnt.)
 		if (PS5Platform::IsElevated() || ps5vfs_is_virtual("/mnt/usb0"))
 		{
 			static constexpr const char* names[] = {"crux2", "pspcsx2", "pcsx2", "ps2", "ps2iso", "playstation2"};
-			for (unsigned drive = 0; drive < 8; drive++)
+			for (const PS5Platform::Drive& drive : PS5Platform::Drives())
 			{
-				const std::string root = "/mnt/usb" + std::to_string(drive);
-				if (!FileSystem::DirectoryExists(root.c_str()))
-					continue;
+				const std::string& root = drive.root;
 				std::string folder;
 				FileSystem::FindResultsArray entries;
 				FileSystem::FindFiles(root.c_str(), "*", FILESYSTEM_FIND_FOLDERS | FILESYSTEM_FIND_RELATIVE_PATHS, &entries);
@@ -5582,7 +5596,7 @@ public:
 				const bool made = folder.empty();
 				if (made)
 					folder = Path::Combine(root, "crux2");
-				places.emplace_back(fmt::format("USB drive {} ({}{})", drive + 1, Path::GetFileName(folder), made ? ", made for it" : ""), folder);
+				places.emplace_back(fmt::format("{} ({}{})", drive.label, Path::GetFileName(folder), made ? ", made for it" : ""), folder);
 			}
 		}
 		for (unsigned i = 0;; i++)
@@ -6461,26 +6475,71 @@ private:
 		if (where == "PS5" && (what == "AntiAliasing" || what == "SSAAFilter"))
 		{
 			const auto lock = Host::GetSettingsLock();
-			if (SettingsInterface* const si = Layer(layer); si != nullptr)
+			SettingsInterface* const si = Layer(layer);
+			// SSAA left: the upscaling it turned off comes back, and a resolution an earlier build raised for it, unless
+			// changed since. (B4.5 and before raised the resolution and kept it: a game left SSAA and still drew at 8x.)
+			// [PS5] SSAARaisedFrom/SSAARaisedTo/SSAACASWas, in the layer SSAA changed; -1: the layer had no value.
+			const auto ssaaUndo = [](SettingsInterface& l) {
+				if (!l.ContainsValue("PS5", "SSAARaisedTo"))
+					return;
+				const float from = l.GetFloatValue("PS5", "SSAARaisedFrom", -1.f), to = l.GetFloatValue("PS5", "SSAARaisedTo", 0.f);
+				const int casWas = l.GetIntValue("PS5", "SSAACASWas", -2);
+				if (to > 0.f && l.GetFloatValue("EmuCore/GS", "upscale_multiplier", -1.f) == to)
+				{
+					if (from < 0.f)
+						l.DeleteValue("EmuCore/GS", "upscale_multiplier");
+					else
+						l.SetFloatValue("EmuCore/GS", "upscale_multiplier", from);
+					ps5px_log("picture: SSAA left: internal resolution %.0fx again%s", from < 0.f ? 0.f : from,
+						from < 0.f ? " (every game's)" : "");
+				}
+				if (casWas != -2 && l.GetIntValue("EmuCore/GS", "CASMode", -3) == 0)
+				{
+					if (casWas < 0)
+						l.DeleteValue("EmuCore/GS", "CASMode");
+					else
+						l.SetIntValue("EmuCore/GS", "CASMode", casWas);
+				}
+				l.DeleteValue("PS5", "SSAARaisedFrom");
+				l.DeleteValue("PS5", "SSAARaisedTo");
+				l.DeleteValue("PS5", "SSAACASWas");
+			};
+			if (si != nullptr && layer == bp::Own && !si->ContainsValue("PS5", "AntiAliasing"))
+			{
+				// The game's own anti-aliasing reset: the keys it wrote go too, so the game follows every game's.
+				ssaaUndo(*si);
+				si->DeleteValue("EmuCore/GS", "fxaa");
+				si->DeleteValue("PS5", "SMAA");
+				si->DeleteValue("PS5", "Downsample");
+			}
+			else if (si != nullptr)
 			{
 				const int aa = std::clamp(si->GetIntValue("PS5", "AntiAliasing", 0), 0, 4);
 				const bool ssaa = aa >= 3;
 				si->SetBoolValue("EmuCore/GS", "fxaa", aa == 1);
 				si->SetBoolValue("PS5", "SMAA", aa == 2 || aa == 4);
 				si->SetIntValue("PS5", "Downsample", ssaa ? std::clamp(si->GetIntValue("PS5", "SSAAFilter", 1), 1, 2) : 0);
+				if (!ssaa)
+					ssaaUndo(*si);
 				if (ssaa && what == "AntiAliasing")
 				{
-					// About 1.5 times the screen's height in the PS2's 448 lines, raised only (never lowered).
-					const int screen = Host::Internal::GetBaseSettingsLayer()->GetIntValue("PS5", "OutputHeight", 2160);
-					const float want = std::min(12.f, std::ceil(1.5f * static_cast<float>(screen) / 448.f));
-					const float have = si->GetFloatValue("EmuCore/GS", "upscale_multiplier", 6.f);
-					if (have < want)
-						si->SetFloatValue("EmuCore/GS", "upscale_multiplier", want);
+					// SSAA scales the picture of the internal resolution chosen down to the screen (ps5_aa.h: only
+					// when it is larger than its place); the resolution is the user's own and is left as it is.
+					// FSR/NIS, which enlarges a smaller picture, is turned off while SSAA is chosen and put back after
+					// (ssaaUndo; [PS5] SSAARaisedTo -1: no resolution of ours to put back).
 					const int cas = si->GetIntValue("EmuCore/GS", "CASMode", 5);
 					if (cas >= 3)
+					{
+						if (!si->ContainsValue("PS5", "SSAACASWas"))
+						{
+							si->SetIntValue("PS5", "SSAACASWas", si->ContainsValue("EmuCore/GS", "CASMode") ? cas : -1);
+							if (!si->ContainsValue("PS5", "SSAARaisedTo"))
+								si->SetFloatValue("PS5", "SSAARaisedTo", -1.f);
+						}
 						si->SetIntValue("EmuCore/GS", "CASMode", 0);
-					ps5px_log("picture: SSAA chosen: internal resolution %.0fx (was %.0fx), upscaling %s", std::max(have, want), have,
-						cas >= 3 ? "FSR/NIS turned off" : "as it was");
+					}
+					ps5px_log("picture: SSAA chosen: the internal resolution scaled down to the screen, upscaling %s",
+						cas >= 3 ? "(FSR/NIS) turned off" : "as it was");
 				}
 			}
 			m_pages++;
@@ -7039,6 +7098,10 @@ private:
 	u32 m_unlabelled = 0;
 
 	unsigned m_pages = 1;
+	std::vector<AvailableMcdInfo> m_cards; // Cards(): the folder's cards as last listed
+	std::chrono::steady_clock::time_point m_cards_listed;
+	unsigned m_cards_pages = 0;
+	bool m_cards_made = false;
 	// Settings > Folders' network share being added (m_netshare_index -1) or changed (v1.0.19, back
 	// after 883c832), and what the threads that ask the network for it hand back to the next frame
 	// (a search of the network, a server's list, a share's test).

@@ -40,7 +40,7 @@ item is done or something new is learned; delete what no longer applies.
   asked for again only when `gamesGeneration()` moves); pinned settings in the quick menu (made once
   as it opens, the rows of all games only when a pin is not one of the game's own); long titles cut
   with "..." in every view. Left as it is: a game's page still opens the game's settings once to
-  read them and Its settings opens them again (one `openGame` each; a Backend that kept the last
+  read them and Game Specific Settings opens them again (one `openGame` each; a Backend that kept the last
   game's patches would save the second); the Settings look at what is changed every half second
   (about 600 values read); the library is drawn under an open game page; the first frame of a
   screen with text of a new size makes its glyphs (FreeType) once.
@@ -208,6 +208,48 @@ frame, about 8 ms. The GIF and vertex handlers are about 20%; the recorder threa
   textures changed (`GSDeviceVK.cpp:6430`); the last pipeline remembered (`:5718`).
 - The menus: the thread is 55% busy without a game; the present path's fence waits spin for
   `GpuWaitSpinUs` (1500 µs) at 120 Hz. Not settled.
+
+## Performance work of 2026-11-21: built, to measure on a console
+
+Nothing of this was run on a console. Full report: the session's `crux2-performance-implementation-2026-11-21.md`.
+
+- **PGO**: the changes alter the control flow of profiled hot functions (`recClearIOP`, `rcntUpdate`,
+  `psxRcntSync`, `recMicroVU1::Clear`, `DescriptorSetUpdateBuilder`, `VKStreamBuffer::CommitMemory`,
+  `KernelSemaphore::Post`), which then build without their profile. Train a new profile
+  (`PS5PX_PGO=generate`, MTVU on and off) before a release, and A/B against v1.0.22 only after it.
+- To check: the `clock:` line (if the thread processor clock costs microseconds, try Coarse Thread
+  Times); the `counters:` line in a heavy VU1 scene (XGKICK waits, wake-ups that slept, unchanged
+  microprogram uploads with Skip Unchanged Microprograms on); the profile's `generated code:` line.
+- Audio: the time stretch must sound the same (bit-identical on a PC with the build's compiler).
+- Profile: `ps5/pgo/crux2-2026-11-21.profdata` (`104619efcd21`, MTVU on and off, 2026-11-21 runs on
+  build `ae9956016f6d9052`) is the base of build B (`f65d7e7bb670863b`); `crux2.profdata` is still
+  `f965a89d3a30`. 570 functions the old profile had run were not run in training (paraLLEl-GS,
+  texture packs, paletted lookups, the overlay, `CheckOverlapVerts`): cold in B.
+- Second batch (on B, needs its own training round, G2 then B2): the GS UV+XYZ2 packed loop, the
+  24-bit depth test order, one `temp_draw_rect` store, the inlined block address functions, the
+  event test's clock ratio, and **IOP Stores Inline** (off). Not done: microVU JR/JALR jump-cache
+  hits in generated code.
+- Console 2026-11-21 (profiling build): thread processor time 0.85-0.92 us a call; VU wakes
+  100-150/s (Coarse Thread Times not worth it); XGKICK waits almost all under 50 us and spun (the
+  spin length cannot help); the VU ring never full.
+- PCSX2 master is 10 commits past the pin (GS texture cache target selection, an IOP fix, the
+  controller settings rework; four patched files): moved separately from this work.
+
+## GPU work of 2026-11-22: measured, closed
+
+Console logs (B4.4, B4.7, B4.9) show the games below full speed are GPU-bound; the investigation is the
+session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
+
+- What helps: the internal resolution (6x keeps SLUS-21376, SLUS-21065, SCES-53247 at 98-99%) and the
+  ordered view on (the default; SLUS-21376 98% against 91% off, 6x).
+- Tried and removed: leaving the ordered view after draws that did not need it. In SLUS-21376 those draws
+  alternate one by one with draws that need it (705/705, 962/961 a frame), so a target either leaves and
+  comes back each draw (a full-target copy each way: 87-88% speed) or never leaves. Taking one-barrier
+  draws into the view and fetching textures before the interlock were removed with it, untested.
+- Deinterlacing (SCES-53247, adaptive) costs 0.09 ms a frame at 6x: not worth work.
+- Kept in the test windows: pixels shaded by pass kind (with the overlay's GPU statistics off) and the
+  names of the merge, deinterlace, post and clear passes. Not done: why render passes end (counting it
+  in EndRenderPass voided RenderHW's trained profile).
 
 ## Known problems
 

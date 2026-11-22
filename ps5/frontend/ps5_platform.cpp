@@ -784,16 +784,41 @@ std::vector<std::string> PS5Platform::FindGameFolders()
       folders.emplace_back(point);
   }
 
-  // USB drives: the folders with one of these names at the top of the drive (not the whole drive,
-  // which may hold a great many disc images that are not PlayStation 2 games).
+  // Drives (USB, M.2, the internal ext0): the folders with one of these names at the top of the drive
+  // (not the whole drive, which may hold a great many disc images that are not PlayStation 2 games).
   if (s_elevated)
   {
     static constexpr const char* names[] = {"crux2", "pspcsx2", "pcsx2", "ps2", "ps2iso", "playstation2"};
-    for (unsigned drive = 0; drive < 8; drive++)
+    // (Whether the M.2 storage and ext0 are there and can be read, said once a start: a drive that
+    // is mounted but refuses the title shows here with the reason.)
+    // (What /mnt holds, once: where a drive the console has is mounted, when it is not where it is looked for.)
+    if (DIR* const mnt = opendir("/mnt"))
     {
-      const std::string root = "/mnt/usb" + std::to_string(drive);
-      if (!FileSystem::DirectoryExists(root.c_str()))
-        continue;
+      std::string names;
+      while (const dirent* const entry = readdir(mnt))
+      {
+        if (entry->d_name[0] != '.')
+          names += std::string(names.empty() ? "" : " ") + entry->d_name;
+      }
+      closedir(mnt);
+      ps5px_log("mounts: /mnt holds %s", names.empty() ? "nothing" : names.c_str());
+    }
+    for (const char* const ext : {"/mnt/ext0", "/mnt/ext1"})
+    {
+      struct stat st = {};
+      if (stat(ext, &st) != 0)
+        ps5px_log("%s %s: not there (%s)", std::strcmp(ext, "/mnt/ext1") == 0 ? "M.2 storage" : "internal storage", ext,
+                  std::strerror(errno));
+      else if (DIR* const dir = opendir(ext))
+        closedir(dir);
+      else
+        ps5px_log("%s %s: there, but it cannot be read: %s (mode %o, owner %u)",
+                  std::strcmp(ext, "/mnt/ext1") == 0 ? "M.2 storage" : "internal storage", ext, std::strerror(errno),
+                  static_cast<unsigned>(st.st_mode & 07777), static_cast<unsigned>(st.st_uid));
+    }
+    for (const Drive& drive : Drives())
+    {
+      const std::string& root = drive.root;
 
       FileSystem::FindResultsArray entries;
       FileSystem::FindFiles(root.c_str(), "*", FILESYSTEM_FIND_FOLDERS | FILESYSTEM_FIND_RELATIVE_PATHS, &entries);
@@ -810,12 +835,30 @@ std::vector<std::string> PS5Platform::FindGameFolders()
           }
         }
       }
-      ps5px_log("USB drive %s: %u game folder%s (%zu folders at its top)", root.c_str(), found, (found == 1) ? "" : "s",
-                entries.size());
+      ps5px_log("%s %s: %u game folder%s (%zu folders at its top)", drive.label.c_str(), root.c_str(), found,
+                (found == 1) ? "" : "s", entries.size());
     }
   }
 
   return folders;
+}
+
+std::vector<PS5Platform::Drive> PS5Platform::Drives()
+{
+  std::vector<Drive> drives;
+  for (unsigned drive = 0; drive < 8; drive++)
+  {
+    std::string root = "/mnt/usb" + std::to_string(drive);
+    if (FileSystem::DirectoryExists(root.c_str()))
+      drives.push_back({std::move(root), "USB drive " + std::to_string(drive + 1)});
+  }
+  // The console's other storage, as OGBox lists it (ogbox_main.cpp): /mnt/ext0 is part of the internal
+  // storage, /mnt/ext1 the M.2 SSD in the expansion slot (the owner, 2026-11-22).
+  if (FileSystem::DirectoryExists("/mnt/ext0"))
+    drives.push_back({"/mnt/ext0", "Internal storage (ext0)"});
+  if (FileSystem::DirectoryExists("/mnt/ext1"))
+    drives.push_back({"/mnt/ext1", "M.2 storage"});
+  return drives;
 }
 
 namespace {

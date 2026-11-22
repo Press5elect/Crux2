@@ -6,6 +6,68 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## v1.0.23 (2026-11-22)
+
+- Changed: faster paths, each giving the same results as before (on a console no frame rate changed
+  in the games measured, which are held back by the GPU, not by these):
+  the VU thread's ring keeps the EE's and the VU thread's positions on cache lines of their own; a
+  VU1 microprogram upload clears only the program entries in use (it cleared all 2048, 32 KB, each
+  time); the audio's time stretch tries four positions at a time (twice as fast on a PC, the same
+  sound); an IOP store to memory with no code skips the clearing walk; the counters' power-of-two
+  rates are shifted, not divided; a graphics draw no longer zeroes 2 KB of descriptor writes, nor
+  asks to flush memory that needs none; a release build no longer checks every IOP block on each
+  clear.
+- Changed: the graphics thread draws a common sprite format (UV then XYZ2) in a loop of its own
+  and tests the 24-bit depth setting before the rest; one store less per primitive; the texture
+  cache's block address functions are inlined; the event test divides the clocks only when they
+  change. The profile is trained again, with MTVU on and off.
+- Changed: the texture cache skips pages with no textures without reading their lists; the ordered
+  view's overlap scan runs only when its answer can change something; an event test with no
+  interrupt pending skips the interrupt-enable tests; GS image writes read the memory base once.
+- Added: a profiled run names the busiest guest blocks of each recompiler, and writes the code of
+  the busiest EE blocks into the log once; the test windows count kilobytes of textures uploaded
+  (UK), palette textures (PU), texture sources made (SC) and GPU submissions (SB). **Driver Core
+  Kept Free** (Settings, the Everything level, on): the other threads off the driver's core.
+- Fixed: the graphics thread (and with it the interface) could stop for tens of seconds or minutes
+  when texture replacements were loaded again soon after a game with a pack started (a game
+  closed, a texture setting changed, a pack download ended): it waited for the whole pack's
+  precache, which was then thrown away. It is given up at once now.
+- Fixed: a file written to a network share (a card sync, a backup, a pack moved there) held every
+  other call to that share until the whole file was written, the graphics thread's look for a
+  game's texture pack among them: the picture and the interface stopped meanwhile.
+- Fixed: the Memory cards page listed the cards folder and opened every card (a folder card's saves
+  all read) each frame it was shown, on the graphics thread: choosing a slot's card or changing a
+  switch there could stop the interface and the game. The list is made at most every 3 seconds.
+- Fixed: the Settings home showed the four oldest pins only, so a fifth one pinned never appeared.
+  It shows as many as its card holds, in the quick menu's order, and scrolls through the rest.
+- Changed: **Anti-Aliasing**, **SSAA Filter** and **Debanding** can be set for one game.
+- Changed: SSAA scales the picture of the internal resolution chosen down to the screen; it no longer raises
+  the resolution (to 8x at 4K). FSR 1 is off while SSAA is chosen and comes back when another choice is
+  made. A resolution an earlier build raised for SSAA is put back too when SSAA is left, unless changed
+  since (one raised before this version is not known: lower it by hand).
+- Added: a test run's GPU line names what the conversion passes did (each conversion shader, and
+  clears), the costliest five with their time a frame.
+- Added: a test run's GPU line counts the pixels shaded by each kind of pass (and the time a million of
+  them took; with the overlay's GPU statistics off), and names the merge, deinterlacing,
+  post-processing and in-pass clear passes.
+- Changed: the game page's settings tab is **Game Specific Settings** (as are the quick menu's tile,
+  the home's hint and the page's card); the page's file card is **Game File**.
+- Fixed: the console's M.2 storage (/mnt/ext1) and the internal storage's /mnt/ext0 were never offered:
+  game folders named Crux2, PS2 and the like at their top are found as on a USB drive, and both are
+  among the places to choose a folder from, to copy a disc to, to export saves to and to look for
+  shader presets in.
+- Added: the driver counts why the graphics thread waited for an image (the display's pace, the
+  GPU, a full queue): a test run's `acquire:` line (Mesa patch 0022).
+- Added: **IOP Stores Inline** (Settings, Emulation, the Everything level, off): the IOP
+  recompiler writes stores to IOP memory itself.
+- Changed: **Enable Multithreaded VU1 (MTVU)** shows on as its default, which is what a new install
+  has always set.
+- Added: Settings, the Everything level under PlayStation 5, all off or as before: **Skip Unchanged
+  Microprograms**, **Coarse Thread Times**, **Wake-Up Spin Time** (50 us, PCSX2's). The boot log
+  says what the console's clocks cost (`clock:`); a test or profiled run prints where the threads
+  waited for each other (`counters:`: VU wake-ups, XGKICK waits, VU ring, code writes and
+  compiles), and the profile splits the time in generated code by recompiler and stub.
+
 ## v1.0.22 (2026-11-17)
 
 - Added: two switches against the graphics thread's time spent creating textures (Settings, the

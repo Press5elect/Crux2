@@ -874,7 +874,7 @@ void quickScreen()
 		// This game's own settings: in effect at once (but those it takes at its start), and kept for
 		// this game only.
 		const GameInfo game = runningGame(running, false);
-		QuickItem item{ICON_FA_SLIDERS, "Game settings", "Every setting, for this game", running.canSaveState, [game] { openSettings(&game, Screen::Quick); }};
+		QuickItem item{ICON_FA_SLIDERS, "Game Specific Settings", "Every setting, for this game", running.canSaveState, [game] { openSettings(&game, Screen::Quick); }};
 		item.stays = true;
 		item.id = "gameoptions";
 		items.push_back(std::move(item));

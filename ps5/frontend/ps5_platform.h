@@ -117,8 +117,18 @@ void MountShares();
 
 /// The folders games are looked for in without being asked: <title folder>/games (and games in
 /// the outside folder, when that is used and has one), each network share, and the PlayStation
-/// folders at the top of each USB drive.
+/// folders at the top of each drive (Drives).
 std::vector<std::string> FindGameFolders();
+
+/// A drive outside the console's own storage that is there now: its folder and what the menus call it.
+struct Drive
+{
+  std::string root;  // "/mnt/usb0", "/mnt/ext0", "/mnt/ext1"
+  std::string label; // "USB drive 1", "Internal storage (ext0)", "M.2 storage"
+};
+/// The USB drives (/mnt/usb0-7), the internal storage's /mnt/ext0 and the M.2 SSD (/mnt/ext1) that
+/// are there. Outside the sandbox only (inside it, none are); callers ask IsElevated as before.
+std::vector<Drive> Drives();
 
 /// Crux2's files outside the title folder. When a folder /data/crux2 is there and can be written
 /// to, the emulator keeps everything in it that it would keep in the title folder: the settings,

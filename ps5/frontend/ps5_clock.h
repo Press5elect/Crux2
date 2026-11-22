@@ -113,6 +113,9 @@ uint64_t ps5px_monotonic_ns(void);
 /* One line for the boot log: the counter's rate, how many times the clock was checked against
  * the kernel's and the largest difference found; "" before the clock runs. */
 void ps5px_clock_line(char *line, unsigned size);
+/* One line for the boot log: what the thread's processor clock, the kernel's monotonic clock and
+ * the counter cost per call, timed over `calls` calls each; *thread_cpu_ns gets the first. */
+void ps5px_clock_probe_line(char *line, unsigned size, unsigned calls, uint64_t *thread_cpu_ns);
 
 #ifdef __cplusplus
 }

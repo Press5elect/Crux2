@@ -536,12 +536,8 @@ std::vector<Place> Places()
 	std::vector<Place> places;
 	if (PS5Platform::IsElevated())
 	{
-		for (unsigned drive = 0; drive < 8; drive++)
-		{
-			const std::string root = fmt::format("/mnt/usb{}", drive);
-			if (FileSystem::DirectoryExists(root.c_str()))
-				places.push_back({root, fmt::format("USB drive {}", drive + 1)});
-		}
+		for (const PS5Platform::Drive& drive : PS5Platform::Drives())
+			places.push_back({drive.root, drive.label});
 	}
 	for (unsigned i = 0;; i++)
 	{
