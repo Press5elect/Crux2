@@ -8,7 +8,11 @@
 #include "common/HostSys.h"
 
 #include "PS5ThreadTimes.h"
+#include "common/PS5Counters.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdio>
 #include <memory>
 
 #include <pthread.h>
@@ -63,10 +67,31 @@ static u64 own_thread_time()
 // only a thread's own clock is known to be readable on the console).
 static PS5ThreadTimes s_thread_times;
 
+// Coarse thread times (PS5/CoarseThreadTimes, off by default): a thread notes its time at most
+// once a millisecond. Reading the thread's processor clock is a system call (ps5_clock.h: the
+// boot log's "clock:" line says what it costs), and the VU thread notes its time each time it
+// wakes, thousands of times a second. With it on, a time read by the overlay or the profiler can
+// be up to 1 ms of the thread's work behind (the overlay averages over a second).
+static std::atomic<uint64_t> s_coarse_ticks{0}; // counter ticks between two notes; 0: every time
+
+extern "C" void ps5px_set_coarse_thread_times(bool on)
+{
+	s_coarse_ticks.store(on ? sceKernelGetTscFrequency() / 1000 : 0, std::memory_order_relaxed);
+}
+
 // A thread notes its own time, for the performance overlay to read from another thread: the
 // emulation thread once a frame (the host), the VU thread each time it wakes (MTVU.cpp).
 extern "C" void ps5px_publish_thread_cpu_time(void)
 {
+	const uint64_t every = s_coarse_ticks.load(std::memory_order_relaxed);
+	if (every != 0)
+	{
+		static thread_local uint64_t last;
+		const uint64_t now = sceKernelReadTsc();
+		if (now - last < every)
+			return;
+		last = now;
+	}
 	s_thread_times.Publish((uptr)pthread_self(), own_thread_time());
 }
 
@@ -273,16 +298,17 @@ Threading::KernelSemaphore::~KernelSemaphore()
 	pthread_mutex_destroy(&m_mutex);
 }
 
-void Threading::KernelSemaphore::Post()
+bool Threading::KernelSemaphore::Post()
 {
 	m_count.fetch_add(1, std::memory_order_seq_cst);
 	if (m_waiters.load(std::memory_order_seq_cst) == 0)
-		return;
+		return false;
 	// Signalled with the mutex held: a waiter between its check of the count and its wait is not
 	// missed, and the semaphore may be destroyed as soon as the waiter returns.
 	pthread_mutex_lock(&m_mutex);
 	pthread_cond_signal(&m_cond);
 	pthread_mutex_unlock(&m_mutex);
+	return true;
 }
 
 bool Threading::KernelSemaphore::TryWait()
@@ -296,14 +322,14 @@ bool Threading::KernelSemaphore::TryWait()
 	return false;
 }
 
-void Threading::KernelSemaphore::Wait()
+bool Threading::KernelSemaphore::Wait()
 {
 	// A short look first: the post is usually on its way.
 	u32 waited = 0;
 	while (waited <= SPIN_TIME_NS)
 	{
 		if (TryWait())
-			return;
+			return false;
 		waited += ShortSpin();
 	}
 	pthread_mutex_lock(&m_mutex);
@@ -312,4 +338,95 @@ void Threading::KernelSemaphore::Wait()
 		pthread_cond_wait(&m_cond, &m_mutex);
 	m_waiters.fetch_sub(1, std::memory_order_seq_cst);
 	pthread_mutex_unlock(&m_mutex);
+	return true;
+}
+
+// The counters of common/PS5Counters.h, and the line a test or profiled run prints every window.
+PS5Counters::VUThread PS5Counters::vu;
+PS5Counters::GSThread PS5Counters::gs;
+PS5Counters::EEThread PS5Counters::ee;
+PS5Counters::EEMemory PS5Counters::mem;
+uint64_t PS5Counters::ticks_per_second;
+
+namespace
+{
+	// N: the block's counters (not its padding to a whole cache line).
+	template <typename T, size_t Count>
+	struct Snapshot
+	{
+		static constexpr size_t N = Count;
+		uint64_t v[N] = {};
+		// The counts since the last call, from the block's counters in order.
+		void Take(const T& block, uint64_t* delta)
+		{
+			const PS5Counters::Counter* c = reinterpret_cast<const PS5Counters::Counter*>(&block);
+			for (size_t i = 0; i < N; i++)
+			{
+				const uint64_t now = c[i].load(std::memory_order_relaxed);
+				delta[i] = now - v[i];
+				v[i] = now;
+			}
+		}
+	};
+	using VUSnap = Snapshot<PS5Counters::VUThread, 11>;
+	using GSSnap = Snapshot<PS5Counters::GSThread, 5>;
+	using EESnap = Snapshot<PS5Counters::EEThread, 8>;
+	using MemSnap = Snapshot<PS5Counters::EEMemory, 8>;
+	static_assert(offsetof(PS5Counters::EEMemory, iop_clears) == 7 * sizeof(PS5Counters::Counter));
+	static_assert(offsetof(PS5Counters::VUThread, micro_writes_same) == 10 * sizeof(PS5Counters::Counter));
+	static_assert(offsetof(PS5Counters::GSThread, xgkick_hist_ticks) == 5 * sizeof(PS5Counters::Counter));
+	static_assert(offsetof(PS5Counters::EEThread, ring_words_max) == 7 * sizeof(PS5Counters::Counter));
+} // namespace
+
+// Rates a second over `seconds`, from the counts since the last call (one caller: the host's test window).
+extern "C" void ps5px_counters_line(char* line, unsigned size, double seconds)
+{
+	if (!line || size == 0)
+		return;
+	static VUSnap s_vu;
+	static GSSnap s_gs;
+	static EESnap s_ee;
+	static MemSnap s_mem;
+	uint64_t vu[VUSnap::N], gs[GSSnap::N], ee[EESnap::N], mem[MemSnap::N];
+	s_vu.Take(PS5Counters::vu, vu);
+	s_gs.Take(PS5Counters::gs, gs);
+	s_ee.Take(PS5Counters::ee, ee);
+	s_mem.Take(PS5Counters::mem, mem);
+	// The XGKICK waits' lengths: the last ones noted in the window (at most 256), by bucket.
+	uint64_t hist[5] = {};
+	{
+		const uint64_t noted = std::min<uint64_t>(gs[4], 256);
+		const uint64_t end = PS5Counters::gs.xgkick_hist_count.load(std::memory_order_relaxed);
+		const uint64_t tps_us = PS5Counters::ticks_per_second ? PS5Counters::ticks_per_second : 1;
+		for (uint64_t i = 0; i < noted; i++)
+		{
+			const uint64_t t = PS5Counters::gs.xgkick_hist_ticks[(end - 1 - i) & 255].load(std::memory_order_relaxed);
+			const uint64_t us = t * 1000000 / tps_us;
+			hist[us < 50 ? 0 : us < 250 ? 1 : us < 1000 ? 2 : us < 4000 ? 3 : 4]++;
+		}
+	}
+	// The ring's most is a high-water mark over the run, not a count: it is printed as it is.
+	const uint64_t ring_max = PS5Counters::ee.ring_words_max.load(std::memory_order_relaxed);
+	const double s = seconds > 0 ? seconds : 1;
+	const double tps = PS5Counters::ticks_per_second ? static_cast<double>(PS5Counters::ticks_per_second) : 1;
+	auto rate = [s](uint64_t n) { return static_cast<double>(n) / s; };
+	auto ms_per_s = [s, tps](uint64_t ticks) { return static_cast<double>(ticks) * 1000.0 / tps / s; };
+	// Order as declared in common/PS5Counters.h.
+	snprintf(line, size,
+		"counters: per second: vu wakes %.0f (ready %.0f, spun %.0f, slept %.0f), commands %.0f, programs %.0f, "
+		"micro uploads %.0f (unchanged %.0f); xgkick posts %.0f (gs waiting %.0f, asleep %.0f) | gs xgkick ready %.0f, waited %.0f "
+		"(spun %.0f, slept %.0f, %.2f ms/s; of the last %llu waits <50us %llu, <250us %llu, <1ms %llu, <4ms %llu, more %llu) | ee vu kicks %.0f "
+		"(woke it %.0f), waitvu %.0f (%.2f ms/s), ring full %.0f, ring %.0f KB average, %.0f KB most | code writes %.1f, "
+		"backpatches %.1f, reprotects %.1f, page resets %.1f, block discards %.1f, EE compiles %.1f, IOP compiles %.1f, "
+		"IOP code clears %.1f",
+		rate(vu[0]), rate(vu[1]), rate(vu[2]), rate(vu[3]), rate(vu[4]), rate(vu[5]), rate(vu[6]), rate(vu[10]), rate(vu[7]),
+		rate(vu[8]), rate(vu[9]),
+		rate(gs[0] - gs[1]), rate(gs[1]), rate(gs[1] - gs[2]), rate(gs[2]), ms_per_s(gs[3]),
+		static_cast<unsigned long long>(std::min<uint64_t>(gs[4], 256)), static_cast<unsigned long long>(hist[0]),
+		static_cast<unsigned long long>(hist[1]), static_cast<unsigned long long>(hist[2]),
+		static_cast<unsigned long long>(hist[3]), static_cast<unsigned long long>(hist[4]),
+		rate(ee[0]), rate(ee[1]), rate(ee[2]), ms_per_s(ee[3]), rate(ee[4]),
+		ee[5] ? static_cast<double>(ee[6]) * 4.0 / 1024.0 / static_cast<double>(ee[5]) : 0.0,
+		static_cast<double>(ring_max) * 4.0 / 1024.0, rate(mem[0]), rate(mem[1]), rate(mem[2]), rate(mem[3]), rate(mem[4]),
+		rate(mem[5]), rate(mem[6]), rate(mem[7]));
 }

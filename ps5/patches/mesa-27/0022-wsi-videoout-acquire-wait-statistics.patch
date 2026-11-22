@@ -1,0 +1,131 @@
+From 2fe71951cf8f01cf8a889f4a5d12b4b473015cb4 Mon Sep 17 00:00:00 2001
+From: Crux2 <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 07:42:33 +0000
+Subject: [PATCH] wsi/videoout: acquire wait statistics
+
+Counts the title's acquires, those that waited, and why and for how long
+each wait was: a vblank (a flip still to show), the GPU (a present still
+waiting for its frame), a full queue, or images all held. Taken and reset
+by wsi_videoout_take_wait_stats (Crux2's test windows). No behaviour
+changes: the counts are kept under the lock the acquire already holds.
+---
+ src/vulkan/wsi/wsi_common_videoout.c | 56 +++++++++++++++++++++++++++-
+ 1 file changed, 54 insertions(+), 2 deletions(-)
+
+diff --git a/src/vulkan/wsi/wsi_common_videoout.c b/src/vulkan/wsi/wsi_common_videoout.c
+index 8f2e6be102e..94860c413ec 100644
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -1242,8 +1242,21 @@ videoout_swapchain_get_wsi_image(struct wsi_swapchain *wsi_chain, uint32_t image
+  * lock: neither held, nor waiting for its flip, nor flipped past the flip
+  * shown last, nor on screen; the one flipped longest ago. UINT32_MAX when
+  * none is, with *vblank set when only a flip still to show holds one. */
++/* Why an acquire found no image (the wait statistics, wsi_videoout_take_wait_stats). */
++enum videoout_wait_reason {
++   VIDEOOUT_WAIT_VBLANK,    /* a flip still to show frees one at a vblank */
++   VIDEOOUT_WAIT_GPU_FRAME, /* a present still waits for its frame from the GPU */
++   VIDEOOUT_WAIT_QUEUE,     /* the queue depth is reached by flips still to show */
++   VIDEOOUT_WAIT_HELD,      /* every image is held by the title */
++   VIDEOOUT_WAIT_REASONS,
++};
++
++/* Under videoout_output.lock: acquires, those that waited, and per reason the waits and their time. */
++static uint64_t videoout_wait_acquires, videoout_wait_waited;
++static uint64_t videoout_wait_count[VIDEOOUT_WAIT_REASONS], videoout_wait_ns[VIDEOOUT_WAIT_REASONS];
++
+ static uint32_t
+-videoout_free_buffer_locked(uint32_t first, uint32_t count, bool *vblank)
++videoout_free_buffer_locked(uint32_t first, uint32_t count, bool *vblank, enum videoout_wait_reason *reason)
+ {
+    struct wsi_videoout_output *out = &videoout_output;
+    const int64_t shown = videoout_shown_argument_locked();
+@@ -1272,10 +1285,13 @@ videoout_free_buffer_locked(uint32_t first, uint32_t count, bool *vblank)
+          /* A flip to show frees one at a vblank; a present waiting for its
+           * frame, when its flip is made. */
+          *vblank = flipped;
++         *reason = flipped ? VIDEOOUT_WAIT_QUEUE : VIDEOOUT_WAIT_GPU_FRAME;
+          return UINT32_MAX;
+       }
+    }
++   bool any_pending = false;
+    for (uint32_t i = first; i < first + count; i++) {
++      any_pending |= out->buffer[i].pending;
+       if (out->buffer[i].held || out->buffer[i].pending || i == on_screen)
+          continue;
+       if (out->buffer[i].argument > shown) {
+@@ -1285,6 +1301,7 @@ videoout_free_buffer_locked(uint32_t first, uint32_t count, bool *vblank)
+       if (best == UINT32_MAX || out->buffer[i].argument < out->buffer[best].argument)
+          best = i;
+    }
++   *reason = *vblank ? VIDEOOUT_WAIT_VBLANK : any_pending ? VIDEOOUT_WAIT_GPU_FRAME : VIDEOOUT_WAIT_HELD;
+    return best;
+ }
+ 
+@@ -1297,13 +1314,16 @@ videoout_swapchain_acquire_next_image(struct wsi_swapchain *wsi_chain, const VkA
+    const uint64_t deadline = os_time_get_absolute_timeout(info->timeout);
+ 
+    mtx_lock(&out->lock);
++   videoout_wait_acquires++;
++   bool waited = false;
+    for (;;) {
+       if (chain->retired) {
+          mtx_unlock(&out->lock);
+          return VK_ERROR_OUT_OF_DATE_KHR;
+       }
+       bool vblank;
+-      const uint32_t index = videoout_free_buffer_locked(chain->first, chain->base.image_count, &vblank);
++      enum videoout_wait_reason reason = VIDEOOUT_WAIT_HELD;
++      const uint32_t index = videoout_free_buffer_locked(chain->first, chain->base.image_count, &vblank, &reason);
+       if (index != UINT32_MAX) {
+          out->buffer[index].held = true;
+          mtx_unlock(&out->lock);
+@@ -1318,6 +1338,12 @@ videoout_swapchain_acquire_next_image(struct wsi_swapchain *wsi_chain, const VkA
+          mtx_unlock(&out->lock);
+          return VK_TIMEOUT;
+       }
++      if (!waited) {
++         waited = true;
++         videoout_wait_waited++;
++      }
++      videoout_wait_count[reason]++;
++      const uint64_t wait_start = os_time_get_nano();
+       if (vblank) {
+          /* A flip still to show frees one at a vblank. */
+          const int handle = out->handle;
+@@ -1333,7 +1359,33 @@ videoout_swapchain_acquire_next_image(struct wsi_swapchain *wsi_chain, const VkA
+          const uint64_t wake = MIN2(deadline, now + UINT64_C(20000000));
+          ps5_cnd_wait_ns(&out->changed, &out->lock, wake > now ? wake - now : 0);
+       }
++      videoout_wait_ns[reason] += os_time_get_nano() - wait_start;
++   }
++}
++
++/* Crux2: where the title's acquires waited, since the last call (each call starts the counts again).
++ * values gets, as far as count allows: acquires, acquires that waited, then for vblank, GPU frame,
++ * queue full and held, the waits and their nanoseconds. Returns the number of values written. */
++PUBLIC int wsi_videoout_take_wait_stats(uint64_t *values, int count);
++PUBLIC int
++wsi_videoout_take_wait_stats(uint64_t *values, int count)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   uint64_t all[2 + 2 * VIDEOOUT_WAIT_REASONS];
++   mtx_lock(&out->lock);
++   all[0] = videoout_wait_acquires;
++   all[1] = videoout_wait_waited;
++   for (int r = 0; r < VIDEOOUT_WAIT_REASONS; r++) {
++      all[2 + 2 * r] = videoout_wait_count[r];
++      all[3 + 2 * r] = videoout_wait_ns[r];
++      videoout_wait_count[r] = videoout_wait_ns[r] = 0;
+    }
++   videoout_wait_acquires = videoout_wait_waited = 0;
++   mtx_unlock(&out->lock);
++   const int n = values ? MIN2(count, (int)ARRAY_SIZE(all)) : 0;
++   for (int i = 0; i < n; i++)
++      values[i] = all[i];
++   return n;
+ }
+ 
+ static VkResult
+-- 
+2.43.0
+

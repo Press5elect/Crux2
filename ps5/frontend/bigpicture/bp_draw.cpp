@@ -2983,4 +2983,44 @@ void tickClock()
 	timeNow += std::clamp(static_cast<double>(ImGui::GetIO().DeltaTime), 0.0, 0.1);
 }
 
+
+// PCSX2's on-screen messages (ImGuiManager::DrawOSDMessages, with [PS5] OsdStyle 0) drawn as this
+// interface's toasts are (drawToasts): the same face and size, ground, edge and glow, in the skin's
+// colours. Sizes and places are screen pixels, for PCSX2's placing and stacking of its messages.
+namespace
+{
+constexpr float OSD_MOST = 560.f; // a toast's widest text before it wraps
+ImVec2 osdMessageUnits(const char* s)
+{
+	const ImVec2 one = textSize(regular(), 22, s);
+	const bool wraps = one.x > OSD_MOST;
+	const ImVec2 ts = wraps ? textSize(regular(), 22, s, OSD_MOST) : one;
+	return ImVec2((wraps ? OSD_MOST : ts.x) + 48, std::max(68.f, ts.y + 24));
+}
+} // namespace
+
+ImVec2 osdMessageSize(const char* s)
+{
+	measure();
+	const ImVec2 u = osdMessageUnits(s);
+	return ImVec2(u.x * S, u.y * S);
+}
+
+void osdMessageDraw(ImDrawList* dl, float x_px, float y_px, const char* s, float shown)
+{
+	measure();
+	const ImVec2 u = osdMessageUnits(s);
+	const float x = x_px / S, y = y_px / S, w = u.x, h = u.y;
+	const ImVec2 ts = textSize(regular(), 22, s, w - 48 < OSD_MOST ? 0.f : OSD_MOST);
+	glow(dl, x, y, w, h, 16, alpha(col::rgba(0, 0, 0, 255), 0.45f * shown), 12);
+	rect(dl, x, y, w, h, alpha(col::sheetHi, shown), 16);
+	outline(dl, x, y, w, h, alpha(col::accent, 0.7f * shown), 16, 2);
+	text(dl, regular(), 22, x + 24, y + (h - ts.y) / 2, alpha(col::text, shown), s, w - 48 < OSD_MOST ? 0.f : OSD_MOST);
+}
+
+float osdMessageSpacing()
+{
+	measure();
+	return 10.f * S;
+}
 } // namespace bp

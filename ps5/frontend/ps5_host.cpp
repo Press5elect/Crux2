@@ -38,11 +38,13 @@
 #include "ps5_ui_audio.h"
 #include "bigpicture/bp.h"
 #include "ps5_vfs.h"
+#include "ps5_clock.h"
 
 #include "Achievements.h"
 #include "CDVD/CDVDcommon.h"
 #include "Config.h"
 #include "GS/GS.h"
+#include "MTVU.h"
 #include "GS/Renderers/Common/GSDevice.h"
 #include "GS/Renderers/HW/GSRendererHW.h"
 #include "GameList.h"
@@ -67,6 +69,7 @@
 #include "common/Error.h"
 #include "common/FileSystem.h"
 #include "common/HostSys.h"
+#include "common/PS5Counters.h"
 #include <ps5platform/kernel.h>
 #include "common/Path.h"
 #include "common/ProgressCallback.h"
@@ -79,6 +82,7 @@
 #include "IconsFontAwesome.h"
 #include "fmt/format.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -95,6 +99,11 @@
 
 extern "C" int sceKernelUsleep(unsigned microseconds);
 extern "C" void ps5px_publish_thread_cpu_time(void);
+extern "C" void ps5px_set_coarse_thread_times(bool on);
+extern "C" void ps5px_counters_line(char* line, unsigned size, double seconds);
+extern bool g_ps5_same_micro_skip; // MTVU.cpp
+// The driver's acquire wait statistics (ps5/patches/mesa-27/0022); weak: a driver without it has none.
+extern "C" int wsi_videoout_take_wait_stats(uint64_t* values, int count) __attribute__((weak));
 extern "C" void ps5px_profiler_set_window_extra(void (*extra)(void));
 
 namespace PS5Host
@@ -395,6 +404,10 @@ void PS5Host::SetReleaseDefaults(SettingsInterface& si, bool only_missing)
 	b("PS5", "FastPipelines", true);
 	b("PS5", "ThreadedRecording", true);
 	b("PS5", "StreamZero", true); // the driver clears new graphics memory with streaming writes (on since the owner's console runs of 2026-11-16)
+	b("PS5", "DriverCoreFree", true); // the rest of the threads kept off the driver's core (on: the owner's decision, 2026-11-22)
+	b("PS5", "SameMicroSkip", false); // a VU1 microprogram upload equal to micro memory keeps the compiled programs
+	b("PS5", "CoarseThreadTimes", false); // threads note their processor time at most once a millisecond (off: each wake)
+	i("PS5", "WakeSpinUs", 50); // how long a waiting thread looks for work before it sleeps (PCSX2's 50 us)
 	b(GS, "PS5SharedTargetMemory", true); // render targets from shared memory blocks (on since the owner's console runs of 2026-11-16)
 	b("PS5", "UpdateAtStart", true);
 	b("PS5", "FixesAtStart", true);
@@ -944,6 +957,14 @@ void Host::PumpMessagesOnCPUThread()
 	ps5px_publish_thread_cpu_time();
 	if (PS5Host::s_test.active)
 	{
+		// The VU thread's ring at this frame, for the window's "counters:" line (common/PS5Counters.h).
+		if (THREAD_VU1)
+		{
+			const u64 used = vu1Thread.PS5RingUsedWords();
+			PS5Counters::Add(PS5Counters::ee.ring_samples);
+			PS5Counters::Add(PS5Counters::ee.ring_words, used);
+			PS5Counters::Max(PS5Counters::ee.ring_words_max, used);
+		}
 		PS5Host::TestRunFrame();
 		PS5Host::TestRunTick();
 	}
@@ -1269,6 +1290,27 @@ void PS5Host::TestRunTick()
 						EmuConfig.GS.VsyncQueueSize > 0 ? EmuConfig.GS.VsyncQueueSize : MTGS::PS5FrameQueueDepth());
 					if (const std::string stretch = AudioStream::PS5TakeStretchWindow(); !stretch.empty())
 						ps5px_log("test: window %u: %s", s_test.window_index, stretch.c_str());
+					// Where the EE, VU and graphics threads waited for each other (common/PS5Counters.h).
+					{
+						char counters[1024];
+						ps5px_counters_line(counters, sizeof(counters), window_seconds);
+						ps5px_log("test: window %u: %s", s_test.window_index, counters);
+					}
+					// Where the graphics thread waited for an image to draw the next frame into, and why (the
+					// driver's counts, Mesa patch 0022): a vblank is the display's pace, the GPU frame a present
+					// still waiting for the GPU, a full queue flips still to show, held images all held.
+					if (wsi_videoout_take_wait_stats)
+					{
+						uint64_t w[10] = {};
+						if (wsi_videoout_take_wait_stats(w, 10) == 10)
+						{
+							const double s = window_seconds > 0 ? window_seconds : 1.0;
+							ps5px_log("test: window %u: acquire: per second %.0f acquires, %.0f waited; vblank %.0f (%.1f ms/s), "
+									  "GPU frame %.0f (%.1f ms/s), queue full %.0f (%.1f ms/s), images held %.0f (%.1f ms/s)",
+								s_test.window_index, w[0] / s, w[1] / s, w[2] / s, w[3] / 1e6 / s, w[4] / s, w[5] / 1e6 / s, w[6] / s,
+								w[7] / 1e6 / s, w[8] / s, w[9] / 1e6 / s);
+						}
+					}
 
 					// How busy the threads and the GPU are (the overlay's figures), and what the
 					// graphics thread draws in a frame: the renderer's own counters, read on its
@@ -2127,6 +2169,12 @@ bool PS5Host::IsOnCPUThread()
 	return s_state.cpu_thread_running.load(std::memory_order_acquire) && pthread_equal(pthread_self(), s_state.cpu_pthread);
 }
 
+// For MTGS::RunOnGSThread's check that the graphics thread's queue has its one writer (MTGS.cpp).
+extern "C" int ps5px_on_cpu_thread(void)
+{
+	return PS5Host::IsOnCPUThread() ? 1 : 0;
+}
+
 // On the emulation thread.
 void PS5Host::StartGameListRefresh(bool invalidate_cache)
 {
@@ -2376,6 +2424,38 @@ int main(int argc, char* argv[])
 			setenv("RADV_PS5_WAIT_SPIN_US", std::to_string(spin).c_str(), 1);
 			setenv("RADV_PS5_WAIT_SLEEP_US", std::to_string(sleep).c_str(), 1);
 			ps5px_log("graphics driver: a wait for the GPU checks for %d us, then sleeps %d us between checks", spin, sleep);
+		}
+	}
+
+	// How long a thread waiting for work or for a semaphore looks for it before it sleeps (Settings >
+	// Interface > PlayStation 5 > Wake-Up Spin Time; PCSX2's own 50 us by default). For measuring 50, 100
+	// and 200 us against each other: set here, before the emulator's threads start.
+	{
+		const int spin = std::clamp(Host::GetBaseIntSettingValue("PS5", "WakeSpinUs", 50), 0, 1000);
+		if (spin != 50)
+		{
+			SPIN_TIME_NS = static_cast<u32>(spin) * 1000;
+			ps5px_log("threads: a wait looks for work for %d us before it sleeps (WakeSpinUs)", spin);
+		}
+	}
+
+	// What the clocks cost on this console (the boot log's "clock:" line), and the coarse thread times
+	// (Settings > Interface > PlayStation 5 > Coarse Thread Times, off): with them on, a thread notes its own
+	// processor time at most once a millisecond instead of at every wake (PS5Threads.cpp).
+	{
+		char line[192];
+		uint64_t thread_cpu_ns = 0;
+		ps5px_clock_probe_line(line, sizeof(line), 200, &thread_cpu_ns);
+		PS5Counters::ticks_per_second = sceKernelGetTscFrequency();
+		if (line[0])
+			ps5px_log("%s", line);
+		g_ps5_same_micro_skip = Host::GetBaseBoolSettingValue("PS5", "SameMicroSkip", false);
+		if (g_ps5_same_micro_skip)
+			ps5px_log("VU1: a microprogram upload equal to micro memory keeps the compiled programs (SameMicroSkip)");
+		if (Host::GetBaseBoolSettingValue("PS5", "CoarseThreadTimes", false))
+		{
+			ps5px_set_coarse_thread_times(true);
+			ps5px_log("threads: processor times are noted at most once a millisecond (CoarseThreadTimes)");
 		}
 	}
 

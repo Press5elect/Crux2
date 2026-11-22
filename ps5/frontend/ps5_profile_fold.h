@@ -158,9 +158,19 @@ private:
 /// used, which leaves out the time before it).
 /// `self_top`, `stack_top` and `caller_top` bound the three lists; for the `spot_functions`
 /// functions the thread ran in most, the instructions it was interrupted at most are listed too.
+/// A range of generated code (the recompilers' blocks, their dispatchers), by name: where a sample outside
+/// the program was taken (ps5_profiler.cpp's table, filled from PCSX2's Perf registrations and the code
+/// area's regions). Where ranges overlap, the smallest that holds the address names it.
+struct PS5ProfileRegion
+{
+	uint64_t start, end;
+	const char* name;
+};
+
 inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const PS5ProfileSymbols& symbols, uint64_t base,
 	double seconds, const char* prefix, std::vector<std::string>& lines, size_t sent = 0, uint64_t cpu_before = 0,
-	unsigned self_top = 25, unsigned stack_top = 40, unsigned caller_top = 8, unsigned spot_functions = 8)
+	unsigned self_top = 25, unsigned stack_top = 40, unsigned caller_top = 8, unsigned spot_functions = 8,
+	const PS5ProfileRegion* regions = nullptr, size_t region_count = 0)
 {
 	char text[320];
 	if (count == 0)
@@ -176,6 +186,19 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 	// program with this function the nearest of the program's on the stack.
 	std::vector<uint32_t> self(functions, 0), on_stack(functions, 0), outside_from(functions, 0);
 	uint32_t outside = 0, outside_unknown = 0, unnamed = 0;
+	// Samples outside the program by the generated code they were in (regions), and those in none.
+	std::vector<uint32_t> in_region(region_count, 0);
+	uint32_t outside_no_region = 0;
+	const auto region_of = [&](uint64_t address) -> int {
+		int found = -1;
+		for (size_t r = 0; r < region_count; r++)
+		{
+			if (address >= regions[r].start && address < regions[r].end &&
+				(found < 0 || regions[r].end - regions[r].start < regions[found].end - regions[found].start))
+				found = static_cast<int>(r);
+		}
+		return found;
+	};
 	uint32_t by_tag[4] = {0, 0, 0, 0}; // e, d, p, l
 
 	const auto function_of = [&](uint64_t address) -> int {
@@ -218,6 +241,10 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 		else
 		{
 			outside++;
+			if (const int region = region_of(sample.rip); region >= 0)
+				in_region[static_cast<size_t>(region)]++;
+			else
+				outside_no_region++;
 		}
 
 		// The words found by looking through the stack (the first `scanned` entries), by what was
@@ -287,6 +314,30 @@ inline void PS5ProfileFold(const PS5ProfileSample* samples, size_t count, const 
 		"outside the program %.1f%%",
 		prefix, percent(by_tag[0]), percent(by_tag[1]), percent(by_tag[2]), percent(by_tag[3] + unnamed), percent(outside));
 	lines.emplace_back(text);
+
+	// The part of "outside the program" that was generated code, by region (the largest first).
+	if (outside != 0 && region_count != 0 && outside_no_region != outside)
+	{
+		std::vector<uint32_t> order;
+		for (size_t r = 0; r < region_count; r++)
+		{
+			if (in_region[r] != 0)
+				order.push_back(static_cast<uint32_t>(r));
+		}
+		std::sort(order.begin(), order.end(),
+			[&](uint32_t a, uint32_t b) { return (in_region[a] != in_region[b]) ? in_region[a] > in_region[b] : a < b; });
+		std::string line = std::string(prefix) + " generated code:";
+		for (size_t i = 0; i < order.size(); i++)
+		{
+			char part[96];
+			std::snprintf(part, sizeof(part), "%s %s %.1f%%", i ? "," : "", regions[order[i]].name, percent(in_region[order[i]]));
+			line += part;
+		}
+		char rest[96];
+		std::snprintf(rest, sizeof(rest), "; outside the program and not generated code %.1f%%", percent(outside_no_region));
+		line += rest;
+		lines.push_back(std::move(line));
+	}
 
 	// The lists: the largest counts first, equal counts by address so that a list is the same
 	// every time.

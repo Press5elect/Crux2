@@ -13,6 +13,7 @@
 #include "bp_settings_model.h"
 #include "bp_settings_text.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 
@@ -280,7 +281,7 @@ void homeScreen(ImDrawList* dl)
 	// (Pointers into the rows: taken again after the input, which may have made the rows anew.)
 	std::vector<const Item*> pinnedItems = entriesOf(pins());
 	std::vector<const Item*> lately = entriesOf(recent());
-	int pinnedShown = std::min(static_cast<int>(pinnedItems.size()), 4);
+	int pinnedShown = static_cast<int>(pinnedItems.size()); // (every pin reachable, in the quick menu's order)
 	int latelyShown = std::min(static_cast<int>(lately.size()), 3);
 
 	// ---- input
@@ -376,7 +377,7 @@ void homeScreen(ImDrawList* dl)
 	// ---- drawing
 	pinnedItems = entriesOf(pins());
 	lately = entriesOf(recent());
-	pinnedShown = std::min(static_cast<int>(pinnedItems.size()), 4);
+	pinnedShown = static_cast<int>(pinnedItems.size());
 	latelyShown = std::min(static_cast<int>(lately.size()), 3);
 	st.homeInner = std::clamp(st.homeInner, 0, std::max(0, (f == 9 ? pinnedShown : latelyShown) - 1));
 	const float e = entered(st.forGame ? 203 : 202);
@@ -439,11 +440,11 @@ void homeScreen(ImDrawList* dl)
 	// Pinned, and changed lately.
 	{
 		const float y = areasY + 2 * (ch + gap), h = H - 72 - 24 - y, w = (fullW - gap) / 2;
-		const auto list = [&](int which, const char* title, const std::vector<const Item*>& items, int shown, const char* none) {
+		const auto list = [&](int which, const std::string& title, const std::vector<const Item*>& items, int count, const char* none) {
 			const float x = x0 + which * (w + gap);
 			const bool on = (f == 9 + which);
 			card(dl, x, y, w, h, false, false);
-			text(dl, bold(), 18, x + 28, y + 20, p.accent, title);
+			text(dl, bold(), 18, x + 28, y + 20, p.accent, title.c_str());
 			if (items.empty())
 			{
 				text(dl, regular(), 21, x + 28, y + 62, p.faint, none, w - 56);
@@ -451,24 +452,42 @@ void homeScreen(ImDrawList* dl)
 					focusRing(dl, x, y, w, h, 16);
 				return;
 			}
-			const float lh = std::min(44.f, (h - 64) / std::max(1, shown));
-			for (int i = 0; i < shown; i++)
+			// As many rows as the card holds, in the quick menu's order; when they do not all fit, the focus
+			// scrolls them (one column, as the quick menu's panel).
+			const float lh = 34.f;
+			const int rows = std::max(1, static_cast<int>((h - 60) / lh));
+			const int shown = std::min(count, rows);
+			const int first = on ? std::clamp(st.homeInner - (shown - 1), 0, count - shown) : 0;
+			if (count > shown)
 			{
-				const Item& it = *items[static_cast<size_t>(i)];
-				const float ly = y + 56 + i * lh;
-				const bool here = on && i == st.homeInner;
+				// Where the rows shown are among them all.
+				const std::string where = std::to_string(first + 1) + "\xe2\x80\x93" + std::to_string(first + shown) + " of " + std::to_string(count);
+				const float ww = textSize(bold(), 18, where.c_str()).x;
+				text(dl, bold(), 18, x + w - 28 - ww, y + 20, p.secondary, where.c_str());
+			}
+			const float colW = w - 28;
+			for (int i = 0; i < shown && first + i < count; i++)
+			{
+				const Item& it = *items[static_cast<size_t>(first + i)];
+				const float cx = x + 14;
+				const float ly = y + 56 + static_cast<float>(i) * lh;
+				const bool here = on && first + i == st.homeInner;
+				const float boxW = colW;
 				if (here)
 				{
-					rect(dl, x + 14, ly - 4, w - 28, lh - 2, p.raised, 10);
-					focusRing(dl, x + 14, ly - 4, w - 28, lh - 2, 10);
+					rect(dl, cx, ly - 1, boxW, lh - 2, p.raised, 10);
+					focusRing(dl, cx, ly - 1, boxW, lh - 2, 10);
 				}
+				const float size = 21.f;
 				const std::string v = valueText(it.o);
-				const float vw = std::min(textSize(bold(), 21, v.c_str()).x, w * 0.4f);
-				textIn(dl, bold(), 21, x + w - 28 - vw, ly + 4, it.changed ? p.accent : p.secondary, v, w * 0.4f, here);
-				textIn(dl, regular(), 21, x + 28, ly + 4, p.text, it.o.label, w - 84 - vw, here);
+				const float vw = std::min(textSize(bold(), size, v.c_str()).x, boxW * 0.4f);
+				const float right = cx + boxW - 14;
+				textIn(dl, bold(), size, right - vw, ly + 4, it.changed ? p.accent : p.secondary, v, boxW * 0.4f, here);
+				textIn(dl, regular(), size, cx + 14, ly + 4, p.text, it.o.label, right - vw - 12 - (cx + 14), here);
 			}
 		};
-		list(0, "PINNED", pinnedItems, pinnedShown, "Press Square on any setting to pin it here.");
+		list(0, pinnedShown > 1 ? "PINNED (" + std::to_string(pinnedShown) + ")" : std::string("PINNED"), pinnedItems, pinnedShown,
+			"Press Square on any setting to pin it here.");
 		list(1, "CHANGED LATELY", lately, latelyShown, "The last three settings changed are shown here.");
 	}
 	endEntrance(content, e);

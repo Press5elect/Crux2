@@ -59,6 +59,7 @@ what each patch does and where it comes from. In brief:
 | `0015`-`0017` | VRR: 119.88 Hz on a VRR display, variable refresh on request, found at run time |
 | `0020` | HDR10 framebuffers on request (from OGBox; needs `param.json`'s attribute `0x20000000`) |
 | `0021` | New buffers zeroed with non-temporal stores (`RADV_PS5_STREAM_ZERO=1`; off by default) |
+| `0022` | Acquire wait statistics: why and how long the title waited for an image (a test run's `acquire:` line) |
 
 `ps5/patches/mesa/` is the older series on Mesa 26.2.5 ([its README](../../ps5/patches/mesa/README.md));
 it is used only with `CRUX2_MESA_PATCHES=ps5/patches/mesa`.

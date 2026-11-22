@@ -25,6 +25,7 @@
 #include "ps5_profile_fold.h"
 #include "ps5_thread_layout.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
@@ -32,11 +33,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
 
 #include <pthread.h>
+
+// The EE's code at a guest address, for the busiest blocks' dumps (PCSX2's side, x86/ix86-32/iR5900.cpp on the
+// console): up to `count` words, the number read (0 when the address is not memory).
+extern "C" int ps5px_profile_guest_ee_words(uint32_t pc, uint32_t* out, int count) __attribute__((weak));
 #include <signal.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -107,6 +114,171 @@ namespace
 	PS5ProfileSymbols s_symbols;
 	uint64_t s_base = 0;
 	uint64_t s_end = 0; // the end of the program's code, as an address
+
+	// The generated code's ranges by name (ps5px_profile_code_region): the recompilers' code areas and
+	// the stubs PCSX2 registers with Perf. Written under s_regions_lock by the recompilers' resets, read
+	// by the sampler thread when it folds (never by the signal handler).
+	constexpr size_t MAX_REGIONS = 48;
+	struct CodeRegion
+	{
+		std::atomic<uint64_t> start{0}, end{0};
+		std::atomic<const char*> name{nullptr};
+	};
+	CodeRegion s_regions[MAX_REGIONS];
+	std::atomic<size_t> s_region_count{0};
+	std::mutex s_regions_lock;
+
+	std::vector<PS5ProfileRegion> CodeRegions()
+	{
+		std::vector<PS5ProfileRegion> out;
+		const size_t n = std::min(s_region_count.load(std::memory_order_acquire), MAX_REGIONS);
+		for (size_t i = 0; i < n; i++)
+		{
+			const uint64_t start = s_regions[i].start.load(std::memory_order_relaxed);
+			const uint64_t end = s_regions[i].end.load(std::memory_order_relaxed);
+			const char* name = s_regions[i].name.load(std::memory_order_relaxed);
+			if (name && end > start)
+				out.push_back({start, end, name});
+		}
+		return out;
+	}
+
+	// The recompilers' blocks (PCSX2's Perf::*.RegisterPC, common/Perf.cpp): where each block's code is,
+	// and the guest address it was compiled from, so that a sample in generated code names the guest code
+	// it ran. One table a recompiler, each written by the one thread that compiles for it (the EE thread
+	// for the EE and the IOP, the VU thread for VU1), read by the sampler thread when it writes a window
+	// up (never by the signal handler). A recompiler fills its code area from the bottom up between two
+	// resets, so a table is in address order and searched by halves; a reset starts it again (a sample
+	// taken across a reset can be put down to a block of the new code: rare, and only names).
+	struct BlockEntry
+	{
+		uint64_t start;
+		uint32_t size;
+		uint32_t pc;
+	};
+	struct BlockTable
+	{
+		const char* name;
+		uint32_t capacity;
+		std::unique_ptr<BlockEntry[]> entries{};
+		std::atomic<uint32_t> count{0};
+		std::atomic<uint32_t> dropped{0}; // blocks past the capacity, not named
+	};
+	enum : int { BLOCKS_EE, BLOCKS_IOP, BLOCKS_VU0, BLOCKS_VU1, BLOCK_TABLES };
+	BlockTable s_blocks[BLOCK_TABLES] = {{"EE", 262144, {}}, {"IOP", 65536, {}}, {"microVU0", 16384, {}}, {"microVU1", 65536, {}}};
+	std::atomic<bool> s_blocks_on{false};
+	int s_block_dumps_left = 12; // code dumps a run (the sampler thread's)
+
+	struct BlockHit
+	{
+		int table;
+		const BlockEntry* entry;
+	};
+
+	BlockHit FindBlock(uint64_t address)
+	{
+		for (int t = 0; t < BLOCK_TABLES; t++)
+		{
+			const BlockTable& table = s_blocks[t];
+			const uint32_t n = std::min(table.count.load(std::memory_order_acquire), table.capacity);
+			if (n == 0 || address < table.entries[0].start)
+				continue;
+			const BlockEntry* const begin = table.entries.get();
+			// The last block that starts at or before the address.
+			const BlockEntry* it = std::upper_bound(begin, begin + n, address, [](uint64_t a, const BlockEntry& e) { return a < e.start; });
+			if (it == begin)
+				continue;
+			--it;
+			if (address < it->start + it->size)
+				return {t, it};
+		}
+		return {-1, nullptr};
+	}
+
+	// The window's samples by guest block: the busiest ones as a line, and, a few times a run, the code
+	// of the busiest EE blocks as bytes (to be read against a disassembler: what the recompiler made).
+	void BlockLines(const std::vector<PS5ProfileSample>& samples, const char* prefix)
+	{
+		if (!s_blocks_on.load(std::memory_order_acquire) || samples.empty())
+			return;
+		struct Count
+		{
+			int table;
+			uint32_t pc;
+			uint64_t start;
+			uint32_t size;
+			uint32_t n;
+		};
+		std::vector<Count> counts;
+		uint32_t in_blocks = 0;
+		for (const PS5ProfileSample& sample : samples)
+		{
+			const BlockHit hit = FindBlock(sample.rip);
+			if (!hit.entry)
+				continue;
+			in_blocks++;
+			bool found = false;
+			for (Count& c : counts)
+			{
+				if (c.table == hit.table && c.start == hit.entry->start)
+				{
+					c.n++;
+					found = true;
+					break;
+				}
+			}
+			if (!found && counts.size() < 4096)
+				counts.push_back({hit.table, hit.entry->pc, hit.entry->start, hit.entry->size, 1});
+		}
+		if (in_blocks == 0)
+			return;
+		std::sort(counts.begin(), counts.end(), [](const Count& a, const Count& b) { return a.n != b.n ? a.n > b.n : a.start < b.start; });
+		const double total = static_cast<double>(samples.size());
+		std::string line = std::string(prefix) + " busiest guest blocks (share of all samples):";
+		for (size_t i = 0; i < counts.size() && i < 10; i++)
+		{
+			char part[80];
+			std::snprintf(part, sizeof(part), "%s %s %08X %.1f%%", i ? "," : "", s_blocks[counts[i].table].name, counts[i].pc,
+				100.0 * counts[i].n / total);
+			line += part;
+		}
+		ps5px_log("%s", line.c_str());
+
+		// The code of the three busiest EE blocks, 64 bytes a line, at most 1 KiB a block.
+		for (size_t i = 0; i < counts.size() && i < 3 && s_block_dumps_left > 0; i++)
+		{
+			const Count& c = counts[i];
+			if (c.table != BLOCKS_EE || c.n * 250 < samples.size()) // under 0.4% of the window: not worth the lines
+				continue;
+			s_block_dumps_left--;
+			const uint32_t size = std::min<uint32_t>(c.size, 1024);
+			ps5px_log("%s code of EE block %08X (%u bytes%s, at 0x%llx):", prefix, c.pc, c.size, size < c.size ? ", the first 1024" : "",
+				static_cast<unsigned long long>(c.start));
+			// The guest instructions the block was compiled from (MIPS words from the block's address on),
+			// to be read beside the x86: what the game's code does, and how the recompiler made it.
+			if (ps5px_profile_guest_ee_words)
+			{
+				uint32_t words[32];
+				const int n = ps5px_profile_guest_ee_words(c.pc, words, 32);
+				for (int w = 0; w < n; w += 8)
+				{
+					char text[8 * 9 + 1] = "";
+					for (int k = w; k < n && k < w + 8; k++)
+						std::snprintf(text + (k - w) * 9, 10, "%08x ", words[k]);
+					ps5px_log("%s   guest %08X %s", prefix, c.pc + w * 4, text);
+				}
+			}
+			const uint8_t* const code = reinterpret_cast<const uint8_t*>(c.start);
+			for (uint32_t at = 0; at < size; at += 64)
+			{
+				char hex[64 * 2 + 1];
+				const uint32_t len = std::min<uint32_t>(64, size - at);
+				for (uint32_t b = 0; b < len; b++)
+					std::snprintf(hex + b * 2, 3, "%02x", code[at + b]);
+				ps5px_log("%s   +%03x %s", prefix, at, hex);
+			}
+		}
+	}
 
 	bool InProgram(uint64_t address)
 	{
@@ -306,15 +478,20 @@ namespace
 		char prefix[32];
 		std::snprintf(prefix, sizeof(prefix), "profile: %s:", name);
 		lines.clear();
-		PS5ProfileFold(copy.data(), copy.size(), s_symbols, s_base, seconds, prefix, lines, sent, cpu_before);
+		const std::vector<PS5ProfileRegion> regions = CodeRegions();
+		PS5ProfileFold(copy.data(), copy.size(), s_symbols, s_base, seconds, prefix, lines, sent, cpu_before, 25, 40, 8, 8,
+			regions.data(), regions.size());
 		for (const std::string& line : lines)
 			ps5px_log("%s", line.c_str());
+		BlockLines(copy, prefix);
 
 		if (++thread.windows == MAX_WINDOWS)
 			ps5px_log("profile: %s: %u windows written, no more are (the thread is left alone from here on)", name, MAX_WINDOWS);
 	}
 
 	std::atomic<void (*)()> s_window_extra{nullptr};
+
+
 
 	void* SamplerMain(void*)
 	{
@@ -391,6 +568,16 @@ extern "C" void ps5px_profile_start(int all_threads)
 	}
 	s_base = reinterpret_cast<uint64_t>(&__executable_start[0]);
 	s_end = s_base + s_symbols.End();
+	// The recompilers' block tables, for a run that profiles the emulation threads (about 6 MiB).
+	if (all_threads && !s_blocks_on.load(std::memory_order_relaxed))
+	{
+		for (BlockTable& table : s_blocks)
+			table.entries.reset(new (std::nothrow) BlockEntry[table.capacity]);
+		bool all = true;
+		for (BlockTable& table : s_blocks)
+			all &= table.entries != nullptr;
+		s_blocks_on.store(all, std::memory_order_release);
+	}
 	if (s_base == 0)
 	{
 		ps5px_log("profile: not started: the program's own address is not known");
@@ -425,6 +612,54 @@ extern "C" void ps5px_profile_start(int all_threads)
 	ps5px_log("profile: %s every %ld ms, written up every %.0f s while busy; %zu functions known, the program is at %p",
 		s_all_threads ? "the graphics, emulation and VU threads" : "the graphics thread", SAMPLE_INTERVAL_NS / 1000000,
 		static_cast<double>(WINDOW_NS) / 1e9, s_symbols.Count(), static_cast<const void*>(&__executable_start[0]));
+}
+
+// A block a recompiler compiled (common/Perf.cpp's RegisterPC on the console): 0 EE, 1 IOP, 2 microVU0,
+// 3 microVU1. From the thread that compiles for that recompiler only.
+extern "C" void ps5px_profile_block(int table, const void* start, size_t size, uint32_t pc)
+{
+	if (table < 0 || table >= BLOCK_TABLES || !s_blocks_on.load(std::memory_order_acquire))
+		return;
+	BlockTable& t = s_blocks[table];
+	const uint32_t n = t.count.load(std::memory_order_relaxed);
+	if (n >= t.capacity)
+	{
+		t.dropped.store(t.dropped.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+		return;
+	}
+	t.entries[n] = {reinterpret_cast<uint64_t>(start), static_cast<uint32_t>(size), pc};
+	t.count.store(n + 1, std::memory_order_release);
+}
+
+// The recompiler's code was thrown away (a reset): its table starts again.
+extern "C" void ps5px_profile_blocks_reset(int table)
+{
+	if (table >= 0 && table < BLOCK_TABLES)
+		s_blocks[table].count.store(0, std::memory_order_release);
+}
+
+// A range of generated code by name (`name` must live for the whole run: PCSX2's Perf symbols and the
+// recompilers' region names are string literals). The same name again moves its range (a reset).
+extern "C" void ps5px_profile_code_region(const char* name, const void* start, size_t size)
+{
+	if (!name || !start || size == 0)
+		return;
+	const std::lock_guard<std::mutex> lock(s_regions_lock);
+	const size_t n = s_region_count.load(std::memory_order_relaxed);
+	size_t slot = n;
+	for (size_t i = 0; i < n; i++)
+	{
+		const char* existing = s_regions[i].name.load(std::memory_order_relaxed);
+		if (existing == name || (existing && std::strcmp(existing, name) == 0))
+			slot = i;
+	}
+	if (slot >= MAX_REGIONS)
+		return;
+	s_regions[slot].start.store(reinterpret_cast<uint64_t>(start), std::memory_order_relaxed);
+	s_regions[slot].end.store(reinterpret_cast<uint64_t>(start) + size, std::memory_order_relaxed);
+	s_regions[slot].name.store(name, std::memory_order_relaxed);
+	if (slot == n)
+		s_region_count.store(n + 1, std::memory_order_release);
 }
 
 // From a thread of the emulator as it names itself (common/PS5Threads.cpp): the ones the

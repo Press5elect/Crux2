@@ -240,3 +240,43 @@ ps5px_clock_line(char *line, unsigned size)
             (unsigned long long)s_hz, (unsigned long long)atomic_load_explicit(&s_checks, memory_order_relaxed),
             (double)atomic_load_explicit(&s_largest_difference, memory_order_relaxed) / 1e6);
 }
+
+/* Crux2: what the clocks cost on this console, for the boot log (the probe of the 2026-11-21
+ * performance work): `calls` calls each of the thread's own processor clock, the kernel's
+ * monotonic clock and the counter, timed by the counter. *thread_cpu_ns gets the processor
+ * clock's cost per call. */
+void
+ps5px_clock_probe_line(char *line, unsigned size, unsigned calls, uint64_t *thread_cpu_ns)
+{
+   if (!line || size == 0)
+      return;
+   line[0] = '\0';
+   const uint64_t hz = sceKernelGetTscFrequency();
+   if (hz < UINT64_C(100000000) || calls == 0)
+      return;
+   struct timespec ts;
+   volatile uint64_t sink = 0;
+   uint64_t t0 = sceKernelReadTsc();
+   for (unsigned i = 0; i < calls; i++) {
+      __real_clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+      sink += (uint64_t)ts.tv_nsec;
+   }
+   uint64_t t1 = sceKernelReadTsc();
+   for (unsigned i = 0; i < calls; i++) {
+      __real_clock_gettime(CLOCK_MONOTONIC, &ts);
+      sink += (uint64_t)ts.tv_nsec;
+   }
+   uint64_t t2 = sceKernelReadTsc();
+   for (unsigned i = 0; i < calls; i++)
+      sink += sceKernelReadTsc();
+   uint64_t t3 = sceKernelReadTsc();
+   (void)sink;
+   const double ns_per_tick = 1e9 / (double)hz;
+   const double cpu = (double)(t1 - t0) * ns_per_tick / calls;
+   const double mono = (double)(t2 - t1) * ns_per_tick / calls;
+   const double tsc = (double)(t3 - t2) * ns_per_tick / calls;
+   if (thread_cpu_ns)
+      *thread_cpu_ns = (uint64_t)cpu;
+   snprintf(line, size, "clock: costs per call (%u calls): thread processor time %.2f us, kernel monotonic %.2f us, counter %.1f ns",
+            calls, cpu / 1000.0, mono / 1000.0, tsc);
+}

@@ -505,7 +505,7 @@ Page emulationPage(int layer, bool forGame)
 		{"Off", "Mild", "Moderate", "Maximum"})));
 	rows.push_back(adv(toggle("Multi-threaded VU1 (MTVU)",
 		"Generally a speedup on CPUs with 4 or more cores. Safe for most games, but a few are incompatible and may "
-			"hang.", SPEED, "vuThread", false)));
+			"hang.", SPEED, "vuThread", true)));  // on: VMManager::SetHardwareDependentDefaultSettings writes it on
 	{
 		// One choice for two switches: PCSX2's pinning and Crux2's own layout (which wins when both
 		// are on, so that state is not offered).
@@ -530,6 +530,16 @@ Page emulationPage(int layer, bool forGame)
 			"PS5", "DriverOwnCore", true, Option::Restart);
 		o.flags |= Option::AllGames | Option::Advanced;
 		o.enabled = [](int) { return be->getBool(Shared, "PS5", "ThreadLayout").value_or(true); };
+		rows.push_back(std::move(o));
+	}
+	{
+		Option o = toggle("Driver Core Kept Free",
+			"With the graphics driver on a core of its own, keeps the emulator's other threads off that core.",
+			"PS5", "DriverCoreFree", true, Option::NextStart);
+		o.flags |= Option::AllGames | Option::Expert;
+		o.enabled = [](int) {
+			return be->getBool(Shared, "PS5", "ThreadLayout").value_or(true) && be->getBool(Shared, "PS5", "DriverOwnCore").value_or(true);
+		};
 		rows.push_back(std::move(o));
 	}
 	rows.push_back(toggle("Fast disc access", "Fast disc access, shorter loading times. Check HDLoader compatibility lists for games that are known to have "
@@ -983,15 +993,15 @@ Page graphicsPage(int layer, bool forGame)
 	// screen's (bp_pcsx2.cpp Changed; ps5/frontend/ps5_aa.h; the passes in GSDeviceVK_PS5.cpp, ps5_aa.glsl).
 	rows.push_back(list("Anti-aliasing",
 		"Smooths the jagged edges of the picture. FXAA: quick, a little soft. SMAA: sharper edges, a little GPU time. "
-		"SSAA: the game drawn larger than the screen and made screen-sized, the least shimmer; choosing it raises the "
-		"internal resolution to about one and a half times the screen's (8x at 4K) and turns FSR 1 off, and costs the most. "
+		"SSAA: the picture of the internal resolution you chose scaled down to the screen, the least shimmer when that is "
+		"larger than the screen (6x and up at 4K); FSR 1 is off while it is chosen. "
 		"SSAA + SMAA: SSAA, then SMAA over it for the edges it leaves.",
-		"PS5", "AntiAliasing", 0, {"Off", "FXAA", "SMAA", "SSAA", "SSAA + SMAA"}, 0, Option::AllGames));
+		"PS5", "AntiAliasing", 0, {"Off", "FXAA", "SMAA", "SSAA", "SSAA + SMAA"}, 0));
 	{
 		Option o = list("SSAA filter",
 			"How SSAA makes the larger picture screen-sized. Soft: every pixel it covers averaged, the least shimmer. Sharp: a "
 			"Lanczos filter, crisper edges.",
-			"PS5", "SSAAFilter", 1, {"Soft", "Sharp"}, 1, Option::AllGames);
+			"PS5", "SSAAFilter", 1, {"Soft", "Sharp"}, 1);
 		o.enabled = [](int l) { return effectiveInt(l, "PS5", "AntiAliasing", 0) >= 3; };
 		rows.push_back(std::move(o));
 	}
@@ -1257,6 +1267,8 @@ Page advancedPage(int layer)
 	rows.push_back(toggle("Wait loop detection", "Moderate speedup for some games, with no known side effects.", SPEED, "WaitLoop", true, f));
 	rows.push_back(toggle("Enable fast memory access", "Uses backpatching to avoid register flushing on every memory access.", REC, "EnableFastmem", true, f));
 	rows.push_back(toggle("Pause on TLB miss", "Pauses the virtual machine when a TLB miss occurs, instead of ignoring it and continuing.", REC, "PauseOnTLBMiss", false, f));
+	rows.push_back(toggle("IOP Stores Inline", "The IOP recompiler writes stores to IOP memory itself instead of calling the memory handlers. "
+		"Not yet tested on a console: a game that hangs or loses sound with it on needs it off.", REC, "IopInlineRamStores", false, f | Option::NextStart));
 	rows.push_back(toggle("Enable 128MB RAM (dev console)", "Exposes additional memory to the virtual machine, expanding the EE and IOP memory to 128MB and 8MB "
 		"respectively.", CPU, "ExtraMemory", false, f | Option::NextStart));
 

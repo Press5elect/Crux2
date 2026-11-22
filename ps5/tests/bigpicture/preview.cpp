@@ -33,6 +33,12 @@ bool toastShown(const std::string& line); // bp_draw.cpp: a hook for the checks
 }
 #include "ps5_mc.h"      // the memory cards the card manager is shown: true ones, held in memory
 #include "ps5_osd_draw.h" // the performance overlay, pictured with made-up figures
+namespace bp
+{
+ImVec2 osdMessageSize(const char* s);
+void osdMessageDraw(ImDrawList* dl, float x_px, float y_px, const char* s, float shown);
+float osdMessageSpacing();
+} // namespace bp
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -3039,6 +3045,28 @@ void shots(Harness& h)
 	h.press(P::Square, 10);
 	h.press(P::Circle, 30);
 	h.shot("13-0g-settings-home-pinned");
+	{
+		// More pins than the card holds: one column that scrolls, in the quick menu's order (B4.8).
+		const std::string pinsWere = b.getString(0, "PS5UI", "Pins").value_or("");
+		b.setString(0, "PS5UI", "Pins",
+			"EmuCore/GS.upscale_multiplier@graphics/rendering;EmuCore/GS.AspectRatio;Framerate.NominalScalar;EmuCore/GS.FrameGeneration;"
+			"PS5UI.Look;PS5UI.TextSize;PS5.AntiAliasing");
+		h.wait(10);
+		h.shot("13-0g2-settings-home-many-pins");
+		h.press(P::Down, 10); // to the changed lately
+		h.press(P::Left, 10); // the pins
+		for (int i = 0; i < 5; i++)
+			h.press(P::Down, 6);
+		h.shot("13-0g3-settings-home-pins-scrolled");
+		h.press(P::Up, 6);
+		h.press(P::Up, 6);
+		h.press(P::Up, 6);
+		h.press(P::Up, 6);
+		h.press(P::Up, 6);
+		h.press(P::Up, 10);
+		b.setString(0, "PS5UI", "Pins", pinsWere);
+		h.wait(4);
+	}
 	g_check.expect(b.getString(0, "PS5UI", "RecentChanges").value_or("").find("PS5UI.TextSize") == 0,
 		"a setting changed is the first of the changed lately");
 	h.press(P::Triangle, 20);
@@ -3458,7 +3486,7 @@ void shots(Harness& h)
 	h.shot("16-resume-or-start-over");
 	h.press(P::Circle, 20);
 
-	// Its own options: its page's third tab (R1 twice), Its settings.
+	// Its own options: its page's third tab (R1 twice), Game Specific Settings.
 	h.press(P::Triangle, 20);
 	h.press(P::R1);
 	h.press(P::R1);
@@ -4073,6 +4101,31 @@ void shots(Harness& h)
 			shown = {{c, 3}};
 		}
 		picture("49c7-osd-custom");
+		// PCSX2's on-screen messages (ImGuiManager::DrawOSDMessages with [PS5] OsdStyle 0): the interface's
+		// toasts' face, size, ground and edge, stacked from the top left as PCSX2 places them, beside the
+		// Compact overlay at the top right.
+		{
+			shown = {{make(PS5OsdLogic::Compact, 60, 0, 100, steady), 3}};
+			meters(shown[0].first, 71, 48, 62, 22);
+			const auto overlay = g_overlay;
+			g_overlay = [overlay] {
+				overlay();
+				const float margin = std::round(10.0f * ImGui::GetIO().DisplaySize.y / 1080.0f);
+				float y = margin;
+				for (const char* line : {"State saved to slot 1.", "Widescreen patches enabled for SLUS-21376.",
+						 "Fast forward: on. The game runs as fast as it can; audio may stutter while it is on, and the frame limiter is off "
+						 "until you turn it off again."})
+				{
+					bp::osdMessageDraw(ImGui::GetForegroundDrawList(), margin, y, line, 1.0f);
+					y += bp::osdMessageSize(line).y + bp::osdMessageSpacing();
+				}
+			};
+			const ImVec2 one = bp::osdMessageSize("State saved to slot 1.");
+			const float s = ImGui::GetIO().DisplaySize.y / 1080.0f;
+			g_check.expect(std::fabs(one.y - 68.0f * s) < 1.0f, "a one-line message is a toast's height (68 units)");
+			picture("49c8-osd-messages");
+			g_overlay = overlay;
+		}
 		g_overlay = nullptr;
 		shown.clear();
 	}
@@ -5146,7 +5199,7 @@ void bench(Harness& h, const char* fixture, int frames, const char* only)
 	g_check.expect(bp::screen == bp::Screen::Library && bp::libraryTab() == bp::TabHome, "bench: and OPTIONS is Home again");
 	change("home>game-settings (2nd)", P::Square);
 	change("game-settings>home (2nd)", P::Options);
-	// Home: Triangle is the game's page; on it, Its settings (the third tab); back to the page, and
+	// Home: Triangle is the game's page; on it, Game Specific Settings (the third tab); back to the page, and
 	// out of it.
 	change("home>game-page", P::Triangle);
 	h.press(P::R1, 30);
@@ -5193,7 +5246,7 @@ void bench(Harness& h, const char* fixture, int frames, const char* only)
 	bp::quickFocus("load");
 	h.wait(20);
 	measure("quick-menu-load-state");
-	// The quick menu's "Game settings" (the settings over a paused game), and back.
+	// The quick menu's "Game Specific Settings" (the settings over a paused game), and back.
 	bp::quickFocus("settings");
 	h.wait(10);
 	change("quick-menu>game-settings", P::Cross);

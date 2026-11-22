@@ -343,7 +343,11 @@ public:
 
   bool StoreFrom(const std::string& path, uint64_t size, const Source& source) override
   {
-    std::lock_guard lock(m_mutex);
+    /* The share's lock is let go while each chunk is read from where it comes from: a whole file
+     * (a card set's sync, a backup, a texture pack moved here: gigabytes) held every other call to
+     * the share until it was written, the graphics thread's looking for a game's pack among them,
+     * which stopped the picture and the interface. Calls into libsmb2 still hold it, one at a time. */
+    std::unique_lock lock(m_mutex);
     const std::string full = FullPath(path);
     const std::string part = full + ".part";
     for (int attempt = 0; attempt < 2; attempt++)
@@ -370,13 +374,27 @@ public:
       std::vector<uint8_t> buffer(static_cast<size_t>(std::min<uint64_t>(std::max<uint64_t>(size, 1), most)));
       uint64_t written = 0;
       int result = 0;
+      const uint64_t generation = m_generation;
+      bool connected_again = false;
       while (written < size)
       {
         const uint32_t chunk = static_cast<uint32_t>(std::min<uint64_t>(size - written, most));
-        if (source(buffer.data(), chunk, written) != static_cast<int64_t>(chunk))
+        lock.unlock();
+        errno = 0;
+        const int64_t got = source(buffer.data(), chunk, written);
+        const int source_errno = errno;
+        lock.lock();
+        /* Another call connected again meanwhile (the connection broke): this file's handle went with
+         * the old connection, and the file is written again from its start. */
+        if (!m_context || m_generation != generation)
+        {
+          connected_again = true;
+          break;
+        }
+        if (got != static_cast<int64_t>(chunk))
         {
           /* The source stopped: what was written goes. */
-          const int why = errno ? errno : ECANCELED;
+          const int why = source_errno ? source_errno : ECANCELED;
           smb2_close(m_context, handle);
           (void)smb2_unlink(m_context, part.c_str());
           m_cache.Clear();
@@ -394,6 +412,12 @@ public:
         written += done;
         if (done < chunk)
           break;
+      }
+      if (connected_again)
+      {
+        Log("vfs: %s: connected again while \"%s\" was written%s", m_url.server.c_str(), part.c_str(),
+            attempt == 0 ? ": writing it again" : "");
+        continue;
       }
 
       if (written == size)

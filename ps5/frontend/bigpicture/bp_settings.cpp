@@ -273,7 +273,7 @@ Page summaryPage()
 		o.label = "Back to the Settings for everything";
 		o.desc = "Removes all of this game's own settings, including its patches and cheats.";
 		o.action = [] {
-			confirm("Clear this game's settings?",
+			confirm("Clear the Game Specific Settings?",
 				"Every setting, patch and cheat chosen for this game goes; it uses the global settings again.\nThis cannot be undone.",
 				[](bool yes) {
 					if (yes)
@@ -1286,7 +1286,7 @@ void switchLayer()
 			st.home = 1 + st.area;
 		}
 	}
-	toast(st.forGame ? "This game's own settings" : "The settings of all games", 2.f);
+	toast(st.forGame ? "Game Specific Settings" : "The settings of all games", 2.f);
 }
 
 // ---- the pinned settings in the quick menu

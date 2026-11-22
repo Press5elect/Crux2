@@ -242,6 +242,25 @@ static void TestFold()
 			  Has(lines, "100.0%  [e] GSRendererHW::Draw"));
 	}
 	{
+		// Generated code by region: the smallest range that holds the address names it, and what is in none
+		// is said apart.
+		const PS5ProfileRegion regions[] = {
+			{0x900000000ull, 0x904000000ull, "EE blocks"},
+			{0x900001000ull, 0x900001100ull, "EE Dispatcher"},
+			{0x910000000ull, 0x912000000ull, "IOP blocks"},
+		};
+		std::vector<PS5ProfileSample> jit = {Sample(0x900200000ull, {}, 0, true), Sample(0x900200040ull, {}, 0, true),
+			Sample(0x900001010ull, {}, 0, true), Sample(0x910000100ull, {}, 0, true), Sample(0x800012340ull, {}, 0, true)};
+		lines.clear();
+		PS5ProfileFold(jit.data(), jit.size(), symbols, BASE, 10.0, "p:", lines, 0, 0, 25, 40, 8, 8, regions, 3);
+		CHECK(Has(lines, "p: generated code: EE blocks 40.0%, EE Dispatcher 20.0%, IOP blocks 20.0%; "
+						 "outside the program and not generated code 20.0%"));
+		// Without regions (or with none hit) there is no such line.
+		lines.clear();
+		PS5ProfileFold(jit.data() + 4, 1, symbols, BASE, 10.0, "p:", lines, 0, 0, 25, 40, 8, 8, regions, 3);
+		CHECK(!Has(lines, "generated code:"));
+	}
+	{
 		PS5ProfileSample in_emulator = Sample(0x1104, {0x3040 /* found by looking */, 0x1410 /* a frame's */});
 		in_emulator.scanned = 1;
 		lines.clear();

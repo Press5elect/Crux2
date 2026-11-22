@@ -1381,14 +1381,14 @@ void emptyLibrary(ImDrawList* dl, bool selectDisc)
 // The cover on the left with the ways to start the game under it (Resume when it has a state to go
 // on from, Start from the beginning); beside it its name, a line of what is known of it, and tabs
 // (L1 / R1): Overview (cards of where it was left, its own settings, its memory card, its patches and
-// cheats, its texture pack, its file; and what it is), Save states, Its settings, Patches and cheats,
+// cheats, its texture pack, its file; and what it is), Save states, Game Specific Settings, Patches and cheats,
 // Texture packs. Left and right go between the cover's buttons and the tab's rows; L2 / R2 put the
 // game's other pictures in the cover's place; Square is More (what is done with a game less often:
 // the start with the console's own start-up, a favourite, hidden, renamed, collections, its
 // pictures, its next disc, an image of a disc); Circle goes back.
 
 enum GameTab { GameOverview, GameStates, GameOwn, GamePatches, GameTextures };
-const char* const gameTabNames[] = {"Overview", "Save states", "Its settings", "Patches and cheats", "Texture packs"};
+const char* const gameTabNames[] = {"Overview", "Save states", "Game Specific Settings", "Patches and cheats", "Texture packs"};
 
 // What the page says of the game that has to be looked up (its own settings, its patches, its card,
 // its texture pack): when it opens, and again when it is back from another screen.
@@ -2236,7 +2236,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 			if (f.own)
 			{
 				const size_t n = f.ownRows.size();
-				cards.push_back({"ITS OWN SETTINGS", n == 0 ? std::string("None") : n == 1 ? std::string("1 differs from global") : std::to_string(n) + " differ from global",
+				cards.push_back({"GAME SPECIFIC SETTINGS", n == 0 ? std::string("None") : n == 1 ? std::string("1 differs from global") : std::to_string(n) + " differ from global",
 					n == 0 ? std::string("It uses the global settings") : joinNames(f.ownRows, 1)});
 				if (!f.card.empty() || !f.cardNote.empty())
 				{
@@ -2263,7 +2263,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 					cards.push_back({"TEXTURE PACK", "None installed", "The Texture packs tab finds one"});
 			}
 			if (cards.size() < 6)
-				cards.push_back({"ITS FILE", g.info.size != 0 ? formatSize(g.info.size) : std::string("Not known"), g.info.fileName});
+				cards.push_back({"GAME FILE", g.info.size != 0 ? formatSize(g.info.size) : std::string("Not known"), g.info.fileName});
 			const float gap = 24, cardW = (tw - 2 * gap) / 3, cardH = 150;
 			for (size_t i = 0; i < cards.size(); i++)
 			{
@@ -2341,7 +2341,7 @@ void detailsPanel(ImDrawList* dl, Game& g, float t, bool selectDisc)
 		case GameOwn:
 		{
 			const size_t n = f.ownRows.size();
-			tabRow(dl, p, tx, cy, tw, rowH - 8, t, det.side == 1, ICON_FA_SLIDERS, "Open this game's settings",
+			tabRow(dl, p, tx, cy, tw, rowH - 8, t, det.side == 1, ICON_FA_SLIDERS, "Open Game Specific Settings",
 				n == 0 ? std::string("It uses the global settings") : n == 1 ? std::string("1 of its own") : std::to_string(n) + " of its own");
 			float y = cy + rowH + 20;
 			if (n == 0)
