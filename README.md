@@ -569,6 +569,9 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
   - *Speed below 100% and the EE thread near 100%:* the emulated processor is the limit. Try
     Multi-threaded VU1; undo any EE cycle rate above 100%.
   - *Speed below 100% and the GS thread near 100%:* the graphics thread is the limit. Settings >
+    Picture > Graphics > **GS Thread Split** (on, two threads, by default, at More) puts the drawing on a
+    thread of its own; the GS figure is then the thread that reads the game's graphics commands, and the
+    boot log's `gs split:` lines say how busy the drawing thread is. Settings >
     System > PlayStation 5 > **Threaded Graphics Driver** (on by default, at More) takes the driver's share
     off it; with the higher blending accuracy levels, Settings > Picture > Graphics > **Rasterizer Ordered
     View** matters too.

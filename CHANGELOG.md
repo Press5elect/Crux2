@@ -6,7 +6,7 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
-## Unreleased
+## v1.0.24 (2026-11-24)
 
 - Added: **GS Thread Split** (Settings > Picture > Graphics, ADVANCED; on, two threads, by default): the GS
   thread in two, one reading the game's graphics commands and one drawing, so games held back by the GS
@@ -15,6 +15,7 @@ not shown). The full notes of each published release are in
   Targets, Disable Render Target Compression, Leave out barriers with nothing to wait for, Reuse
   copies of the picture) were read only when the title started for most games: a game's own choice,
   or a change made since the start, was not used. They are read again at each game's start.
+- Changed: the profile the title is compiled with is trained again, with the GS thread split on.
 
 ## v1.0.23 (2026-11-22)
 
