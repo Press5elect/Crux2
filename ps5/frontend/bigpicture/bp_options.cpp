@@ -1066,6 +1066,10 @@ Page graphicsPage(int layer, bool forGame)
 		"Skips GPU waits when nothing has been drawn since the last one. Turn off if effects look wrong. Takes effect "
 			"the next time a game starts.",
 		GS, "PS5SkipRedundantBarriers", true, Option::NextStart))));
+	rows.push_back(adv(hw(list("GS Thread Split",
+		"Splits the GS thread in two: one reads the game's graphics commands, the other draws. Can improve performance in "
+			"games limited by the GS thread. Check does the same work on one thread, to compare the picture.",
+		GS, "PS5GSSplit", 2, {"Off", "Check (One Thread)", "On (Two Threads)"}, 0, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Reuse copies of the picture",
 		"Reuses copies of the screen for glow and blur effects when nothing has changed. Turn off if an effect looks a "
 			"frame behind. Takes effect the next time a game starts.",

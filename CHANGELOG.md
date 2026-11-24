@@ -6,6 +6,16 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## Unreleased
+
+- Added: **GS Thread Split** (Settings > Picture > Graphics, ADVANCED; on, two threads, by default): the GS
+  thread in two, one reading the game's graphics commands and one drawing, so games held back by the GS
+  thread run faster. "Check (One Thread)" does the same work on one thread, to compare the picture.
+- Fixed: the graphics switches under Settings > Picture > Graphics > Advanced (Uncompressed Feedback
+  Targets, Disable Render Target Compression, Leave out barriers with nothing to wait for, Reuse
+  copies of the picture) were read only when the title started for most games: a game's own choice,
+  or a change made since the start, was not used. They are read again at each game's start.
+
 ## v1.0.23 (2026-11-22)
 
 - Changed: faster paths, each giving the same results as before (on a console no frame rate changed

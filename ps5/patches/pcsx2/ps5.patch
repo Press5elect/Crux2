@@ -2843,7 +2843,7 @@ index 695f4c3..fe72c15 100644
  	if (m_device == -1)
  		return false;
 diff --git a/pcsx2/CMakeLists.txt b/pcsx2/CMakeLists.txt
-index 9d00abc..75bae81 100644
+index 9d00abc..ca339ab 100644
 --- a/pcsx2/CMakeLists.txt
 +++ b/pcsx2/CMakeLists.txt
 @@ -103,6 +103,7 @@ set(pcsx2Sources
@@ -2895,7 +2895,7 @@ index 9d00abc..75bae81 100644
  # common Sources
  target_sources(PCSX2 PRIVATE
  	${pcsx2CDVDSources}
-@@ -1484,3 +1502,86 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
+@@ -1484,3 +1502,88 @@ source_group(Resources/GUI FILES ${pcsx2GuiResources})
  source_group(Resources/PAD FILES ${pcsx2PADResources})
  source_group(Resources/Recording FILES ${pcsx2RecordingVirtualPadResources})
  source_group(Resources REGULAR_EXPRESSION ${CMAKE_CURRENT_BINARY_DIR}/*)
@@ -2939,6 +2939,8 @@ index 9d00abc..75bae81 100644
 +	# The picture tools of the console: AMD FSR 3's optical flow and NVIDIA's NIS on compute shaders,
 +	# and libretro presets as the look (GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp drives them).
 +	target_sources(PCSX2 PRIVATE
++		GS/GSSplit.cpp
++		GS/GSSplit.h
 +		GS/Renderers/Vulkan/GSDeviceVK_PS5.cpp
 +		"${PS5PX_ROOT}/frontend/ps5_compute_fx.cpp"
 +		"${PS5PX_ROOT}/frontend/ps5_slang.cpp"
@@ -3967,7 +3969,7 @@ index 89d0504..77d5c7c 100644
  
  }	// End Namespace COP1
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
-index a0b988f..f95a981 100644
+index a0b988f..a65d6a7 100644
 --- a/pcsx2/GS/GS.cpp
 +++ b/pcsx2/GS/GS.cpp
 @@ -6,6 +6,9 @@
@@ -3980,7 +3982,17 @@ index a0b988f..f95a981 100644
  #include "GS/GSCapture.h"
  #include "GS/GSExtra.h"
  #include "GS/GSGL.h"
-@@ -53,6 +56,11 @@
+@@ -21,6 +24,9 @@
+ #include "GS/Renderers/Null/GSRendererNull.h"
+ #include "GS/Renderers/HW/GSRendererHW.h"
+ #include "GS/Renderers/HW/GSTextureReplacements.h"
++#ifdef __PROSPERO__
++#include "GS/GSSplit.h"
++#endif
+ #include "VMManager.h"
+ 
+ #ifdef ENABLE_OPENGL
+@@ -53,6 +59,11 @@
  
  #include "fmt/format.h"
  
@@ -3992,7 +4004,7 @@ index a0b988f..f95a981 100644
  #include <fstream>
  
  Pcsx2Config::GSOptions GSConfig;
-@@ -178,6 +186,9 @@ static void CloseGSDevice(bool clear_state)
+@@ -178,6 +189,9 @@ static void CloseGSDevice(bool clear_state)
  	if (!g_gs_device)
  		return;
  
@@ -4002,7 +4014,59 @@ index a0b988f..f95a981 100644
  	ImGuiManager::Shutdown(clear_state);
  	g_gs_device->Destroy();
  	g_gs_device.reset();
-@@ -357,6 +368,12 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
+@@ -201,6 +215,20 @@ static void GSClampUpscaleMultiplier(Pcsx2Config::GSOptions& config)
+ 	config.UpscaleMultiplier = static_cast<float>(max_upscale_multiplier);
+ }
+ 
++#ifdef __PROSPERO__
++// Crux2 GS split (GSSplit.h): the object that reads the GIF packets: the split's FRONT side while it runs.
++static GSState* ParseState()
++{
++	GSState* front = GSSplit::Front();
++	return front ? front : static_cast<GSState*>(g_gs_renderer.get());
++}
++#else
++static GSState* ParseState()
++{
++	return g_gs_renderer.get();
++}
++#endif
++
+ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
+ {
+ 	// Must be done first, initialization routines in GSState use GSIsHardwareRenderer().
+@@ -231,6 +259,9 @@ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
+ 
+ static void CloseGSRenderer()
+ {
++#ifdef __PROSPERO__
++	GSSplit::Stop();
++#endif
+ 	GSTextureReplacements::Shutdown();
+ 
+ 	if (g_gs_renderer)
+@@ -245,6 +276,10 @@ bool GSreopen(bool recreate_device, bool recreate_renderer, GSRendererType new_r
+ {
+ 	Console.WriteLn("Reopening GS with %s device", recreate_device ? "new" : "existing");
+ 
++#ifdef __PROSPERO__
++	// The split stops (the whole state back to the renderer) and starts again afterwards if still asked for.
++	GSSplit::Stop();
++#endif
+ 	g_gs_renderer->Flush(GSState::GSFlushReason::GSREOPEN);
+ 
+ 	if (recreate_device && !recreate_renderer)
+@@ -338,6 +373,9 @@ bool GSreopen(bool recreate_device, bool recreate_renderer, GSRendererType new_r
+ 	if (!capture_filename.empty())
+ 		g_gs_renderer->BeginCapture(std::move(capture_filename), capture_size);
+ 
++#ifdef __PROSPERO__
++	GSSplit::Configure(basemem);
++#endif
+ 	return true;
+ }
+ 
+@@ -357,6 +395,14 @@ bool GSopen(const Pcsx2Config::GSOptions& config, GSRendererType renderer, u8* b
  			CloseGSDevice(true);
  	}
  
@@ -4010,12 +4074,14 @@ index a0b988f..f95a981 100644
 +	// PS5: paraLLEl-GS draws the game in place of PCSX2's renderer when its settings ask for it.
 +	if (res)
 +		PS5PGS::Open(basemem);
++	if (res)
++		GSSplit::Configure(basemem);
 +#endif
 +
  	if (!res)
  	{
  		Host::ReportErrorAsync("Error",
-@@ -374,6 +391,9 @@ void GSclose()
+@@ -374,6 +420,9 @@ void GSclose()
  	if (GSCapture::IsCapturing())
  		GSCapture::EndCapture();
  
@@ -4025,9 +4091,23 @@ index a0b988f..f95a981 100644
  	CloseGSRenderer();
  	CloseGSDevice(true);
  	Host::ReleaseRenderWindow();
-@@ -382,6 +402,10 @@ void GSclose()
+@@ -381,7 +430,24 @@ void GSclose()
+ 
  void GSreset(bool hardware_reset)
  {
++#ifdef __PROSPERO__
++	if (GSSplit::Active())
++	{
++		// In the single thread's order: the renderer's part of the reset (texture cache, current picture),
++		// then GSState's (whose flush draws what is pending), on each side.
++		GSSplit::QueueResetTextureCache(hardware_reset);
++		GSSplit::Front()->Reset(hardware_reset);
++		GSSplit::Front()->m_ps5_scanmask_set = false; // (the reset sets the count to 0 on both sides)
++		GSSplit::QueueResetState(hardware_reset);
++		GSSplit::Drain();
++	}
++	else
++#endif
  	g_gs_renderer->Reset(hardware_reset);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
@@ -4036,21 +4116,29 @@ index a0b988f..f95a981 100644
  
  	// Restart video capture if it's been started.
  	// Otherwise we get a buildup of audio frames from the CPU thread.
-@@ -397,6 +421,10 @@ void GSreset(bool hardware_reset)
+@@ -397,19 +463,30 @@ void GSreset(bool hardware_reset)
  
  void GSgifSoftReset(u32 mask)
  {
+-	g_gs_renderer->SoftReset(mask);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +		PS5PGS::SoftReset(mask);
 +#endif
- 	g_gs_renderer->SoftReset(mask);
++	ParseState()->SoftReset(mask);
  }
  
-@@ -408,6 +436,13 @@ void GSwriteCSR(u32 csr)
+ void GSwriteCSR(u32 csr)
+ {
+-	g_gs_renderer->WriteCSR(csr);
++	ParseState()->WriteCSR(csr);
+ }
+ 
  void GSInitAndReadFIFO(u8* mem, u32 size)
  {
  	GL_PERF("Init and read FIFO %u qwc", size);
+-	g_gs_renderer->InitReadFIFO(mem, size);
+-	g_gs_renderer->ReadFIFO(mem, size);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +	{
@@ -4058,13 +4146,16 @@ index a0b988f..f95a981 100644
 +		return;
 +	}
 +#endif
- 	g_gs_renderer->InitReadFIFO(mem, size);
- 	g_gs_renderer->ReadFIFO(mem, size);
++	ParseState()->InitReadFIFO(mem, size);
++	ParseState()->ReadFIFO(mem, size);
  }
-@@ -419,21 +454,49 @@ void GSReadLocalMemoryUnsync(u8* mem, u32 qwc, u64 BITBLITBUF, u64 TRXPOS, u64 T
+ 
+ void GSReadLocalMemoryUnsync(u8* mem, u32 qwc, u64 BITBLITBUF, u64 TRXPOS, u64 TRXREG)
+@@ -419,26 +496,86 @@ void GSReadLocalMemoryUnsync(u8* mem, u32 qwc, u64 BITBLITBUF, u64 TRXPOS, u64 T
  
  void GSgifTransfer(const u8* mem, u32 size)
  {
+-	g_gs_renderer->Transfer<3>(mem, size);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +	{
@@ -4072,11 +4163,12 @@ index a0b988f..f95a981 100644
 +		return;
 +	}
 +#endif
- 	g_gs_renderer->Transfer<3>(mem, size);
++	ParseState()->Transfer<3>(mem, size);
  }
  
  void GSgifTransfer1(u8* mem, u32 addr)
  {
+-	g_gs_renderer->Transfer<0>(const_cast<u8*>(mem) + addr, (0x4000 - addr) / 16);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +	{
@@ -4084,11 +4176,12 @@ index a0b988f..f95a981 100644
 +		return;
 +	}
 +#endif
- 	g_gs_renderer->Transfer<0>(const_cast<u8*>(mem) + addr, (0x4000 - addr) / 16);
++	ParseState()->Transfer<0>(const_cast<u8*>(mem) + addr, (0x4000 - addr) / 16);
  }
  
  void GSgifTransfer2(u8* mem, u32 size)
  {
+-	g_gs_renderer->Transfer<1>(const_cast<u8*>(mem), size);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +	{
@@ -4096,11 +4189,12 @@ index a0b988f..f95a981 100644
 +		return;
 +	}
 +#endif
- 	g_gs_renderer->Transfer<1>(const_cast<u8*>(mem), size);
++	ParseState()->Transfer<1>(const_cast<u8*>(mem), size);
  }
  
  void GSgifTransfer3(u8* mem, u32 size)
  {
+-	g_gs_renderer->Transfer<2>(const_cast<u8*>(mem), size);
 +#ifdef __PROSPERO__
 +	if (PS5PGS::Active())
 +	{
@@ -4108,10 +4202,47 @@ index a0b988f..f95a981 100644
 +		return;
 +	}
 +#endif
- 	g_gs_renderer->Transfer<2>(const_cast<u8*>(mem), size);
++	ParseState()->Transfer<2>(const_cast<u8*>(mem), size);
  }
  
-@@ -451,11 +514,29 @@ void GSvsync(u32 field, bool registers_written)
+ void GSvsync(u32 field, bool registers_written)
+ {
++#ifdef __PROSPERO__
++	if (GSSplit::Active())
++	{
++		// A settings change the DRAW thread asked for (automatic quality) is done here, between frames.
++		Pcsx2Config::GSOptions deferred;
++		if (GSSplit::TakeDeferredConfig(deferred))
++			GSUpdateConfig(deferred);
++	}
++	if (GSState* const f = GSSplit::Front())
++	{
++		// The display circuits and the scan mask count as the DRAW side's end of the last frame left them
++		// (GSRenderer::Merge changes both), then this frame's, as the single thread works them out.
++		u8 scanmask = f->m_scanmask_used;
++		GSSplit::WaitPreviousVSync(f->PCRTCDisplays, scanmask);
++		if (!f->m_ps5_scanmask_set)
++			f->m_scanmask_used = scanmask;
++		f->PCRTCDisplays.SetVideoMode(f->GetVideoMode());
++		f->PCRTCDisplays.EnableDisplays(f->m_regs->PMODE, f->m_regs->SMODE2, f->isReallyInterlaced());
++		f->PCRTCDisplays.SetRects(0, f->m_regs->DISP[0].DISPLAY, f->m_regs->DISP[0].DISPFB);
++		f->PCRTCDisplays.SetRects(1, f->m_regs->DISP[1].DISPLAY, f->m_regs->DISP[1].DISPFB);
++		f->PCRTCDisplays.CheckSameSource();
++		f->PCRTCDisplays.CalculateDisplayOffset(f->m_scanmask_used);
++		f->PCRTCDisplays.CalculateFramebufferOffset(f->m_scanmask_used, f->m_regs->DISP[0].DISPFB, f->m_regs->DISP[1].DISPFB);
++		f->Flush(GSState::VSYNC);
++		GSSplit::QueueVSync(field, registers_written, f->m_ps5_scanmask_set, *f->m_regs, f->PCRTCDisplays);
++		f->m_ps5_scanmask_set = false;
++		// The overlay's GS figure is worked out on the DRAW thread (PerformanceMetrics::Update in VSync), which
++		// reads this thread's processor time as this thread last noted it (ps5/common/PS5Threads.cpp): note it.
++		(void)MTGS::GetThreadHandle().GetCPUTime();
++		return;
++	}
++#endif
+ 	// Update this here because we need to check if the pending draw affects the current frame, so our regs need to be updated.
+ 	g_gs_renderer->PCRTCDisplays.SetVideoMode(g_gs_renderer->GetVideoMode());
+ 	g_gs_renderer->PCRTCDisplays.EnableDisplays(g_gs_renderer->m_regs->PMODE, g_gs_renderer->m_regs->SMODE2, g_gs_renderer->isReallyInterlaced());
+@@ -451,11 +588,64 @@ void GSvsync(u32 field, bool registers_written)
  	// Do not move the flush into the VSync() method. It's here because EE transfers
  	// get cleared in HW VSync, and may be needed for a buffered draw (FFX FMVs).
  	g_gs_renderer->Flush(GSState::VSYNC);
@@ -4138,10 +4269,45 @@ index a0b988f..f95a981 100644
 +		return PS5PGS::Freeze(data, mode == FreezeAction::Size);
 +	}
 +#endif
++#ifdef __PROSPERO__
++	if (GSState* const f = GSSplit::Front())
++	{
++		if (mode == FreezeAction::Size)
++			return f->Freeze(data, true);
++		if (mode == FreezeAction::Save)
++		{
++			// The FRONT side's state, with the DRAW side's memory (after its targets are read back if asked).
++			f->Flush(GSState::GSFlushReason::SAVESTATE);
++			GSSplit::Drain();
++			if (GSConfig.UserHacks_ReadTCOnClose)
++				g_gs_renderer->ReadbackTextureCache();
++			std::memcpy(f->m_mem.m_vm8, g_gs_renderer->m_mem.m_vm8, GSLocalMemory::m_vmsize);
++			f->m_ps5_split_skip_readback = true;
++			const int ret = f->Freeze(data, false);
++			f->m_ps5_split_skip_readback = false;
++			return ret;
++		}
++		// Load: both sides load the state (the DRAW side its memory, CLUT and renderer; the FRONT side the rest).
++		f->Flush(GSState::GSFlushReason::LOADSTATE);
++		GSSplit::Drain();
++		g_gs_device->ClearCurrent();
++		if (GSCapture::IsCapturing())
++			GSCapture::Flush();
++		std::memcpy(g_gs_renderer->GetRegsMem(), f->GetRegsMem(), sizeof(GSPrivRegSet));
++		const int ret = g_gs_renderer->Defrost(data);
++		if (ret != 0)
++			return ret;
++		f->m_ps5_split_quiet = true;
++		const int fret = f->Defrost(data);
++		f->m_ps5_split_quiet = false;
++		f->m_ps5_scanmask_set = false;
++		return fret;
++	}
++#endif
  	if (mode == FreezeAction::Save)
  	{
  		return g_gs_renderer->Freeze(data, false);
-@@ -482,12 +563,27 @@ int GSfreeze(FreezeAction mode, freezeData* data)
+@@ -482,12 +672,27 @@ int GSfreeze(FreezeAction mode, freezeData* data)
  
  void GSQueueSnapshot(const std::string& path, u32 gsdump_frames)
  {
@@ -4169,7 +4335,31 @@ index a0b988f..f95a981 100644
  	if (g_gs_renderer)
  		g_gs_renderer->StopGSDump();
  }
-@@ -559,6 +655,18 @@ void GSGameChanged()
+@@ -540,6 +745,9 @@ void GSToggleVideoCapture()
+ 
+ void GSPresentCurrentFrame()
+ {
++#ifdef __PROSPERO__
++	GSSplit::Drain();
++#endif
+ 	g_gs_renderer->PresentCurrentFrame();
+ }
+ 
+@@ -551,14 +759,39 @@ void GSThrottlePresentation()
+ 		return;
+ 	}
+ 
++#ifdef __PROSPERO__
++	GSSplit::Drain();
++#endif
+ 	g_gs_device->ThrottlePresentation();
+ }
+ 
+ void GSGameChanged()
+ {
++#ifdef __PROSPERO__
++	GSSplit::Drain();
++#endif
  	if (GSIsHardwareRenderer())
  		GSTextureReplacements::GameChanged();
  
@@ -4177,18 +4367,25 @@ index a0b988f..f95a981 100644
 +	// Crux2: the GS device and renderer are kept between games while Big Picture runs, so the PS5 rows of
 +	// Settings > Graphics > Advanced ("takes effect at the next start") are read again here, with the new
 +	// game's own settings (VMManager::UpdateRunningGame applied its settings layer before this).
-+	if (VMManager::HasValidVM() && g_gs_device && g_gs_renderer)
++	// At a game's start this is queued while the VM is still Initializing (UpdateDiscDetails(true) in
++	// VMManager::Initialize) and the GS thread can run it before the VM is Running: a game whose
++	// pipelines were made ahead quickly had its own settings, and any change made after the title
++	// started, left unread. So Initializing counts here as well; a VM that is stopping still does not.
++	const VMState vm_state = VMManager::GetState();
++	if ((vm_state == VMState::Initializing || VMManager::HasValidVM()) && g_gs_device && g_gs_renderer)
 +	{
 +		g_gs_device->PS5ReadGameSettings();
 +		if (GSCurrentRenderer != GSRendererType::SW && GSCurrentRenderer != GSRendererType::Null)
 +			static_cast<GSRendererHW*>(g_gs_renderer.get())->PS5ReadGameSettings();
++		// The GS split as the game's settings and fixes ask (GSSplit::Configure).
++		GSSplit::Configure(nullptr);
 +	}
 +#endif
 +
  	if (!VMManager::HasValidVM() && GSCapture::IsCapturing())
  		GSCapture::EndCapture();
  }
-@@ -772,6 +880,26 @@ void GSgetStats(SmallStringBase& info)
+@@ -772,6 +1005,26 @@ void GSgetStats(SmallStringBase& info)
  				(int)std::ceil(pm.Get(GSPerfMon::TextureCopiesROV)),
  				(int)std::ceil(pm.Get(GSPerfMon::TextureUploads)));
  		}
@@ -4215,7 +4412,50 @@ index a0b988f..f95a981 100644
  	}
  }
  
-@@ -1027,6 +1155,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
+@@ -836,6 +1089,16 @@ void GSgetTitleStats(std::string& info)
+ 
+ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
+ {
++#ifdef __PROSPERO__
++	// From the GS split's DRAW thread (automatic quality, in VSync): done by the MTGS thread at its next
++	// vsync, since the FRONT side reads GSConfig while it parses. Otherwise the DRAW side idle first.
++	if (GSSplit::InItem())
++	{
++		GSSplit::DeferConfig(new_config);
++		return;
++	}
++	GSSplit::Drain();
++#endif
+ 	Pcsx2Config::GSOptions old_config(std::move(GSConfig));
+ 	GSConfig = new_config;
+ 	if (!g_gs_renderer)
+@@ -880,6 +1143,13 @@ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
+ 
+ 	// renderer-specific options (e.g. auto flush, TC offset)
+ 	g_gs_renderer->UpdateSettings(old_config);
++#ifdef __PROSPERO__
++	if (GSState* const f = GSSplit::Front())
++	{
++		f->UpdateSettings(old_config);
++		f->m_nativeres = g_gs_renderer->m_nativeres;
++	}
++#endif
+ 
+ 	// reload texture cache when trilinear filtering or TC options change
+ 	if (
+@@ -931,6 +1201,11 @@ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
+ 		if (!g_gs_device->SetGPUPipelineStatisticsEnabled(GSConfig.OsdShowGPUStats))
+ 			GSConfig.OsdShowGPUStats = false;
+ 	}
++
++#ifdef __PROSPERO__
++	// (A fix or an option the split cannot run with may have changed.)
++	GSSplit::Configure(nullptr);
++#endif
+ }
+ 
+ void GSSetSoftwareRendering(bool software_renderer, GSInterlaceMode new_interlace)
+@@ -1027,6 +1302,62 @@ void GSFreeWrappedMemory(void* ptr, size_t size, size_t repeat)
  	s_fh = NULL;
  }
  
@@ -4278,7 +4518,7 @@ index a0b988f..f95a981 100644
  #else
  
  #include <sys/mman.h>
-@@ -1226,7 +1410,13 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
+@@ -1226,7 +1557,13 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
  	[](s32 pressed) {
  		if (!pressed)
  		{
@@ -4292,6 +4532,49 @@ index a0b988f..f95a981 100644
  		}
  	}},
  	{"ToggleVideoCapture", TRANSLATE_NOOP("Hotkeys", "Graphics"), TRANSLATE_NOOP("Hotkeys", "Toggle Video Capture"),
+diff --git a/pcsx2/GS/GSClut.cpp b/pcsx2/GS/GSClut.cpp
+index 5232c6a..175b170 100644
+--- a/pcsx2/GS/GSClut.cpp
++++ b/pcsx2/GS/GSClut.cpp
+@@ -99,6 +99,20 @@ GSClut::~GSClut()
+ 	_aligned_free(m_clut);
+ }
+ 
++#ifdef __PROSPERO__
++void GSClut::PS5GetWriteState(void* out) const
++{
++	std::memcpy(out, &m_write, sizeof(m_write));
++	std::memcpy(static_cast<u8*>(out) + sizeof(m_write), m_CBP, sizeof(m_CBP));
++}
++
++void GSClut::PS5SetWriteState(const void* in)
++{
++	std::memcpy(&m_write, in, sizeof(m_write));
++	std::memcpy(m_CBP, static_cast<const u8*>(in) + sizeof(m_write), sizeof(m_CBP));
++}
++#endif
++
+ u8 GSClut::IsInvalid()
+ {
+ 	return m_write.dirty;
+diff --git a/pcsx2/GS/GSClut.h b/pcsx2/GS/GSClut.h
+index 3e15c37..5becbf1 100644
+--- a/pcsx2/GS/GSClut.h
++++ b/pcsx2/GS/GSClut.h
+@@ -124,6 +124,13 @@ public:
+ 	void Read32(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA);
+ 	void GetAlphaMinMax32(int& amin, int& amax);
+ 
++#ifdef __PROSPERO__
++	// Crux2 GS split: the write state (what was loaded and the reload bookkeeping, not the palette).
++	static constexpr size_t PS5_WRITE_STATE_SIZE = sizeof(WriteState) + sizeof(u32) * 2;
++	void PS5GetWriteState(void* out) const;
++	void PS5SetWriteState(const void* in);
++#endif
++
+ 	u32 operator[](size_t i) const { return m_buff32[i]; }
+ 
+ 	operator const u32*() const { return m_buff32; }
 diff --git a/pcsx2/GS/GSDump.cpp b/pcsx2/GS/GSDump.cpp
 index 2fdb1ac..4a208ff 100644
 --- a/pcsx2/GS/GSDump.cpp
@@ -4347,10 +4630,48 @@ index d944b77..9b8303b 100644
  		if (m_shutdown)
  			m_shutdown();
 diff --git a/pcsx2/GS/GSLocalMemory.cpp b/pcsx2/GS/GSLocalMemory.cpp
-index 231f3ad..c8ac8b1 100644
+index 231f3ad..c86b5d5 100644
 --- a/pcsx2/GS/GSLocalMemory.cpp
 +++ b/pcsx2/GS/GSLocalMemory.cpp
-@@ -460,6 +460,7 @@ bool GSLocalMemory::IsPageAligned(u32 psm, const GSVector4i& rc)
+@@ -50,11 +50,23 @@ GSLocalMemory::readImage GSLocalMemory::m_readImageX;
+ GSLocalMemory::GSLocalMemory()
+ 	: m_clut(this)
+ {
+-	m_vm8 = (u8*)GSAllocateWrappedMemory(m_vmsize, 4);
++#ifdef __PROSPERO__
++	if (s_ps5_instances++ > 0)
++	{
++		m_ps5_plain_vm = true;
++		m_vm8 = static_cast<u8*>(_aligned_malloc(static_cast<size_t>(m_vmsize) * 4, 4096));
++	}
++	else
++#endif
++		m_vm8 = (u8*)GSAllocateWrappedMemory(m_vmsize, 4);
+ 	if (!m_vm8)
+ 		pxFailRel("Failed to allocate GS memory storage.");
+ 
++#ifdef __PROSPERO__
++	memset(m_vm8, 0, m_ps5_plain_vm ? static_cast<size_t>(m_vmsize) * 4 : m_vmsize);
++#else
+ 	memset(m_vm8, 0, m_vmsize);
++#endif
+ 
+ 	MULTI_ISA_SELECT(GSLocalMemoryPopulateFunctions)(*this);
+ 
+@@ -241,6 +253,12 @@ GSLocalMemory::GSLocalMemory()
+ 
+ GSLocalMemory::~GSLocalMemory()
+ {
++#ifdef __PROSPERO__
++	s_ps5_instances--;
++	if (m_vm8 && m_ps5_plain_vm)
++		_aligned_free(m_vm8);
++	else
++#endif
+ 	if (m_vm8)
+ 		GSFreeWrappedMemory(m_vm8, m_vmsize, 4);
+ 
+@@ -460,6 +478,7 @@ bool GSLocalMemory::IsPageAligned(u32 psm, const GSVector4i& rc)
  	return (rc & pgmsk).eq(GSVector4i::zero());
  }
  
@@ -4358,7 +4679,7 @@ index 231f3ad..c8ac8b1 100644
  u32 GSLocalMemory::GetStartBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
  {
  	u32 result = m_psm[psm].info.bn(rect.x, rect.y, bp, bw); // Valid only for color formats
-@@ -492,6 +493,8 @@ u32 GSLocalMemory::GetEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
+@@ -492,6 +511,8 @@ u32 GSLocalMemory::GetEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
  	return result;
  }
  
@@ -4368,10 +4689,24 @@ index 231f3ad..c8ac8b1 100644
  {
  	const u32 result = GetEndBlockAddress(bp, bw, psm, rect);
 diff --git a/pcsx2/GS/GSLocalMemory.h b/pcsx2/GS/GSLocalMemory.h
-index d4786e4..c439a04 100644
+index d4786e4..f0e913a 100644
 --- a/pcsx2/GS/GSLocalMemory.h
 +++ b/pcsx2/GS/GSLocalMemory.h
-@@ -1145,3 +1145,39 @@ constexpr inline GSOffset GSOffset::fromKnownPSM(u32 bp, u32 bw, GS_PSM psm)
+@@ -471,6 +471,13 @@ public:
+ 	static constexpr int m_vmsize = 1024 * 1024 * 4;
+ 
+ 	u8* m_vm8;
++#ifdef __PROSPERO__
++	// Crux2 GS split: the PS5 has one wrapped mapping of GS memory (GSAllocateWrappedMemory), the renderer's.
++	// A second memory object (the split's FRONT side, which never reads what it holds) gets plain memory
++	// of the whole wrapped size instead.
++	bool m_ps5_plain_vm = false;
++	static inline int s_ps5_instances = 0;
++#endif
+ 
+ 	GSClut m_clut;
+ 
+@@ -1145,3 +1152,39 @@ constexpr inline GSOffset GSOffset::fromKnownPSM(u32 bp, u32 bw, GS_PSM psm)
  	}
  	return GSOffset(GSLocalMemory::swizzle32, bp, bw, psm);
  }
@@ -4503,11 +4838,904 @@ index c8d2b89..a82fc2e 100644
  						break;
  					case 3:
  						// many games, TODO: formats mixed with NOPs (xeno2: 040f010f02, 04010f020f, mgs3: 04010f0f02, 0401020f0f, 04010f020f)
+diff --git a/pcsx2/GS/GSSplit.cpp b/pcsx2/GS/GSSplit.cpp
+new file mode 100644
+index 0000000..8cff62a
+--- /dev/null
++++ b/pcsx2/GS/GSSplit.cpp
+@@ -0,0 +1,782 @@
++// SPDX-FileCopyrightText: 2026 Press5elect (Crux2)
++// SPDX-License-Identifier: GPL-3.0+
++
++#ifdef __PROSPERO__
++
++#include "GS/GSSplit.h"
++#include "GS/GS.h"
++#include "GS/GSPerfMon.h"
++#include "GS/Renderers/Common/GSDevice.h"
++#include "GS/Renderers/Common/GSRenderer.h"
++#include "GS/Renderers/HW/GSRendererHW.h"
++#include "Host.h"
++#include "MTGS.h"
++
++#include "common/Assertions.h"
++#include "common/Threading.h"
++#include "common/Timer.h"
++
++#include "ps5_pgs.h"
++#include "ps5_thread_layout.h"
++
++#include <atomic>
++#include <condition_variable>
++#include <cstdlib>
++#include <cstring>
++#include <memory>
++#include <mutex>
++#include <thread>
++
++extern "C" void ps5px_log(const char* format, ...);
++
++// ------------------------------------------------------------------------------------------------
++// The FRONT object: GSState reading the GIF packets, with the work it would have done itself queued.
++
++class GSSplitFront final : public GSState
++{
++public:
++	GSSplitFront()
++	{
++		m_ps5_split_front = true;
++		m_mipmap = GSConfig.HWMipmap;
++	}
++
++	void Draw() override
++	{
++		// FlushPrim queues the draw on the FRONT side instead (GSState::PS5SplitQueueDraw).
++		pxFailRel("GSSplitFront::Draw");
++	}
++
++	void InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r) override
++	{
++		if (!m_ps5_split_quiet)
++			GSSplit::QueueInvalidateVideoMem(BITBLTBUF, r);
++	}
++
++	void InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut) override
++	{
++		// The hardware renderer does nothing for a CLUT load (GSRendererHW::InvalidateLocalMem returns at
++		// once); the other caller is a download to the EE, which waits for the DRAW side and has it read
++		// its targets back (it reads the transfer registers and TRXDIR of the FRONT side).
++		if (clut || m_ps5_split_quiet)
++			return;
++		GSSplit::Drain();
++		GSState* r_draw = g_gs_renderer.get();
++		r_draw->m_env.BITBLTBUF = m_env.BITBLTBUF;
++		r_draw->m_env.TRXPOS = m_env.TRXPOS;
++		r_draw->m_env.TRXREG = m_env.TRXREG;
++		r_draw->m_env.TRXDIR = m_env.TRXDIR;
++		r_draw->InvalidateLocalMem(BITBLTBUF, r, false);
++	}
++
++	void Move() override
++	{
++		// GSRendererHW::Move (or GSState::Move) on the DRAW side; both leave XDIR at 3 (the split does not
++		// run with a game's move handler, GSRendererHW::PS5SplitSafe).
++		if (!m_ps5_split_quiet)
++			GSSplit::QueueMove(m_env);
++		m_env.TRXDIR.XDIR = 3;
++	}
++
++	bool IsCoverageAlphaSupported() override
++	{
++		// GSRendererHW's answer ends with the device's AA1 support; the split does not run with it.
++		return false;
++	}
++
++	void PurgeTextureCache(bool sources, bool targets, bool hash_cache) override
++	{
++		GSSplit::Drain();
++		g_gs_renderer->PurgeTextureCache(sources, targets, hash_cache);
++	}
++
++	void ReadbackTextureCache() override
++	{
++		if (m_ps5_split_skip_readback)
++			return;
++		GSSplit::Drain();
++		g_gs_renderer->ReadbackTextureCache();
++	}
++
++	void UpdateSettings(const Pcsx2Config::GSOptions& old_config) override
++	{
++		GSState::UpdateSettings(old_config);
++		m_mipmap = GSConfig.HWMipmap;
++	}
++};
++
++// ------------------------------------------------------------------------------------------------
++// The queue: one writer (the MTGS thread), one reader (the DRAW thread), items in order.
++
++namespace GSSplit
++{
++	enum ItemKind : u32
++	{
++		ItemWrap = 0,
++		ItemDraw,
++		ItemInvalidateVideoMem,
++		ItemSwizzle,
++		ItemWriteStart,
++		ItemPartialWrite,
++		ItemClutWrite,
++		ItemMove,
++		ItemVSync,
++		ItemResetTextureCache,
++		ItemResetState,
++	};
++
++	struct alignas(64) ItemHeader
++	{
++		u32 kind;
++		u32 size; // header included, a multiple of 64
++	};
++	static constexpr size_t HEADER = 64;
++	static constexpr size_t RING_SIZE = size_t{64} << 20;
++	static constexpr size_t RING_MASK = RING_SIZE - 1;
++
++	struct alignas(32) SwizzleItem
++	{
++		GIFRegBITBLTBUF blit;
++		GIFRegTRXPOS pos;
++		GIFRegTRXREG reg;
++		u32 dpsm;
++		int x, y, len, perf_len;
++		bool count_transfer;
++	};
++
++	struct alignas(32) RectItem
++	{
++		GIFRegBITBLTBUF blit;
++		GSVector4i r;
++		u32 dbp;
++	};
++
++	struct alignas(32) ClutItem
++	{
++		GIFRegTEX0 TEX0;
++		GIFRegTEXCLUT TEXCLUT;
++	};
++
++	struct alignas(32) MoveItem
++	{
++		GIFRegBITBLTBUF BITBLTBUF;
++		GIFRegTRXPOS TRXPOS;
++		GIFRegTRXREG TRXREG;
++		GIFRegTRXDIR TRXDIR;
++	};
++
++	struct alignas(64) VSyncItem
++	{
++		GSState::GSPCRTCRegs pcrtc;
++		u64 seq;
++		u32 field;
++		bool registers_written;
++		bool scanmask_set;
++		alignas(64) u8 regs[sizeof(GSPrivRegSet)];
++	};
++
++	struct alignas(32) ResetItem
++	{
++		bool hardware_reset;
++	};
++
++	static Mode s_mode = Mode::Off;
++	static std::unique_ptr<GSSplitFront> s_front;
++	static u8* s_basemem = nullptr;
++	alignas(64) static u8 s_draw_regs[sizeof(GSPrivRegSet)];
++
++	static u8* s_ring = nullptr;
++	alignas(64) static std::atomic<u64> s_write{0}; // published by the MTGS thread
++	alignas(64) static std::atomic<u64> s_read{0};  // published by the DRAW thread
++	static u64 s_write_local = 0;
++	static u32 s_pending_size = 0;
++
++	static Threading::WorkSema s_sema;
++	static Threading::Thread s_thread;
++	static std::atomic<bool> s_quit{false};
++	static std::atomic<std::thread::id> s_draw_thread_id{};
++
++	// Vsyncs queued (MTGS thread) and done (DRAW thread), and what the last one done left.
++	static u64 s_vsync_queued = 0;
++	static std::atomic<u64> s_vsync_done{0};
++	static std::mutex s_vsync_mutex;
++	static std::condition_variable s_vsync_cv;
++	static GSState::GSPCRTCRegs s_vsync_pcrtc;
++	static u8 s_vsync_scanmask = 0;
++
++	// Settings changes asked for on the DRAW thread (automatic quality), done by the MTGS thread.
++	static std::mutex s_deferred_mutex;
++	static std::unique_ptr<Pcsx2Config::GSOptions> s_deferred_config;
++
++	// For the log: what the split did.
++	static std::atomic<u64> s_items{0};
++	static u64 s_drains = 0;
++	static u64 s_space_waits = 0;
++	static double s_space_wait_ms = 0;
++	static double s_vsync_wait_ms = 0;
++	static double s_drain_ms = 0;
++	static u32 s_window_frames = 0;
++	static u64 s_window_draw_cpu = 0;
++	static Common::Timer::Value s_window_start = 0;
++
++	// Set while an item runs (on the DRAW thread, or on the MTGS thread in mode 1): work started from inside
++	// one (a settings change in VSync) waits for the MTGS thread's next vsync instead of nesting.
++	static thread_local bool s_in_item = false;
++	static const char* s_last_why = nullptr;
++
++	static void Execute(u32 kind, u8* payload);
++	static void ProcessAll();
++	static void ThreadMain();
++} // namespace GSSplit
++
++bool GSSplit::Active()
++{
++	return static_cast<bool>(s_front);
++}
++
++bool GSSplit::Threaded()
++{
++	return s_front && s_mode == Mode::Thread;
++}
++
++GSState* GSSplit::Front()
++{
++	return s_front.get();
++}
++
++bool GSSplit::InItem()
++{
++	return s_in_item;
++}
++
++bool GSSplit::OnDrawThread()
++{
++	return s_mode == Mode::Thread && s_front && std::this_thread::get_id() == s_draw_thread_id.load(std::memory_order_relaxed);
++}
++
++static size_t Align64(size_t n)
++{
++	return (n + 63) & ~size_t{63};
++}
++
++void* GSSplit::BeginItem(u32 kind, size_t payload)
++{
++	const size_t size = HEADER + Align64(payload);
++	pxAssertRel(size <= RING_SIZE / 2, "GS split item too large");
++
++	size_t pos = s_write_local & RING_MASK;
++	const size_t to_end = RING_SIZE - pos;
++	const size_t need = (size > to_end) ? (to_end + size) : size;
++
++	if (s_write_local + need - s_read.load(std::memory_order_acquire) > RING_SIZE)
++	{
++		Common::Timer timer;
++		s_space_waits++;
++		if (s_mode == Mode::Thread)
++			s_sema.NotifyOfWork();
++		while (s_write_local + need - s_read.load(std::memory_order_acquire) > RING_SIZE)
++		{
++			if (s_mode != Mode::Thread)
++				ProcessAll();
++			else
++				Threading::Timeslice();
++		}
++		s_space_wait_ms += timer.GetTimeMilliseconds();
++	}
++
++	if (size > to_end)
++	{
++		ItemHeader* wrap = reinterpret_cast<ItemHeader*>(s_ring + pos);
++		wrap->kind = ItemWrap;
++		wrap->size = static_cast<u32>(to_end);
++		s_write_local += to_end;
++		pos = 0;
++	}
++
++	ItemHeader* h = reinterpret_cast<ItemHeader*>(s_ring + pos);
++	h->kind = kind;
++	h->size = static_cast<u32>(size);
++	s_pending_size = static_cast<u32>(size);
++	return s_ring + pos + HEADER;
++}
++
++void GSSplit::EndItem()
++{
++	s_write_local += s_pending_size;
++	s_pending_size = 0;
++	s_write.store(s_write_local, std::memory_order_release);
++	if (s_mode == Mode::Thread)
++		s_sema.NotifyOfWork();
++	else
++		ProcessAll();
++}
++
++void GSSplit::ProcessAll()
++{
++	if (s_in_item)
++		return;
++	u64 r = s_read.load(std::memory_order_relaxed);
++	u64 w = s_write.load(std::memory_order_acquire);
++	while (r != w)
++	{
++		while (r != w)
++		{
++			ItemHeader* h = reinterpret_cast<ItemHeader*>(s_ring + (r & RING_MASK));
++			if (h->kind != ItemWrap)
++			{
++				s_in_item = true;
++				Execute(h->kind, reinterpret_cast<u8*>(h) + HEADER);
++				s_in_item = false;
++				s_items.fetch_add(1, std::memory_order_relaxed);
++			}
++			r += h->size;
++			s_read.store(r, std::memory_order_release);
++		}
++		w = s_write.load(std::memory_order_acquire);
++	}
++}
++
++void GSSplit::ThreadMain()
++{
++	Threading::SetNameOfCurrentThread("GS draw");
++	s_draw_thread_id.store(std::this_thread::get_id(), std::memory_order_relaxed);
++	// Under Crux2's thread layout: core 4's first thread (processor 8), its second (9) kept free
++	// (VMManager::SetEmuThreadAffinities keeps the other threads off 8 and 9 while the split is asked for).
++	if (PS5ThreadLayout::Wanted())
++		PS5ThreadLayout::PinCallingThread(u64{1} << 8, "GS draw thread");
++
++	while (!s_quit.load(std::memory_order_acquire))
++	{
++		s_sema.WaitForWorkWithSpin();
++		if (s_quit.load(std::memory_order_acquire))
++			break;
++		ProcessAll();
++	}
++	ProcessAll();
++}
++
++void GSSplit::Drain()
++{
++	if (!s_front || s_in_item)
++		return;
++	if (s_mode != Mode::Thread)
++	{
++		ProcessAll();
++		return;
++	}
++	if (s_in_item)
++		return;
++	Common::Timer timer;
++	s_drains++;
++	s_sema.WaitForEmptyWithSpin();
++	s_drain_ms += timer.GetTimeMilliseconds();
++}
++
++// ------------------------------------------------------------------------------------------------
++// The items, queued on the MTGS thread.
++
++void GSSplit::QueueInvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r)
++{
++	RectItem* it = static_cast<RectItem*>(BeginItem(ItemInvalidateVideoMem, sizeof(RectItem)));
++	it->blit = BITBLTBUF;
++	it->r = r;
++	EndItem();
++}
++
++void GSSplit::QueueSwizzle(u32 dpsm, int x, int y, const u8* src, int len, const GIFRegBITBLTBUF& blit,
++	const GIFRegTRXPOS& pos, const GIFRegTRXREG& reg, int perf_len, bool count_transfer)
++{
++	const size_t bytes = (len > 0) ? static_cast<size_t>(len) : 0;
++	u8* p = static_cast<u8*>(BeginItem(ItemSwizzle, Align64(sizeof(SwizzleItem)) + bytes));
++	SwizzleItem* it = reinterpret_cast<SwizzleItem*>(p);
++	it->blit = blit;
++	it->pos = pos;
++	it->reg = reg;
++	it->dpsm = dpsm;
++	it->x = x;
++	it->y = y;
++	it->len = len;
++	it->perf_len = perf_len;
++	it->count_transfer = count_transfer;
++	if (bytes)
++		std::memcpy(p + Align64(sizeof(SwizzleItem)), src, bytes);
++	EndItem();
++}
++
++void GSSplit::QueueWriteStart(const GIFRegBITBLTBUF& blit, const GSVector4i& r)
++{
++	RectItem* it = static_cast<RectItem*>(BeginItem(ItemWriteStart, sizeof(RectItem)));
++	it->blit = blit;
++	it->r = r;
++	EndItem();
++}
++
++void GSSplit::QueuePartialWrite(u32 dbp, const GSVector4i& r)
++{
++	RectItem* it = static_cast<RectItem*>(BeginItem(ItemPartialWrite, sizeof(RectItem)));
++	it->dbp = dbp;
++	it->r = r;
++	EndItem();
++}
++
++void GSSplit::QueueClutWrite(const GIFRegTEX0& TEX0, const GIFRegTEXCLUT& TEXCLUT)
++{
++	ClutItem* it = static_cast<ClutItem*>(BeginItem(ItemClutWrite, sizeof(ClutItem)));
++	it->TEX0 = TEX0;
++	it->TEXCLUT = TEXCLUT;
++	EndItem();
++}
++
++void GSSplit::QueueMove(const GSDrawingEnvironment& env)
++{
++	MoveItem* it = static_cast<MoveItem*>(BeginItem(ItemMove, sizeof(MoveItem)));
++	it->BITBLTBUF = env.BITBLTBUF;
++	it->TRXPOS = env.TRXPOS;
++	it->TRXREG = env.TRXREG;
++	it->TRXDIR = env.TRXDIR;
++	EndItem();
++}
++
++void GSSplit::QueueVSync(u32 field, bool registers_written, bool scanmask_set, const GSPrivRegSet& regs,
++	const GSState::GSPCRTCRegs& pcrtc)
++{
++	VSyncItem* it = static_cast<VSyncItem*>(BeginItem(ItemVSync, sizeof(VSyncItem)));
++	it->pcrtc = pcrtc;
++	it->seq = ++s_vsync_queued;
++	it->field = field;
++	it->registers_written = registers_written;
++	it->scanmask_set = scanmask_set;
++	std::memcpy(it->regs, &regs, sizeof(GSPrivRegSet));
++	EndItem();
++}
++
++void GSSplit::QueueResetTextureCache(bool hardware_reset)
++{
++	ResetItem* it = static_cast<ResetItem*>(BeginItem(ItemResetTextureCache, sizeof(ResetItem)));
++	it->hardware_reset = hardware_reset;
++	EndItem();
++}
++
++void GSSplit::QueueResetState(bool hardware_reset)
++{
++	ResetItem* it = static_cast<ResetItem*>(BeginItem(ItemResetState, sizeof(ResetItem)));
++	it->hardware_reset = hardware_reset;
++	EndItem();
++}
++
++void GSSplit::WaitPreviousVSync(GSState::GSPCRTCRegs& pcrtc, u8& scanmask_used)
++{
++	if (s_vsync_queued == 0)
++		return;
++	if (s_vsync_done.load(std::memory_order_acquire) < s_vsync_queued)
++	{
++		Common::Timer timer;
++		if (s_mode == Mode::Thread)
++		{
++			std::unique_lock lock(s_vsync_mutex);
++			s_vsync_cv.wait(lock, [] { return s_vsync_done.load(std::memory_order_acquire) >= s_vsync_queued; });
++		}
++		else
++		{
++			ProcessAll();
++		}
++		s_vsync_wait_ms += timer.GetTimeMilliseconds();
++	}
++	std::lock_guard lock(s_vsync_mutex);
++	pcrtc = s_vsync_pcrtc;
++	scanmask_used = s_vsync_scanmask;
++}
++
++bool GSSplit::TakeDeferredConfig(Pcsx2Config::GSOptions& config)
++{
++	std::lock_guard lock(s_deferred_mutex);
++	if (!s_deferred_config)
++		return false;
++	config = *s_deferred_config;
++	s_deferred_config.reset();
++	return true;
++}
++
++void GSSplit::DeferConfig(const Pcsx2Config::GSOptions& config)
++{
++	std::lock_guard lock(s_deferred_mutex);
++	s_deferred_config = std::make_unique<Pcsx2Config::GSOptions>(config);
++}
++
++// ------------------------------------------------------------------------------------------------
++// The items, done on the DRAW side (the DRAW thread, or the MTGS thread itself in mode 1).
++
++static void LogWindow()
++{
++	using namespace GSSplit;
++	const Common::Timer::Value now = Common::Timer::GetCurrentValue();
++	const double secs = Common::Timer::ConvertValueToSeconds(now - s_window_start);
++	if (secs < 5.0)
++		return;
++	const u64 cpu = (s_mode == Mode::Thread) ? s_thread.GetCPUTime() : 0;
++	const double ticks = static_cast<double>(Threading::GetThreadTicksPerSecond());
++	const double draw_busy = (s_mode == Mode::Thread && s_window_draw_cpu && ticks > 0.0) ?
++		100.0 * static_cast<double>(cpu - s_window_draw_cpu) / (ticks * secs) : 0.0;
++	const double frames = static_cast<double>(std::max(1u, s_window_frames));
++	ps5px_log("gs split: %s, %.0f items a frame, DRAW thread %.0f%% busy; the MTGS thread waited %.2f ms a frame for the "
++			  "previous frame's end, %.2f ms for queue space (%llu times), %.2f ms in %llu drains",
++		s_mode == Mode::Thread ? "two threads" : "one thread (check)", static_cast<double>(s_items.exchange(0)) / frames,
++		draw_busy, s_vsync_wait_ms / frames, s_space_wait_ms / frames, static_cast<unsigned long long>(s_space_waits),
++		s_drain_ms / frames, static_cast<unsigned long long>(s_drains));
++	s_window_start = now;
++	s_window_draw_cpu = cpu;
++	s_window_frames = 0;
++	s_space_waits = 0;
++	s_space_wait_ms = 0;
++	s_vsync_wait_ms = 0;
++	s_drains = 0;
++	s_drain_ms = 0;
++}
++
++void GSSplit::Execute(u32 kind, u8* payload)
++{
++	GSRendererHW* r = static_cast<GSRendererHW*>(g_gs_renderer.get());
++	switch (kind)
++	{
++		case ItemDraw:
++		{
++			const GSState::PS5SplitDrawItem* d = reinterpret_cast<const GSState::PS5SplitDrawItem*>(payload);
++			const u8* verts = payload + Align64(sizeof(GSState::PS5SplitDrawItem));
++			const u8* idx = verts + Align64(static_cast<size_t>(d->vtx_tail) * sizeof(GSVertex));
++			r->PS5SplitRunDraw(*d, reinterpret_cast<const GSVertex*>(verts), reinterpret_cast<const u16*>(idx));
++		}
++		break;
++
++		case ItemInvalidateVideoMem:
++		{
++			const RectItem* it = reinterpret_cast<const RectItem*>(payload);
++			r->InvalidateVideoMem(it->blit, it->r);
++		}
++		break;
++
++		case ItemSwizzle:
++		{
++			SwizzleItem* it = reinterpret_cast<SwizzleItem*>(payload);
++			int x = it->x, y = it->y;
++			GIFRegBITBLTBUF blit = it->blit;
++			GIFRegTRXPOS pos = it->pos;
++			GIFRegTRXREG reg = it->reg;
++			const u8* src = payload + Align64(sizeof(SwizzleItem));
++			GSLocalMemory::m_psm[it->dpsm].wi(r->m_mem, x, y, src, it->len, blit, pos, reg);
++			g_perfmon.Put(GSPerfMon::Swizzle, it->perf_len);
++			if (it->count_transfer)
++				GSState::s_transfer_n++;
++		}
++		break;
++
++		case ItemWriteStart:
++		{
++			const RectItem* it = reinterpret_cast<const RectItem*>(payload);
++			r->PS5SplitRunWriteStart(it->blit, it->r);
++		}
++		break;
++
++		case ItemPartialWrite:
++		{
++			const RectItem* it = reinterpret_cast<const RectItem*>(payload);
++			r->PS5SplitRunPartialWrite(it->dbp, it->r);
++		}
++		break;
++
++		case ItemClutWrite:
++		{
++			const ClutItem* it = reinterpret_cast<const ClutItem*>(payload);
++			r->m_mem.m_clut.Write(it->TEX0, it->TEXCLUT);
++		}
++		break;
++
++		case ItemMove:
++		{
++			const MoveItem* it = reinterpret_cast<const MoveItem*>(payload);
++			r->m_env.BITBLTBUF = it->BITBLTBUF;
++			r->m_env.TRXPOS = it->TRXPOS;
++			r->m_env.TRXREG = it->TRXREG;
++			r->m_env.TRXDIR = it->TRXDIR;
++			r->Move();
++		}
++		break;
++
++		case ItemVSync:
++		{
++			VSyncItem* it = reinterpret_cast<VSyncItem*>(payload);
++			std::memcpy(s_draw_regs, it->regs, sizeof(GSPrivRegSet));
++			r->PCRTCDisplays = it->pcrtc;
++			if (it->scanmask_set)
++				r->m_scanmask_used = 2;
++			r->VSync(it->field, it->registers_written, r->IsIdleFrame());
++			{
++				std::lock_guard lock(s_vsync_mutex);
++				s_vsync_pcrtc = r->PCRTCDisplays;
++				s_vsync_scanmask = r->m_scanmask_used;
++				s_vsync_done.store(it->seq, std::memory_order_release);
++			}
++			s_vsync_cv.notify_all();
++			if (s_mode == Mode::Thread)
++				MTGS::PS5SplitFrameDone();
++			s_window_frames++;
++			LogWindow();
++		}
++		break;
++
++		case ItemResetTextureCache:
++		{
++			// GSRendererHW::Reset and GSRenderer::Reset, up to GSState::Reset.
++			const ResetItem* it = reinterpret_cast<const ResetItem*>(payload);
++			if (!it->hardware_reset)
++				r->ReadbackTextureCache();
++			r->PurgeTextureCache(true, true, true);
++			if (it->hardware_reset)
++				g_gs_device->ClearCurrent();
++		}
++		break;
++
++		case ItemResetState:
++		{
++			const ResetItem* it = reinterpret_cast<const ResetItem*>(payload);
++			r->GSState::Reset(it->hardware_reset);
++		}
++		break;
++
++		default:
++			pxFailRel("GS split: unknown item");
++			break;
++	}
++}
++
++// ------------------------------------------------------------------------------------------------
++// Starting and stopping.
++
++static GSSplit::Mode WantedMode()
++{
++	using GSSplit::Mode;
++	const int setting = Host::GetIntSettingValue("EmuCore/GS", "PS5GSSplit", 2);
++	if (setting <= 0 || setting > 2)
++		return Mode::Off;
++	if (!g_gs_renderer || !g_gs_device || !GSIsHardwareRenderer() || GSGetCurrentRenderer() == GSRendererType::Null ||
++		PS5PGS::Active())
++		return Mode::Off;
++	return static_cast<Mode>(setting);
++}
++
++static const char* WhyNot()
++{
++	// Cases where the DRAW side writes state the FRONT side reads to decide (docs: §2.3 of the design).
++	if (GSConfig.UserHacks_CPUCLUTRender > 0 || GSConfig.UserHacks_GPUTargetCLUTMode != GSGPUTargetCLUTMode::Disabled)
++		return "the CPU CLUT render or GPU target CLUT fix is on";
++	if (g_gs_device->Features().aa1)
++		return "hardware AA1 is on";
++	if (!static_cast<GSRendererHW*>(g_gs_renderer.get())->PS5SplitSafe())
++		return "the game's move or IRem skip-count fix is on";
++	if (GSConfig.DumpGSData || GSConfig.SaveFrame || GSConfig.SaveTexture || GSConfig.SaveDepth || GSConfig.SaveAlpha ||
++		GSConfig.SaveInfo || GSConfig.SaveTransferImages || GSConfig.SaveDrawStats || GSConfig.SaveFrameStats)
++		return "GS dumping is on";
++	return nullptr;
++}
++
++void GSSplit::Stop()
++{
++	if (!s_front)
++		return;
++
++	GSRendererHW* r = static_cast<GSRendererHW*>(g_gs_renderer.get());
++	Drain();
++	if (s_mode == Mode::Thread)
++	{
++		s_quit.store(true, std::memory_order_release);
++		s_sema.NotifyOfWork();
++		s_thread.Join();
++	}
++
++	// The whole parse state back, pending vertices included: the single thread goes on from exactly here.
++	r->PS5CopyParseState(*s_front);
++	if (s_front->m_ps5_scanmask_set)
++		r->m_scanmask_used = 2;
++	if (s_front->m_channel_shuffle_finish)
++		r->m_channel_shuffle_finish = true;
++	r->SetRegsMem(s_basemem);
++
++	s_front.reset();
++	std::free(s_ring);
++	s_ring = nullptr;
++	ps5px_log("gs split: off; one GS thread");
++	s_mode = Mode::Off;
++}
++
++void GSSplit::Configure(u8* basemem)
++{
++	if (basemem)
++		s_basemem = basemem;
++
++	const Mode want = WantedMode();
++	const char* why = (want != Mode::Off) ? WhyNot() : nullptr;
++	const Mode mode = why ? Mode::Off : want;
++
++	if (why != s_last_why)
++	{
++		if (why)
++			ps5px_log("gs split: asked for, but not used: %s", why);
++		s_last_why = why;
++	}
++	if (mode == s_mode && (mode == Mode::Off) == !s_front)
++		return;
++	Stop();
++	if (mode == Mode::Off || !s_basemem)
++		return;
++
++	GSRendererHW* r = static_cast<GSRendererHW*>(g_gs_renderer.get());
++
++	s_ring = static_cast<u8*>(std::aligned_alloc(64, RING_SIZE));
++	if (!s_ring)
++	{
++		ps5px_log("gs split: asked for, but not used: no memory for its queue (%zu MiB)", RING_SIZE >> 20);
++		return;
++	}
++
++	// GSState's constructor resets the draw and transfer numbers, which belong to the DRAW side.
++	const u64 n = GSState::s_n, tn = GSState::s_transfer_n, ltn = GSState::s_last_transfer_draw_n;
++	s_front = std::make_unique<GSSplitFront>();
++	GSState::s_n = n;
++	GSState::s_transfer_n = tn;
++	GSState::s_last_transfer_draw_n = ltn;
++
++	s_front->SetRegsMem(s_basemem);
++	s_front->PS5CopyParseState(*r);
++	s_front->PCRTCDisplays = r->PCRTCDisplays;
++	s_front->m_scanmask_used = r->m_scanmask_used;
++	s_front->m_nativeres = r->m_nativeres;
++	// The renderer's own pending vertices and upload are the FRONT side's now: a flush of the renderer's
++	// (in a reset or a state load) must not draw or write them a second time.
++	r->PS5ClearParsePending();
++
++	std::memcpy(s_draw_regs, s_basemem, sizeof(GSPrivRegSet));
++	r->SetRegsMem(s_draw_regs);
++
++	s_write.store(0);
++	s_read.store(0);
++	s_write_local = 0;
++	s_vsync_queued = 0;
++	s_vsync_done.store(0);
++	s_vsync_pcrtc = r->PCRTCDisplays;
++	s_vsync_scanmask = r->m_scanmask_used;
++	s_items.store(0);
++	s_window_frames = 0;
++	s_window_start = Common::Timer::GetCurrentValue();
++	s_window_draw_cpu = 0;
++
++	s_mode = mode;
++	if (mode == Mode::Thread)
++	{
++		s_quit.store(false);
++		s_sema.Reset();
++		s_thread.Start(&GSSplit::ThreadMain);
++	}
++	ps5px_log("gs split: on, %s (PS5GSSplit %d)", mode == Mode::Thread ? "the drawing on a thread of its own" :
++		"each item done at once on the GS thread, to check the picture", static_cast<int>(mode));
++}
++
++#endif
+diff --git a/pcsx2/GS/GSSplit.h b/pcsx2/GS/GSSplit.h
+new file mode 100644
+index 0000000..16d1bcf
+--- /dev/null
++++ b/pcsx2/GS/GSSplit.h
+@@ -0,0 +1,88 @@
++// SPDX-FileCopyrightText: 2026 Press5elect (Crux2)
++// SPDX-License-Identifier: GPL-3.0+
++
++#pragma once
++
++#ifdef __PROSPERO__
++
++#include "GS/GSRegs.h"
++#include "GS/GSState.h"
++
++#include <cstddef>
++
++// Crux2 ([EmuCore/GS] PS5GSSplit, two threads by default (the owner, 2026-11-24)): the GS thread in two.
++//
++// Today one thread does all of the GS: it reads the GIF packets (registers, vertices, the decisions on
++// when a draw is complete) and draws (GSRendererHW::Draw, the texture cache, the Vulkan device). With
++// the split, a FRONT object (GSSplitFront, on the MTGS thread) reads the packets as before and, where
++// the single thread would have drawn, uploaded, loaded a CLUT, moved memory or ended a frame, writes
++// that work into an ordered queue; the DRAW side (g_gs_renderer, the hardware renderer, unchanged)
++// does the queued work in the same order with the state it would have seen. GS memory, the CLUT data,
++// the texture cache and the device belong to the DRAW side; the FRONT side never needs their contents
++// to decide anything (docs: crux2-gs-thread-split-design-2026-11-24.md).
++//
++// Modes: 1 runs each queued item at once on the same thread (the restructuring without concurrency,
++// to check that the picture is the same); 2 runs them on a thread of their own.
++//
++// Needs proper testing on the console: the picture must be the same as with the split off.
++
++class GSSplitFront;
++
++namespace GSSplit
++{
++	enum class Mode : u8
++	{
++		Off = 0,
++		Inline = 1,
++		Thread = 2,
++	};
++
++	/// The split is running (a FRONT object exists and takes the GIF packets).
++	bool Active();
++	/// Items run on a thread of their own (mode 2).
++	bool Threaded();
++	/// The FRONT object, or null.
++	GSState* Front();
++	/// This is the DRAW thread.
++	bool OnDrawThread();
++	/// A queued item is running on this thread (the DRAW side's work, either mode).
++	bool InItem();
++
++	/// Starts or stops the split to match the setting and what the game needs (at a game's start, after
++	/// a settings change). Called on the MTGS thread with the GS open.
++	void Configure(u8* basemem);
++	/// Stops the split, handing the whole state back to g_gs_renderer (GS reopen, close).
++	void Stop();
++
++	/// Waits until the DRAW side has done everything queued and is idle. Afterwards the MTGS thread may
++	/// use g_gs_renderer, the texture cache and the device directly until it queues more work.
++	void Drain();
++
++	// Items the FRONT side queues (MTGS thread). An item is written in place between BeginItem and
++	// EndItem (GSState::PS5SplitQueueDraw writes a draw so).
++	void* BeginItem(u32 kind, size_t payload);
++	void EndItem();
++	static constexpr u32 ITEM_DRAW = 1;
++	void QueueInvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r);
++	void QueueSwizzle(u32 dpsm, int x, int y, const u8* src, int len, const GIFRegBITBLTBUF& blit,
++		const GIFRegTRXPOS& pos, const GIFRegTRXREG& reg, int perf_len, bool count_transfer);
++	void QueueWriteStart(const GIFRegBITBLTBUF& blit, const GSVector4i& r);
++	void QueuePartialWrite(u32 dbp, const GSVector4i& r);
++	void QueueClutWrite(const GIFRegTEX0& TEX0, const GIFRegTEXCLUT& TEXCLUT);
++	void QueueMove(const GSDrawingEnvironment& env);
++	void QueueVSync(u32 field, bool registers_written, bool scanmask_set, const GSPrivRegSet& regs,
++		const GSState::GSPCRTCRegs& pcrtc);
++	void QueueResetTextureCache(bool hardware_reset);
++	void QueueResetState(bool hardware_reset);
++
++	/// FRONT, at a vsync: waits until the DRAW side has ended the frame before this one, then gives what
++	/// that frame's end changed that the FRONT side reads (the display circuits, the scan mask count).
++	void WaitPreviousVSync(GSState::GSPCRTCRegs& pcrtc, u8& scanmask_used);
++
++	/// A settings change asked for on the DRAW thread (automatic quality, in VSync) is done by the MTGS
++	/// thread at its next vsync: the FRONT side reads GSConfig while it parses.
++	void DeferConfig(const Pcsx2Config::GSOptions& config);
++	bool TakeDeferredConfig(Pcsx2Config::GSOptions& config);
++} // namespace GSSplit
++
++#endif
 diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
-index 88fdbb3..c1e4e72 100644
+index 88fdbb3..584bed9 100644
 --- a/pcsx2/GS/GSState.cpp
 +++ b/pcsx2/GS/GSState.cpp
-@@ -224,7 +224,8 @@ void GSState::SetPrimHandlers()
+@@ -6,6 +6,10 @@
+ #include "GS/GSGL.h"
+ #include "GS/GSPerfMon.h"
+ #include "GS/GSUtil.h"
++#ifdef __PROSPERO__
++#include "GS/GSSplit.h"
++#include "GS/Renderers/Common/GSRenderer.h"
++#endif
+ 
+ #include "common/Console.h"
+ #include "common/BitUtils.h"
+@@ -224,7 +228,8 @@ void GSState::SetPrimHandlers()
  	m_fpGIFRegHandlerXYZ[P][2] = &GSState::GIFRegHandlerXYZ2<P, 0, auto_flush>; \
  	m_fpGIFRegHandlerXYZ[P][3] = &GSState::GIFRegHandlerXYZ2<P, 1, auto_flush>; \
  	m_fpGIFPackedRegHandlerSTQRGBAXYZF2[P] = &GSState::GIFPackedRegHandlerSTQRGBAXYZF2<P, auto_flush>; \
@@ -4517,7 +5745,7 @@ index 88fdbb3..c1e4e72 100644
  
  	SetHandlerXYZ(GS_POINTLIST, true);
  	SetHandlerXYZ(GS_LINELIST, auto_flush);
-@@ -1494,6 +1495,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -1494,6 +1499,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -4531,7 +5759,7 @@ index 88fdbb3..c1e4e72 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1516,6 +1524,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
+@@ -1516,6 +1528,10 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZF2(const GIFPackedReg* RESTRICT r, u3
  		r += 3;
  	}
  
@@ -4542,7 +5770,7 @@ index 88fdbb3..c1e4e72 100644
  	m_q = r[-3].STQ.Q; // remember the last one, STQ outputs this to the temp Q each time
  }
  
-@@ -1528,6 +1540,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1528,6 +1544,13 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  
  	const GIFPackedReg* RESTRICT r_end = r + size;
  
@@ -4556,7 +5784,7 @@ index 88fdbb3..c1e4e72 100644
  	while (r < r_end)
  	{
  		const GSVector4i st = GSVector4i::loadl(&r[0].U64[0]);
-@@ -1549,9 +1568,32 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
+@@ -1549,9 +1572,32 @@ void GSState::GIFPackedRegHandlerSTQRGBAXYZ2(const GIFPackedReg* RESTRICT r, u32
  		r += 3;
  	}
  
@@ -4589,7 +5817,33 @@ index 88fdbb3..c1e4e72 100644
  void GSState::GIFPackedRegHandlerNOP(const GIFPackedReg* RESTRICT r, u32 size)
  {
  }
-@@ -2317,6 +2359,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
+@@ -1748,6 +1794,12 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
+ 		}
+ 
+ 		m_mem.m_clut.Write(m_env.CTXT[i].TEX0, m_env.TEXCLUT);
++#ifdef __PROSPERO__
++		// The split's FRONT side keeps the write state from its own load (of its own memory: the palette
++		// itself is the DRAW side's, loaded there in order).
++		if (m_ps5_split_front && !m_ps5_split_quiet)
++			GSSplit::QueueClutWrite(m_env.CTXT[i].TEX0, m_env.TEXCLUT);
++#endif
+ 	}
+ 
+ 	u64 mask = 0x1fffffffffull; // TBP0 TBW PSM TW TH TCC TFX
+@@ -1966,7 +2018,12 @@ void GSState::GIFRegHandlerSCANMSK(const GIFReg* RESTRICT r)
+ 	m_env.SCANMSK = r->SCANMSK;
+ 
+ 	if (m_env.SCANMSK.MSK & 2)
++	{
+ 		m_scanmask_used = 2;
++#ifdef __PROSPERO__
++		m_ps5_scanmask_set = true;
++#endif
++	}
+ 
+ 	if (m_prev_env.SCANMSK.MSK != m_env.SCANMSK.MSK)
+ 		m_dirty_gs_regs |= (1 << DIRTY_REG_SCANMSK);
+@@ -2317,6 +2374,9 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
  
  void GSState::Flush(GSFlushReason reason)
  {
@@ -4599,7 +5853,7 @@ index 88fdbb3..c1e4e72 100644
  	SetDrawBuffDirty();
  
  	FlushWrite();
-@@ -2327,6 +2372,9 @@ void GSState::Flush(GSFlushReason reason)
+@@ -2327,6 +2387,9 @@ void GSState::Flush(GSFlushReason reason)
  
  void GSState::FlushDraw(GSFlushReason reason)
  {
@@ -4609,7 +5863,564 @@ index 88fdbb3..c1e4e72 100644
  	FlushWrite();
  
  	if (m_index->tail > 0)
-@@ -3348,6 +3396,44 @@ void GSState::ReadbackTextureCache()
+@@ -2415,11 +2478,12 @@ void GSState::FlushWrite()
+ 			// Just setting the height should be okay...
+ 			r.w = std::max(r.y + calculated_height, psm_s.bs.y);
+ 
+-			if (m_draw_transfers.size() > 0 && m_tr.m_blit.DBP == m_draw_transfers.back().blit.DBP)
+-			{
+-				m_draw_transfers.back().rect = m_draw_transfers.back().rect.runion(r);
+-				s_last_transfer_draw_n = s_n;
+-			}
++#ifdef __PROSPERO__
++			if (m_ps5_split_front)
++				GSSplit::QueuePartialWrite(m_tr.m_blit.DBP, r); // (the upload list is the DRAW side's)
++			else
++#endif
++				PS5SplitRunPartialWrite(m_tr.m_blit.DBP, r);
+ 		}
+ 	}
+ 
+@@ -2427,12 +2491,24 @@ void GSState::FlushWrite()
+ 
+ 	const GSLocalMemory::writeImage wi = GSLocalMemory::m_psm[m_env.BITBLTBUF.DPSM].wi;
+ 
++#ifdef __PROSPERO__
++	// The split's FRONT side: the DRAW side writes its GS memory; this side writes its own as well, which
++	// moves the transfer's position (m_tr.x/y) exactly as there.
++	if (m_ps5_split_front && !m_ps5_split_quiet)
++		GSSplit::QueueSwizzle(m_env.BITBLTBUF.DPSM, m_tr.x, m_tr.y, &m_tr.buff[m_tr.start], len, m_tr.m_blit, m_tr.m_pos,
++			m_tr.m_reg, len, true);
++#endif
+ 	wi(m_mem, m_tr.x, m_tr.y, &m_tr.buff[m_tr.start], len, m_tr.m_blit, m_tr.m_pos, m_tr.m_reg);
+ 
+ 	m_tr.start += len;
+ 
+-	g_perfmon.Put(GSPerfMon::Swizzle, len);
+-	s_transfer_n++;
++#ifdef __PROSPERO__
++	if (!m_ps5_split_front)
++#endif
++	{
++		g_perfmon.Put(GSPerfMon::Swizzle, len);
++		s_transfer_n++;
++	}
+ 	if (m_tr.start >= m_tr.total)
+ 		m_env.TRXDIR.XDIR = 3;
+ }
+@@ -2520,19 +2596,30 @@ void GSState::FlushPrim()
+ 		m_texflush_flag = PRIM->TME ? false : m_texflush_flag;
+ 
+ 		// internal frame rate detection based on sprite blits to the display framebuffer
++		bool fb_sprite_blit = false;
+ 		{
+ 			const u32 FRAME_FBP = m_context->FRAME.FBP;
+ 			if ((m_regs->DISP[0].DISPFB.FBP == FRAME_FBP && m_regs->PMODE.EN1) ||
+ 				(m_regs->DISP[1].DISPFB.FBP == FRAME_FBP && m_regs->PMODE.EN2))
+ 			{
+-				g_perfmon.AddDisplayFramebufferSpriteBlit();
++				fb_sprite_blit = true;
+ 			}
+ 		}
++#ifdef __PROSPERO__
++		// (The split's FRONT side hands this to the DRAW side, which counts it: g_perfmon is the DRAW side's.)
++		if (fb_sprite_blit && !m_ps5_split_front)
++#else
++		if (fb_sprite_blit)
++#endif
++			g_perfmon.AddDisplayFramebufferSpriteBlit();
+ 
+ 		GSVertex buff[2];
+ 		GSVertexBuff& vtx_buff = *m_vertex;
+ 		GSIndexBuff& idx_buff = *m_index;
+-		IncDraw();
++#ifdef __PROSPERO__
++		if (!m_ps5_split_front) // (the draw number is the DRAW side's)
++#endif
++			IncDraw();
+ 
+ 		const u32 head = vtx_buff.head;
+ 		const u32 tail = vtx_buff.tail;
+@@ -2587,88 +2674,12 @@ void GSState::FlushPrim()
+ #endif
+ 		// Update scissor, it may have been modified by a previous draw
+ 		m_env.CTXT[PRIM->CTXT].UpdateScissor();
+-		m_vt.Update(vtx_buff.buff, idx_buff.buff, vtx_buff.tail, idx_buff.tail, GSUtil::GetPrimClass(PRIM->PRIM));
+-
+-		// Texel coordinate rounding
+-		// Helps Manhunt (lights shining through objects).
+-		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
+-		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
+-		if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
+-		{
+-			if (!PRIM->FST) // STQ's
+-			{
+-				const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
+-				// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
+-				for (int i = idx_buff.tail - 1; i >= 0; i--)
+-				{
+-					GSVertex* v = &vtx_buff.buff[idx_buff.buff[i]];
+-
+-					// Only Q on the second vertex is valid
+-					if (!(i & 1) && is_sprite)
+-						v->RGBAQ.Q = vtx_buff.buff[idx_buff.buff[i + 1]].RGBAQ.Q;
+-
+-					int T = std::bit_cast<int>(v->ST.T);
+-					int Q = std::bit_cast<int>(v->RGBAQ.Q);
+-					int S = std::bit_cast<int>(v->ST.S);
+-					const int expS = (S >> 23) & 0xff;
+-					const int expT = (T >> 23) & 0xff;
+-					const int expQ = (Q >> 23) & 0xff;
+-					int max_exp = std::max(expS, expQ);
+-
+-					u32 mask = CalcMask(expS, max_exp);
+-					S &= ~mask;
+-					v->ST.S = std::bit_cast<float>(S);
+-					max_exp = std::max(expT, expQ);
+-					mask = CalcMask(expT, max_exp);
+-					T &= ~mask;
+-					v->ST.T = std::bit_cast<float>(T);
+-					Q &= ~0xff;
+-
+-					if (!is_sprite || (i & 1))
+-						v->RGBAQ.Q = std::bit_cast<float>(Q);
+-
+-					m_vt.m_min.t.x = std::min(m_vt.m_min.t.x, (v->ST.S / v->RGBAQ.Q) * (1 << m_context->TEX0.TW));
+-					m_vt.m_min.t.y = std::min(m_vt.m_min.t.y, (v->ST.T / v->RGBAQ.Q) * (1 << m_context->TEX0.TH));
+-				}
+-			}
+-		}
+-
+-		// Skip draw if Z test is enabled, but set to fail all pixels.
+-		const bool skip_draw = (m_context->TEST.ZTE && m_context->TEST.ZTST == ZTST_NEVER);
+-		m_quad_check_valid = false;
+-		m_quad_check_valid_shuffle = false;
+-		m_drawlist.clear();
+-		m_drawlist_bbox.clear();
+-
+-		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+-		{
+-			if (GSConfig.SaveInfo)
+-			{
+-				// Only dump registers/vertices if we are drawing.
+-				// Always dump the transfers since these are relevant for debugging regardless of
+-				// whether the draw is skipped or not.
+-				DumpDrawInfo(!skip_draw, !skip_draw, true);
+-			}
+-
+-			if (GSConfig.SaveTransferImages)
+-				DumpTransferImages();
+-		}
+-
+-		if (!skip_draw)
+-			Draw();
+-
+-		g_perfmon.Put(GSPerfMon::Draw, 1);
+-		g_perfmon.Put(GSPerfMon::Prim, idx_buff.tail / GSUtil::GetVertexCount(PRIM->PRIM));
+-
+-		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+-		{
+-			if (GSConfig.SaveDrawStats)
+-			{
+-				m_perfmon_draw = g_perfmon - m_perfmon_draw;
+-				m_perfmon_draw.Dump(GetDrawDumpPath("%05lld_draw_stats.txt", s_n), GSIsHardwareRenderer());
+-				m_perfmon_draw = g_perfmon;
+-			}
+-		}
++#ifdef __PROSPERO__
++		if (m_ps5_split_front)
++			PS5SplitQueueDraw(fb_sprite_blit);
++		else
++#endif
++			PS5FlushPrimDraw();
+ 
+ 		idx_buff.tail = 0;
+ 		vtx_buff.head = 0;
+@@ -2701,6 +2712,318 @@ void GSState::FlushPrim()
+ 		}
+ 	}
+ }
++void GSState::PS5FlushPrimDraw()
++{
++	GSVertexBuff& vtx_buff = *m_vertex;
++	GSIndexBuff& idx_buff = *m_index;
++
++	m_vt.Update(vtx_buff.buff, idx_buff.buff, vtx_buff.tail, idx_buff.tail, GSUtil::GetPrimClass(PRIM->PRIM));
++
++	// Texel coordinate rounding
++	// Helps Manhunt (lights shining through objects).
++	// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
++	// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
++	if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
++	{
++		if (!PRIM->FST) // STQ's
++		{
++			const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
++			// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
++			for (int i = idx_buff.tail - 1; i >= 0; i--)
++			{
++				GSVertex* v = &vtx_buff.buff[idx_buff.buff[i]];
++
++				// Only Q on the second vertex is valid
++				if (!(i & 1) && is_sprite)
++					v->RGBAQ.Q = vtx_buff.buff[idx_buff.buff[i + 1]].RGBAQ.Q;
++
++				int T = std::bit_cast<int>(v->ST.T);
++				int Q = std::bit_cast<int>(v->RGBAQ.Q);
++				int S = std::bit_cast<int>(v->ST.S);
++				const int expS = (S >> 23) & 0xff;
++				const int expT = (T >> 23) & 0xff;
++				const int expQ = (Q >> 23) & 0xff;
++				int max_exp = std::max(expS, expQ);
++
++				u32 mask = CalcMask(expS, max_exp);
++				S &= ~mask;
++				v->ST.S = std::bit_cast<float>(S);
++				max_exp = std::max(expT, expQ);
++				mask = CalcMask(expT, max_exp);
++				T &= ~mask;
++				v->ST.T = std::bit_cast<float>(T);
++				Q &= ~0xff;
++
++				if (!is_sprite || (i & 1))
++					v->RGBAQ.Q = std::bit_cast<float>(Q);
++
++				m_vt.m_min.t.x = std::min(m_vt.m_min.t.x, (v->ST.S / v->RGBAQ.Q) * (1 << m_context->TEX0.TW));
++				m_vt.m_min.t.y = std::min(m_vt.m_min.t.y, (v->ST.T / v->RGBAQ.Q) * (1 << m_context->TEX0.TH));
++			}
++		}
++	}
++
++	// Skip draw if Z test is enabled, but set to fail all pixels.
++	const bool skip_draw = (m_context->TEST.ZTE && m_context->TEST.ZTST == ZTST_NEVER);
++	m_quad_check_valid = false;
++	m_quad_check_valid_shuffle = false;
++	m_drawlist.clear();
++	m_drawlist_bbox.clear();
++
++	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
++	{
++		if (GSConfig.SaveInfo)
++		{
++			// Only dump registers/vertices if we are drawing.
++			// Always dump the transfers since these are relevant for debugging regardless of
++			// whether the draw is skipped or not.
++			DumpDrawInfo(!skip_draw, !skip_draw, true);
++		}
++
++		if (GSConfig.SaveTransferImages)
++			DumpTransferImages();
++	}
++
++	if (!skip_draw)
++		Draw();
++
++	g_perfmon.Put(GSPerfMon::Draw, 1);
++	g_perfmon.Put(GSPerfMon::Prim, idx_buff.tail / GSUtil::GetVertexCount(PRIM->PRIM));
++
++	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
++	{
++		if (GSConfig.SaveDrawStats)
++		{
++			m_perfmon_draw = g_perfmon - m_perfmon_draw;
++			m_perfmon_draw.Dump(GetDrawDumpPath("%05lld_draw_stats.txt", s_n), GSIsHardwareRenderer());
++			m_perfmon_draw = g_perfmon;
++		}
++	}
++}
++
++void GSState::PS5SplitRunWriteStart(const GIFRegBITBLTBUF& blit, const GSVector4i& r)
++{
++	s_last_transfer_draw_n = s_n;
++	// Store the transfer for preloading new RT's.
++	if ((m_draw_transfers.size() > 0 && blit.DBP == m_draw_transfers.back().blit.DBP && m_draw_transfers.back().transfer_type == EEGS_TransferType::EE_to_GS))
++	{
++		// Same BP, let's update the rect.
++		GSUploadQueue transfer = m_draw_transfers.back();
++		m_draw_transfers.pop_back();
++		transfer.rect = transfer.rect.runion(r);
++		transfer.draw = s_n;
++		transfer.was_hardware_only = false;
++		m_draw_transfers.push_back(transfer);
++	}
++	else
++	{
++		const GSUploadQueue new_transfer = {blit, s_n, r, EEGS_TransferType::EE_to_GS, false};
++		m_draw_transfers.push_back(new_transfer);
++	}
++}
++
++void GSState::PS5SplitRunPartialWrite(u32 dbp, const GSVector4i& r)
++{
++	if (m_draw_transfers.size() > 0 && dbp == m_draw_transfers.back().blit.DBP)
++	{
++		m_draw_transfers.back().rect = m_draw_transfers.back().rect.runion(r);
++		s_last_transfer_draw_n = s_n;
++	}
++}
++
++#ifdef __PROSPERO__
++static_assert(GSClut::PS5_WRITE_STATE_SIZE <= sizeof(GSState::PS5SplitDrawItem::clut_write));
++
++static constexpr size_t PS5Align64(size_t n)
++{
++	return (n + 63) & ~size_t{63};
++}
++
++void GSState::PS5SplitQueueDraw(bool fb_sprite_blit)
++{
++	const GSVertexBuff& vb = *m_vertex;
++	const GSIndexBuff& ib = *m_index;
++	const size_t head_bytes = PS5Align64(sizeof(PS5SplitDrawItem));
++	const size_t vtx_bytes = PS5Align64(static_cast<size_t>(vb.tail) * sizeof(GSVertex));
++	const size_t idx_bytes = static_cast<size_t>(ib.tail) * sizeof(u16);
++
++	u8* p = static_cast<u8*>(GSSplit::BeginItem(GSSplit::ITEM_DRAW, head_bytes + vtx_bytes + idx_bytes));
++	PS5SplitDrawItem* d = reinterpret_cast<PS5SplitDrawItem*>(p);
++	std::memcpy(static_cast<void*>(&d->env), &m_env, sizeof(m_env));
++	std::memcpy(static_cast<void*>(&d->prev_env), &m_prev_env, sizeof(m_prev_env));
++	std::memcpy(static_cast<void*>(&d->v), &m_v, sizeof(m_v));
++	d->temp_draw_rect = temp_draw_rect;
++	m_mem.m_clut.PS5GetWriteState(d->clut_write);
++	d->vtx_head = vb.head;
++	d->vtx_tail = vb.tail;
++	d->vtx_next = vb.next;
++	d->idx_tail = ib.tail;
++	d->max_vertex_count = m_max_vertex_count;
++	d->backed_up_ctx = m_backed_up_ctx;
++	d->dirty_gs_regs = m_dirty_gs_regs;
++	d->flush_reason = static_cast<u32>(m_state_flush_reason);
++	d->packed_uv_hack = m_isPackedUV_HackFlag;
++	d->shuffle_finish_set = m_channel_shuffle_finish;
++	d->fb_sprite_blit = fb_sprite_blit;
++	m_channel_shuffle_finish = false; // (handed over: Draw reads and clears it on the DRAW side)
++	if (vb.tail)
++		std::memcpy(p + head_bytes, vb.buff, static_cast<size_t>(vb.tail) * sizeof(GSVertex));
++	if (ib.tail)
++		std::memcpy(p + head_bytes + vtx_bytes, ib.buff, idx_bytes);
++	GSSplit::EndItem();
++}
++
++void GSState::PS5SplitRunDraw(const PS5SplitDrawItem& d, const GSVertex* verts, const u16* idx)
++{
++	// Everything of the FRONT side's state at its FlushPrim that Draw reads. (Draw itself changes only the
++	// scissor and offsets of the context it draws with, in m_prev_env; the FRONT side copies those afresh
++	// from m_env before the next draw, so taking its m_prev_env whole is what the single thread had.)
++	std::memcpy(static_cast<void*>(&m_env), &d.env, sizeof(m_env));
++	std::memcpy(static_cast<void*>(&m_prev_env), &d.prev_env, sizeof(m_prev_env));
++	std::memcpy(static_cast<void*>(&m_v), &d.v, sizeof(m_v));
++	temp_draw_rect = d.temp_draw_rect;
++	m_mem.m_clut.PS5SetWriteState(d.clut_write);
++	m_backed_up_ctx = d.backed_up_ctx;
++	m_dirty_gs_regs = d.dirty_gs_regs;
++	m_state_flush_reason = static_cast<GSFlushReason>(d.flush_reason);
++	m_isPackedUV_HackFlag = d.packed_uv_hack;
++	if (d.shuffle_finish_set)
++		m_channel_shuffle_finish = true;
++
++	// The vertex buffers as large as the FRONT side's (Draw grows them by the same rules).
++	while (m_max_vertex_count < d.max_vertex_count || m_max_vertex_count + 3 < d.vtx_tail)
++		GrowVertexBuffer();
++	if (d.vtx_tail)
++		std::memcpy(m_vertex->buff, verts, static_cast<size_t>(d.vtx_tail) * sizeof(GSVertex));
++	if (d.idx_tail)
++		std::memcpy(m_index->buff, idx, static_cast<size_t>(d.idx_tail) * sizeof(u16));
++	m_vertex->head = d.vtx_head;
++	m_vertex->tail = d.vtx_tail;
++	m_vertex->next = d.vtx_next;
++	m_index->tail = d.idx_tail;
++
++	// As FlushDraw around FlushPrim.
++	m_draw_env = &m_prev_env;
++	PRIM = &m_prev_env.PRIM;
++	UpdateContext();
++
++	if (d.fb_sprite_blit)
++		g_perfmon.AddDisplayFramebufferSpriteBlit();
++	IncDraw();
++	m_env.CTXT[PRIM->CTXT].UpdateScissor();
++	PS5FlushPrimDraw();
++
++	m_index->tail = 0;
++	m_vertex->head = m_vertex->tail = m_vertex->next = 0;
++	m_draw_env = &m_env;
++	PRIM = &m_env.PRIM;
++	UpdateContext();
++}
++
++void GSState::PS5CopyParseState(const GSState& src)
++{
++	std::memcpy(static_cast<void*>(&m_env), &src.m_env, sizeof(m_env));
++	std::memcpy(static_cast<void*>(&m_prev_env), &src.m_prev_env, sizeof(m_prev_env));
++	std::memcpy(static_cast<void*>(&m_temp_env), &src.m_temp_env, sizeof(m_temp_env));
++	std::memcpy(static_cast<void*>(&m_v), &src.m_v, sizeof(m_v));
++	m_q = src.m_q;
++	std::memcpy(static_cast<void*>(m_path), src.m_path, sizeof(m_path));
++
++	m_tr.x = src.m_tr.x;
++	m_tr.y = src.m_tr.y;
++	m_tr.w = src.m_tr.w;
++	m_tr.h = src.m_tr.h;
++	m_tr.start = src.m_tr.start;
++	m_tr.end = src.m_tr.end;
++	m_tr.total = src.m_tr.total;
++	m_tr.rect = src.m_tr.rect;
++	m_tr.m_blit = src.m_tr.m_blit;
++	m_tr.m_pos = src.m_tr.m_pos;
++	m_tr.m_reg = src.m_tr.m_reg;
++	m_tr.write = src.m_tr.write;
++	if (src.m_tr.end > 0)
++		std::memcpy(m_tr.buff, src.m_tr.buff, static_cast<size_t>(src.m_tr.end));
++
++	while (m_max_vertex_count < src.m_max_vertex_count)
++		GrowVertexBuffer();
++	for (int i = 0; i < MAX_DRAW_BUFFERS; i++)
++	{
++		GSVertexBuff& dv = m_vertex_buffers[i];
++		const GSVertexBuff& sv = src.m_vertex_buffers[i];
++		dv.head = sv.head;
++		dv.tail = sv.tail;
++		dv.next = sv.next;
++		dv.xy_tail = sv.xy_tail;
++		for (int j = 0; j < 4; j++)
++			dv.xy[j] = sv.xy[j];
++		dv.xyhead = sv.xyhead;
++		if (sv.tail)
++			std::memcpy(dv.buff, sv.buff, static_cast<size_t>(sv.tail) * sizeof(GSVertex));
++		m_index_buffers[i].tail = src.m_index_buffers[i].tail;
++		if (src.m_index_buffers[i].tail)
++			std::memcpy(m_index_buffers[i].buff, src.m_index_buffers[i].buff, static_cast<size_t>(src.m_index_buffers[i].tail) * sizeof(u16));
++		std::memcpy(static_cast<void*>(&m_env_buffers[i]), &src.m_env_buffers[i], sizeof(m_env_buffers[i]));
++	}
++	m_vertex = &m_vertex_buffers[src.m_vertex - src.m_vertex_buffers];
++	m_index = &m_index_buffers[src.m_index - src.m_index_buffers];
++	m_used_buffers_idx = src.m_used_buffers_idx;
++	m_current_buffer_idx = src.m_current_buffer_idx;
++	m_recent_buffer_switch = src.m_recent_buffer_switch;
++
++	temp_draw_rect = src.temp_draw_rect;
++	m_texflush_flag = src.m_texflush_flag;
++	m_isPackedUV_HackFlag = src.m_isPackedUV_HackFlag;
++	m_dirty_gs_regs = src.m_dirty_gs_regs;
++	m_backed_up_ctx = src.m_backed_up_ctx;
++	m_state_flush_reason = src.m_state_flush_reason;
++	m_ps5_autoflush_scope = false;
++	m_ps5_autoflush_known = false;
++	m_ps5_autoflush_result = src.m_ps5_autoflush_result;
++	m_ps5_autoflush_off = src.m_ps5_autoflush_off;
++	m_ps5_autoflush_layer = src.m_ps5_autoflush_layer;
++	m_ps5_autoflush_uses = src.m_ps5_autoflush_uses;
++
++	u8 ws[GSClut::PS5_WRITE_STATE_SIZE];
++	src.m_mem.m_clut.PS5GetWriteState(ws);
++	m_mem.m_clut.PS5SetWriteState(ws);
++
++	// The contexts' pixel offset tables are the memory object's own: this side's.
++	const auto refresh = [this](GSDrawingEnvironment& env) {
++		for (GSDrawingContext& ctx : env.CTXT)
++			ctx.offset.fzb4 = m_mem.GetPixelOffset4(ctx.FRAME, ctx.ZBUF);
++	};
++	refresh(m_env);
++	refresh(m_prev_env);
++	refresh(m_temp_env);
++	for (GSDrawBufferEnv& b : m_env_buffers)
++		refresh(b.m_env);
++
++	m_draw_env = &m_env;
++	PRIM = &m_env.PRIM;
++	UpdateContext();
++	UpdateVertexKick();
++}
++
++void GSState::PS5ClearParsePending()
++{
++	for (int i = 0; i < MAX_DRAW_BUFFERS; i++)
++	{
++		m_vertex_buffers[i].head = m_vertex_buffers[i].tail = m_vertex_buffers[i].next = 0;
++		m_vertex_buffers[i].xy_tail = 0;
++		m_index_buffers[i].tail = 0;
++	}
++	m_tr.start = m_tr.end;
++}
++
++GSLocalMemory& GSState::PS5ReadMemory()
++{
++	if (!m_ps5_split_front)
++		return m_mem;
++	GSSplit::Drain();
++	return g_gs_renderer->m_mem;
++}
++#endif
++
+ GSVector4i GSState::GetTEX0Rect(const GSDrawingContext& prev_ctx)
+ {
+ 	GSVector4i ret = GSVector4i::zero();
+@@ -2925,23 +3248,12 @@ void GSState::Write(const u8* mem, int len)
+ 
+ 		r = m_tr.rect;
+ 
+-		s_last_transfer_draw_n = s_n;
+-		// Store the transfer for preloading new RT's.
+-		if ((m_draw_transfers.size() > 0 && blit.DBP == m_draw_transfers.back().blit.DBP && m_draw_transfers.back().transfer_type == EEGS_TransferType::EE_to_GS))
+-		{
+-			// Same BP, let's update the rect.
+-			GSUploadQueue transfer = m_draw_transfers.back();
+-			m_draw_transfers.pop_back();
+-			transfer.rect = transfer.rect.runion(r);
+-			transfer.draw = s_n;
+-			transfer.was_hardware_only = false;
+-			m_draw_transfers.push_back(transfer);
+-		}
++#ifdef __PROSPERO__
++		if (m_ps5_split_front)
++			GSSplit::QueueWriteStart(blit, r); // (the upload list and the draw number are the DRAW side's)
+ 		else
+-		{
+-			const GSUploadQueue new_transfer = {blit, s_n, r, EEGS_TransferType::EE_to_GS, false};
+-			m_draw_transfers.push_back(new_transfer);
+-		}
++#endif
++			PS5SplitRunWriteStart(blit, r);
+ 
+ 		GL_CACHE("Write! %u ...  => 0x%x W:%d F:%s (DIR %d%d), dPos(%d %d) size(%d %d) draw %lld", s_transfer_n,
+ 				blit.DBP, blit.DBW, GSUtil::GetPSMName(blit.DPSM),
+@@ -2953,12 +3265,21 @@ void GSState::Write(const u8* mem, int len)
+ 			// received all data in one piece, no need to buffer it
+ 			InvalidateVideoMem(blit, r);
+ 
++#ifdef __PROSPERO__
++			if (m_ps5_split_front && !m_ps5_split_quiet)
++				GSSplit::QueueSwizzle(blit.DPSM, m_tr.x, m_tr.y, mem, m_tr.total, blit, m_tr.m_pos, m_tr.m_reg, len, true);
++#endif
+ 			psm.wi(m_mem, m_tr.x, m_tr.y, mem, m_tr.total, blit, m_tr.m_pos, m_tr.m_reg);
+ 
+ 			m_tr.start = m_tr.end = m_tr.total;
+ 
+-			g_perfmon.Put(GSPerfMon::Swizzle, len);
+-			s_transfer_n++;
++#ifdef __PROSPERO__
++			if (!m_ps5_split_front)
++#endif
++			{
++				g_perfmon.Put(GSPerfMon::Swizzle, len);
++				s_transfer_n++;
++			}
+ 			m_env.TRXDIR.XDIR = 3;
+ 			return;
+ 		}
+@@ -2999,7 +3320,11 @@ void GSState::InitReadFIFO(u8* mem, int len)
+ 		InvalidateLocalMem(m_env.BITBLTBUF, r);
+ 
+ 	// Read the image all in one go.
++#ifdef __PROSPERO__
++	PS5ReadMemory().ReadImageX(m_tr.x, m_tr.y, m_tr.buff, m_tr.total, m_env.BITBLTBUF, m_env.TRXPOS, m_env.TRXREG);
++#else
+ 	m_mem.ReadImageX(m_tr.x, m_tr.y, m_tr.buff, m_tr.total, m_env.BITBLTBUF, m_env.TRXPOS, m_env.TRXREG);
++#endif
+ 
+ 	if (GSConfig.SaveTransferImages && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+ 	{
+@@ -3348,6 +3673,44 @@ void GSState::ReadbackTextureCache()
  {
  }
  
@@ -4654,7 +6465,7 @@ index 88fdbb3..c1e4e72 100644
  template void GSState::Transfer<0>(const u8* mem, u32 size);
  template void GSState::Transfer<1>(const u8* mem, u32 size);
  template void GSState::Transfer<2>(const u8* mem, u32 size);
-@@ -3410,8 +3496,43 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3410,8 +3773,43 @@ void GSState::Transfer(const u8* mem, u32 size)
  
  						switch (path.type)
  						{
@@ -4698,7 +6509,7 @@ index 88fdbb3..c1e4e72 100644
  								u32 reg = 0;
  
  								do
-@@ -3422,6 +3543,10 @@ void GSState::Transfer(const u8* mem, u32 size)
+@@ -3422,6 +3820,10 @@ void GSState::Transfer(const u8* mem, u32 size)
  
  									reg = reg & ((int)(reg - path.nreg) >> 31); // resets reg back to 0 when it becomes equal to path.nreg
  								} while (--total > 0);
@@ -4709,7 +6520,7 @@ index 88fdbb3..c1e4e72 100644
  							}
  							break;
  							case GIFPath::TYPE_ADONLY: // very common
-@@ -3832,6 +3957,8 @@ void GSState::UpdateVertexKick()
+@@ -3832,6 +4234,8 @@ void GSState::UpdateVertexKick()
  
  	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[prim];
  	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[prim];
@@ -4718,7 +6529,7 @@ index 88fdbb3..c1e4e72 100644
  }
  
  static void GrowBuffer(void** pbuff, size_t old_size, size_t new_size, bool vertices)
-@@ -5460,7 +5587,49 @@ __forceinline void GSState::HandleAutoFlush()
+@@ -5460,7 +5864,49 @@ __forceinline void GSState::HandleAutoFlush()
  	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
  	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
  	int tex_layer = 0;
@@ -4768,7 +6579,7 @@ index 88fdbb3..c1e4e72 100644
  	{
  		int  n = 1;
  		u32 buff[3];
-@@ -5867,7 +6036,7 @@ __forceinline void GSState::VertexKick(u32 skip)
+@@ -5867,7 +6313,7 @@ __forceinline void GSState::VertexKick(u32 skip)
  	u32 next = vtx_buff.next;
  	u32 xy_tail = vtx_buff.xy_tail;
  
@@ -4777,7 +6588,7 @@ index 88fdbb3..c1e4e72 100644
  	{
  		if (GSConfig.UserHacks_Limit24BitDepth == GSLimit24BitDepth::PrioritizeUpper)
  			m_v.XYZ.Z = ((m_v.XYZ.Z >> 8) & ~0xFF) | (m_v.XYZ.Z & 0xFF);
-@@ -6090,11 +6259,8 @@ __forceinline void GSState::VertexKick(u32 skip)
+@@ -6090,11 +6536,8 @@ __forceinline void GSState::VertexKick(u32 skip)
  
  	// Update rectangle for the current draw. Needs exclusive endpoints.
  	const GSVector4i draw_rect = bbox.sra32<4>() + GSVector4i(0, 0, 1, 1);
@@ -4792,7 +6603,7 @@ index 88fdbb3..c1e4e72 100644
  	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
  	if (max_vertices != 0 && vtx_buff.tail >= max_vertices)
 diff --git a/pcsx2/GS/GSState.h b/pcsx2/GS/GSState.h
-index 3e0b354..2cfa206 100644
+index 3e0b354..13df7e4 100644
 --- a/pcsx2/GS/GSState.h
 +++ b/pcsx2/GS/GSState.h
 @@ -52,12 +52,15 @@ private:
@@ -4812,7 +6623,7 @@ index 3e0b354..2cfa206 100644
  	void GIFPackedRegHandlerNOP(const GIFPackedReg* RESTRICT r, u32 size);
  
  	template<int i> void ApplyTEX0(GIFRegTEX0& TEX0);
-@@ -299,6 +302,18 @@ public:
+@@ -299,6 +302,28 @@ public:
  	bool m_nativeres = false;
  	bool m_mipmap = false;
  	bool m_texflush_flag = false;
@@ -4828,9 +6639,62 @@ index 3e0b354..2cfa206 100644
 +	int m_ps5_autoflush_layer = 0;
 +	u32 m_ps5_autoflush_uses = 0;
 +#endif
++#ifdef __PROSPERO__
++	// Crux2 GS split (GSSplit.h): this object is the split's FRONT side (it reads the GIF packets and
++	// queues the rest); `quiet` while it loads a state both sides load; `skip_readback` while a save it
++	// makes has had the DRAW side read its targets back already; `scanmask_set` once SCANMSK asked for
++	// the scan mask since the last vsync (the DRAW side keeps the count, GSRenderer::Merge lowers it).
++	bool m_ps5_split_front = false;
++	bool m_ps5_split_quiet = false;
++	bool m_ps5_split_skip_readback = false;
++	bool m_ps5_scanmask_set = false;
++#endif
  	bool m_isPackedUV_HackFlag = false;
  	bool m_channel_shuffle = false;
  	bool m_using_temp_z = false;
+@@ -547,6 +572,42 @@ public:
+ 	template <u32 primclass>
+ 	void RewriteVerticesIfLargeSTImpl(const GSVector4& large_val, bool check_clamp_mode);
+ 	void RewriteVerticesIfLargeST(const GSVector4& large_val, bool check_clamp_mode);
++
++	/// The drawing half of FlushPrim: from the vertex trace to Draw (and the draw's statistics).
++	void PS5FlushPrimDraw();
++	/// The upload list's bookkeeping at an upload's start, and when a partial upload is flushed.
++	void PS5SplitRunWriteStart(const GIFRegBITBLTBUF& blit, const GSVector4i& r);
++	void PS5SplitRunPartialWrite(u32 dbp, const GSVector4i& r);
++
++#ifdef __PROSPERO__
++	/// A draw as the FRONT side hands it over: everything of GSState that Draw reads and the FRONT
++	/// side owns, then the vertices and indices (GSSplit.cpp lays them out).
++	struct alignas(32) PS5SplitDrawItem
++	{
++		GSDrawingEnvironment env;
++		GSDrawingEnvironment prev_env;
++		GSVertex v;
++		GSVector4i temp_draw_rect;
++		alignas(32) u8 clut_write[64];
++		u32 vtx_head, vtx_tail, vtx_next, idx_tail;
++		u32 max_vertex_count;
++		int backed_up_ctx;
++		u32 dirty_gs_regs;
++		u32 flush_reason;
++		bool packed_uv_hack;
++		bool shuffle_finish_set;
++		bool fb_sprite_blit;
++	};
++	void PS5SplitQueueDraw(bool fb_sprite_blit);
++	void PS5SplitRunDraw(const PS5SplitDrawItem& d, const GSVertex* verts, const u16* idx);
++	/// The state of reading the GIF packets (registers, paths, transfer, pending vertices, CLUT write
++	/// state), from another GSState: the split hands it from one side to the other when it starts or stops.
++	void PS5CopyParseState(const GSState& src);
++	/// Forgets pending vertices and an unflushed upload (the DRAW side's own, once the FRONT side has them).
++	void PS5ClearParsePending();
++	/// The GS memory a download to the EE reads: the DRAW side's for the split's FRONT side (after waiting).
++	GSLocalMemory& PS5ReadMemory();
++#endif
+ };
+ 
+ // We put this in the header because of Multi-ISA.
 diff --git a/pcsx2/GS/GSUtil.cpp b/pcsx2/GS/GSUtil.cpp
 index c217846..c39e4e3 100644
 --- a/pcsx2/GS/GSUtil.cpp
@@ -6479,6 +8343,24 @@ index 5a734ac..0ab7999 100644
  	}
  
  	void GenerateMipmapsIfNeeded();
+diff --git a/pcsx2/GS/Renderers/HW/GSHwHack.cpp b/pcsx2/GS/Renderers/HW/GSHwHack.cpp
+index 1351587..e28aa80 100644
+--- a/pcsx2/GS/Renderers/HW/GSHwHack.cpp
++++ b/pcsx2/GS/Renderers/HW/GSHwHack.cpp
+@@ -1459,6 +1459,13 @@ s16 GSLookupMoveHandlerFunctionId(const std::string_view name)
+ 	return -1;
+ }
+ 
++#ifdef __PROSPERO__
++bool GSRendererHW::PS5SplitSafe() const
++{
++	return !m_mv && m_gsc != &GSHwHack::GSC_IRem;
++}
++#endif
++
+ void GSRendererHW::UpdateRenderFixes()
+ {
+ 	GSRenderer::UpdateRenderFixes();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 index 6161dc8..05eacaf 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
@@ -6718,10 +8600,10 @@ index 6161dc8..05eacaf 100644
  	}
  
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.h b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-index 6adcc67..5ac11a5 100644
+index 6adcc67..979f3e6 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.h
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.h
-@@ -255,6 +255,14 @@ private:
+@@ -255,6 +255,17 @@ private:
  
  	void GetForcedROVUsage(bool& color_cov, bool& depth_rov); // Whether having color or depth with the current config forces the other.
  	void DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Heuristics to determine whether to enable/disable ROV
@@ -6731,12 +8613,15 @@ index 6adcc67..5ac11a5 100644
 +	static std::string PS5TakeROVWindow(u32 frames);
 +	/// PS5: reads [EmuCore/GS] PS5ReuseRTCopies again and logs it (at each game start, GSGameChanged).
 +	void PS5ReadGameSettings();
++	/// Crux2 GS split: false while a game's fix writes state the split's FRONT side reads (a move handler,
++	/// GSC_IRem's SCANMSK), GSSplit::Configure.
++	bool PS5SplitSafe() const;
 +#endif
 +private:
  	void ConfigureROV(bool color_rov, bool depth_rov); // Actual config for ROV
  	void ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Convert to RW capable textures if needed.
  	void ConvertTextureTypeROVSingle(GSTextureCache::Target* tgt, bool shader_write); // Helper to do the above.
-@@ -341,6 +349,48 @@ private:
+@@ -341,6 +352,48 @@ private:
  	GSHWDrawConfig m_conf = {};
  	HWCachedCtx m_cached_ctx;
  
@@ -13067,10 +14952,10 @@ index b3eb155..535f4e2 100644
  		{
  			psxCounters[cntidx].count += change;
 diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
-index 59f5aa0..97808fc 100644
+index 59f5aa0..d1e1ee1 100644
 --- a/pcsx2/MTGS.cpp
 +++ b/pcsx2/MTGS.cpp
-@@ -1,6 +1,9 @@
+@@ -1,9 +1,15 @@
  // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
  // SPDX-License-Identifier: GPL-3.0+
  
@@ -13080,7 +14965,13 @@ index 59f5aa0..97808fc 100644
  #include "GS.h"
  #include "Gif_Unit.h"
  #include "MTGS.h"
-@@ -11,13 +14,28 @@
++#ifdef __PROSPERO__
++#include "GS/GSSplit.h"
++#endif
+ #include "MTVU.h"
+ #include "Host.h"
+ #include "IconsFontAwesome.h"
+@@ -11,13 +17,28 @@
  
  #include "common/FPControl.h"
  #include "common/ScopedGuard.h"
@@ -13109,7 +15000,7 @@ index 59f5aa0..97808fc 100644
  // Uncomment this to enable profiling of the GS RingBufferCopy function.
  //#define PCSX2_GSRING_SAMPLING_STATS
  
-@@ -123,6 +141,10 @@ void MTGS::StartThread()
+@@ -123,6 +144,10 @@ void MTGS::StartThread()
  	pxAssertRel(!s_open_flag.load(), "GS thread should not be opened when starting");
  	s_sem_event.Reset();
  	s_shutdown_flag.store(false, std::memory_order_release);
@@ -13120,7 +15011,7 @@ index 59f5aa0..97808fc 100644
  	s_thread.Start(&MTGS::ThreadEntryPoint);
  }
  
-@@ -210,6 +232,9 @@ void MTGS::ResetGS(bool hardware_reset)
+@@ -210,6 +235,9 @@ void MTGS::ResetGS(bool hardware_reset)
  		s_ReadPos = s_WritePos.load();
  		s_QueuedFrameCount = 0;
  		s_VsyncSignalListener = 0;
@@ -13130,7 +15021,7 @@ index 59f5aa0..97808fc 100644
  	}
  
  	MTGS_LOG("MTGS: Sending Reset...");
-@@ -236,6 +261,151 @@ struct RingCmdPacket_Vsync
+@@ -236,6 +264,151 @@ struct RingCmdPacket_Vsync
  	u32 pad[3];
  };
  
@@ -13282,7 +15173,7 @@ index 59f5aa0..97808fc 100644
  void MTGS::PostVsyncStart(bool registers_written)
  {
  	// Optimization note: Typically regset1 isn't needed.  The regs in that area are typically
-@@ -271,18 +441,48 @@ void MTGS::PostVsyncStart(bool registers_written)
+@@ -271,18 +444,57 @@ void MTGS::PostVsyncStart(bool registers_written)
  	// If those are needed back, it's better to increase the VsyncQueueSize via PCSX_vm.ini.
  	// (The Xenosaga engine is known to run into this, due to it throwing bulks of data in one frame followed by 2 empty frames.)
  
@@ -13318,6 +15209,15 @@ index 59f5aa0..97808fc 100644
  	s_sem_Vsync.Wait();
  }
  
++#ifdef __PROSPERO__
++void MTGS::PS5SplitFrameDone()
++{
++	s_QueuedFrameCount.fetch_sub(1);
++	if (s_VsyncSignalListener.exchange(false))
++		s_sem_Vsync.Post();
++}
++#endif
++
  void MTGS::InitAndReadFIFO(u8* mem, u32 qwc)
  {
 +#ifdef __PROSPERO__
@@ -13331,7 +15231,7 @@ index 59f5aa0..97808fc 100644
  	{
  		if (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Unsynchronized)
  			GSReadLocalMemoryUnsync(mem, qwc, vif1.BITBLTBUF._u64, vif1.TRXPOS._u64, vif1.TRXREG._u64);
-@@ -322,9 +522,34 @@ void MTGS::MainLoop()
+@@ -322,9 +534,34 @@ void MTGS::MainLoop()
  
  	std::unique_lock mtvu_lock(s_mtx_RingBufferBusy2);
  
@@ -13367,7 +15267,7 @@ index 59f5aa0..97808fc 100644
  		{
  			if (!s_sem_event.CheckForWork())
  			{
-@@ -335,7 +560,16 @@ void MTGS::MainLoop()
+@@ -335,7 +572,16 @@ void MTGS::MainLoop()
  		else
  		{
  			mtvu_lock.unlock();
@@ -13384,7 +15284,7 @@ index 59f5aa0..97808fc 100644
  			mtvu_lock.lock();
  		}
  
-@@ -460,13 +694,31 @@ void MTGS::MainLoop()
+@@ -460,13 +706,31 @@ void MTGS::MainLoop()
  				case Command::MTVUGSPacket:
  				{
  					MTVU_LOG("MTGS - Waiting on semaXGkick!");
@@ -13416,7 +15316,38 @@ index 59f5aa0..97808fc 100644
  					Gif_Path& path = gifUnit.gifPath[GIF_PATH_1];
  					GS_Packet gsPack = path.GetGSPacketMTVU(); // Get vu1 program's xgkick packet(s)
  					if (gsPack.size)
-@@ -922,8 +1174,25 @@ void MTGS::Freeze(FreezeAction mode, MTGS::FreezeData& data)
+@@ -502,9 +766,16 @@ void MTGS::MainLoop()
+ 							// CSR & 0x2000; is the pageflip id.
+ 							GSvsync((((u32&)RingBuffer.Regs[0x1000]) & 0x2000) ? 0 : 1, remainder[4] != 0);
+ 
+-							s_QueuedFrameCount.fetch_sub(1);
+-							if (s_VsyncSignalListener.exchange(false))
+-								s_sem_Vsync.Post();
++#ifdef __PROSPERO__
++							// (With the GS split on two threads, the frame has ended when the DRAW thread has
++							// done its VSync: it calls PS5SplitFrameDone, so the frame queue keeps its meaning.)
++							if (!GSSplit::Threaded())
++#endif
++							{
++								s_QueuedFrameCount.fetch_sub(1);
++								if (s_VsyncSignalListener.exchange(false))
++									s_sem_Vsync.Post();
++							}
+ 
+ 							// Do not StateCheckInThread() here
+ 							// Otherwise we could pause while there's still data in the queue
+@@ -515,6 +786,10 @@ void MTGS::MainLoop()
+ 						case Command::AsyncCall:
+ 							{
+ 								AsyncCallType* const func = (AsyncCallType*)tag.pointer;
++#ifdef __PROSPERO__
++								// The calls use the renderer, the texture cache and the device: the DRAW side idle first.
++								GSSplit::Drain();
++#endif
+ 								(*func)();
+ 								delete func;
+ 							}
+@@ -922,8 +1197,25 @@ void MTGS::Freeze(FreezeAction mode, MTGS::FreezeData& data)
  	WaitGS(false);
  }
  
@@ -13443,13 +15374,17 @@ index 59f5aa0..97808fc 100644
  
  	// wake the gs thread in case it's sleeping
 diff --git a/pcsx2/MTGS.h b/pcsx2/MTGS.h
-index ccd9f27..e6429e2 100644
+index ccd9f27..b6681a7 100644
 --- a/pcsx2/MTGS.h
 +++ b/pcsx2/MTGS.h
-@@ -64,6 +64,12 @@ namespace MTGS
+@@ -64,6 +64,16 @@ namespace MTGS
  
  	int GetCurrentVsyncQueueSize();
  	void PostVsyncStart(bool registers_written);
++#ifdef __PROSPERO__
++	/// Crux2 GS split: the DRAW thread has ended a frame (the EE thread's vsync wait, as at the end of a VSync packet).
++	void PS5SplitFrameDone();
++#endif
 +#ifdef __PROSPERO__
 +	/// Crux2: frames the EE may run ahead of the GS thread while a game is behind (PS5AutoFrameQueue).
 +	void PS5ResetFrameQueue();
@@ -15455,7 +17390,7 @@ index 3356134..1324012 100644
  
  	static void pad_handle_data(USBDevice* dev, USBPacket* p)
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index f6fda22..53c987e 100644
+index f6fda22..21913a9 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
 @@ -40,8 +40,17 @@
@@ -15932,7 +17867,7 @@ index f6fda22..53c987e 100644
  }
  
  void VMManager::SetHardwareDependentDefaultSettings(SettingsInterface& si)
-@@ -3722,8 +3972,61 @@ void VMManager::EnsureCPUInfoInitialized()
+@@ -3722,8 +3972,66 @@ void VMManager::EnsureCPUInfoInitialized()
  	std::call_once(s_processor_list_initialized, InitializeProcessorList);
  }
  
@@ -15977,7 +17912,11 @@ index f6fda22..53c987e 100644
 +			// rest kept to 8-12, so that nothing else is scheduled on the driver's core.
 +			const bool driver_core_free =
 +				PS5ThreadLayout::DriverOwnCore() && Host::GetBaseBoolSettingValue("PS5", "DriverCoreFree", true);
-+			const u64 rest = PS5ThreadLayout::kTitleMask & ~reserved & ~(driver_core_free ? PS5ThreadLayout::kParallelGsMask : 0);
++			// Crux2 ([EmuCore/GS] PS5GSSplit 2): the GS split's DRAW thread on core 4 (processor 8, GSSplit.cpp),
++			// its second thread (9) kept free as well.
++			const bool gs_split_thread = Host::GetIntSettingValue("EmuCore/GS", "PS5GSSplit", 2) == 2;
++			const u64 rest = PS5ThreadLayout::kTitleMask & ~reserved & ~(driver_core_free ? PS5ThreadLayout::kParallelGsMask : 0) &
++				~(gs_split_thread ? ((u64{1} << 8) | (u64{1} << 9)) : 0);
 +			const bool restricted = PS5ThreadLayout::RestrictProcess(rest);
 +			s_vm_thread_handle.SetAffinity(ee);
 +			vu1Thread.GetThreadHandle().SetAffinity(mtvu ? vu : rest);
@@ -15985,8 +17924,9 @@ index f6fda22..53c987e 100644
 +			s_software_renderer_processor_list.clear();
 +			for (u32 c = 6; c <= 12; c++)
 +				s_software_renderer_processor_list.push_back(c);
-+			INFO_LOG("Thread layout: EE on processor 0, VU on {}, GS on 4-5, the rest on {}{}", mtvu ? "2" : (driver_core_free ? "8-12 (no MTVU)" : "6-12 (no MTVU)"),
-+				driver_core_free ? "8-12 (the driver's core kept free)" : "6-12", restricted ? "" : " (the rest could not be kept off 0-5)");
++			INFO_LOG("Thread layout: EE on processor 0, VU on {}, GS on 4-5, the rest on {}{}{}", mtvu ? "2" : (driver_core_free ? "8-12 (no MTVU)" : "6-12 (no MTVU)"),
++				driver_core_free ? "8-12 (the driver's core kept free)" : "6-12", gs_split_thread ? " less 8-9 (the GS split's DRAW thread)" : "",
++				restricted ? "" : " (the rest could not be kept off 0-5)");
 +			return;
 +		}
 +	}

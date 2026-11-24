@@ -251,6 +251,34 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   names of the merge, deinterlace, post and clear passes. Not done: why render passes end (counting it
   in EndRenderPass voided RenderHW's trained profile).
 
+## Graphics switches read at each game's start (2026-11-24): built, to check on a console
+
+- `GSGameChanged` (`vendor/pcsx2/pcsx2/GS/GS.cpp`) re-reads the PS5 rows of Graphics > Advanced
+  (`PS5HoldFeedbackLayout`, `PS5RTNoCompression`, `PS5SkipRedundantBarriers`, `PS5ROVKeepPass`,
+  `PS5ReuseRTCopies`) with the game's own settings. At a game's start it is queued while the VM is still
+  Initializing, and it required a Running VM: whether it ran depended on how long the GS thread took to
+  get to it. In the owner's logs it ran only for SLUS-20228 and SCUS-97399 (long pipeline precompiles),
+  never for SLUS-21376, SCES-53247, SLUS-21065, SLUS-21452, SLUS-20965. Now Initializing counts too.
+- To check: a game's own `PS5HoldFeedbackLayout` on, and the boot log shows "graphics (this game):
+  render targets a draw has read stay in the feedback loop layout" at its start, for SLUS-21376.
+
+## GS thread split (2026-11-24): built, to check on a console
+
+- `[EmuCore/GS] PS5GSSplit` (0 off, 1 check on one thread, 2 two threads, the default since the owner's
+  decision of 2026-11-24; GS Thread Split in Graphics > Advanced). B5.2/B5.3 on the console: SLUS-21376 4x
+  100% (3 s under 95%, 1% low 59.7) against v1.0.23's 99% (12 s); SLUS-21065 4x 99%; no crash. Design: the session's `crux2-gs-thread-split-design-2026-11-24.md`. Code:
+  `vendor/pcsx2/pcsx2/GS/GSSplit.cpp` (queue, DRAW thread, start/stop), GSState's `PS5Split*`/
+  `PS5FlushPrimDraw`/`PS5CopyParseState`, GS.cpp and MTGS.cpp routing.
+- The FRONT side (GSSplitFront, MTGS thread) reads the GIF packets; draws, uploads, CLUT loads, moves, vsyncs
+  and resets go to g_gs_renderer in order. Not used (logged) with CPU/GPU-target CLUT fixes, hardware AA1, a
+  game's move handler or GSC_IRem, GS dumping, paraLLEl-GS.
+- To check on a console: the picture the same with 1 and 2 as with 0 (screenshots at fixed moments); speed of
+  SLUS-21376 (4x and 6x) and SLUS-21065 with 2 against 0; save and load states, resets, settings changes and
+  game changes with it on; the boot log's "gs split:" lines (items a frame, DRAW thread busy, waits).
+- The training profile does not match FlushPrim, FlushWrite, Write and the MTGS loop any more: compare 0 and 2
+  in the same build; retrain once the split is kept.
+- The DRAW thread's time is not in the overlay's or the test window's GS figure (only the MTGS thread's).
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,

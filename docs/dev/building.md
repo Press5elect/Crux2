@@ -116,7 +116,9 @@ the console:
 
 `PS5PX_PGO_SPLIT=1` (cold splitting, cache-directed sort, a second round's counts) is off by
 default: measured on the console on 2026-10-12, it played worse than the first round's profile
-alone. The committed profile is `280c0407b57f` (v1.0.23; named in every release's build table): six
+alone. The committed profile is `8d4da7d30b0b` (2026-11-24): six games played with the GS thread split on two
+threads (G6, `ps5/pgo/runs-2026-11-24-g6`) merged with `280c0407b57f` below, so that what this round did not
+run keeps its counts. Before it, `280c0407b57f` (v1.0.23; named in every release's build table): six
 games played with MTVU on (2026-11-22, the v1.0.23 sources) merged with the four training rounds of
 2026-11-21/22 (MTVU on and off) and with v1.0.22's `f965a89d3a30`, so that what this round did not
 run (MTVU off, paraLLEl-GS, texture packs) keeps its counts; functions whose code changed take the
