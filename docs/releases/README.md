@@ -6,6 +6,7 @@ stays at the repository's root because the build copies it into the title folder
 
 | Release | Published | Notes | Main points |
 | --- | --- | --- | --- |
+| v1.0.24 | pending | [`v1.0.24.md`](v1.0.24.md) | The GS thread split in two (reading and drawing), on by default; per-game graphics switches read at each game's start; profile trained again |
 | v1.0.23 | pending | [`v1.0.23.md`](v1.0.23.md) | Interface freezes fixed (memory cards, texture packs, network shares); anti-aliasing per game, SSAA at the chosen resolution; games on the M.2 storage; Driver Core Kept Free on |
 | v1.0.22 | 2026-11-17 | [`v1.0.22.md`](v1.0.22.md) | The graphics thread no longer spends half its time creating textures (two switches, on); about fifty interface bugs fixed; native modules made on Windows; PCSX2 master of 2026-11-17 |
 | v1.0.21 | 2026-11-16 | [`v1.0.21.md`](v1.0.21.md) | A game's settings open at once with many cheat files; the interface asks the emulator for less when a screen opens; covers from a second collection, by serial |
