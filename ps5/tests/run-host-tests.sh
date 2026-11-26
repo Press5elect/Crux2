@@ -27,6 +27,8 @@
 #   - the GunCon 2's steady motion aim (frontend/ps5_aim_logic.h) over a made-up controller, the
 #     sticks' response curve and R2's click (ps5_input_source_logic.h);
 #   - USB pads through /dev/ugen (frontend/ps5_ugen.h): the transfers over a made-up device node;
+#   - the write broker (ps5/broker, frontend/ps5_broker.cpp): copies and written files byte for byte
+#     through the payload's request handler, and whole when it dies part-way;
 #   - the updater (frontend/ps5_update.cpp, tests/update): a check, a download and an install
 #     over a made-up GitHub, developer builds, the files a new version dropped;
 #   - HD texture pack downloads (frontend/ps5_texture_packs_pieces.h and _fetch.h): pieces that
@@ -275,6 +277,14 @@ echo "== the elevation helper asked again for a few seconds (ps5/elevation/eleva
 c++ -std=c++20 -O1 -g -Wall -Wextra $sanitize -I "$ps5/elevation" "$tests/elevation/elevation_retry_test.cpp" \
     "$ps5/elevation/elevation.cpp" -o "$work/elevation_retry_test"
 "$work/elevation_retry_test" || status=1
+
+echo "== the write broker (ps5/broker) and its client (frontend/ps5_broker.cpp) over a socketpair"
+# shellcheck disable=SC2086
+c++ -std=c++20 -O1 -g -Wall -Wextra -Werror $sanitize -pthread -I "$frontend" "$tests/broker/broker_test.cpp" \
+    "$frontend/ps5_broker.cpp" "$ps5/broker/server.cpp" -o "$work/broker_test"
+rm -rf "$work/broker"
+"$work/broker_test" "$work/broker" 2> "$work/broker_test.log" && tail -n 1 "$work/broker_test.log" || { cat "$work/broker_test.log"; status=1; }
+rm -rf "$work/broker"
 
 echo "== launch arguments (frontend/ps5_launch.h: --rom, --exit-after-game)"
 # shellcheck disable=SC2086

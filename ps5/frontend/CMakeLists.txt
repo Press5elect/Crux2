@@ -24,6 +24,7 @@ set(PS5PX_FRONTEND_SOURCES
 	ps5_cards.cpp
 	ps5_build_stamp.cpp
 	ps5_crash.cpp
+	ps5_broker.cpp
 	ps5_disc.cpp
 	ps5_disc_image.cpp
 	ps5_about.cpp

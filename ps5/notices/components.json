@@ -38,7 +38,7 @@
 		},
 		{
 			"id": "port",
-			"name": "Crux2 (named PSPCSX2 before v0.6.0): the port layer, host, tools and tests",
+			"name": "Crux2 (named PSPCSX2 before v0.6.0): the port layer, host, tools and tests; the write broker (ps5/broker, write-broker.elf) is taken from OGBox, by the same author",
 			"licence": "GPL-3.0-or-later",
 			"copyright": "Copyright (C) 2026 Press5elect (Crux2 by Press5elect; attribution required, GPL-3.0 section 7(b): NOTICE in the source); parts made from PS5 Vulkan Template (Mihawk, MIT) and PS5_RetroArch (Mihawk-99, GPL-3.0-or-later)",
 			"modifications": "-",
@@ -46,7 +46,8 @@
 			"artifacts": [
 				"eboot.bin",
 				"sce_sys/param.json",
-				"symbols.txt"
+				"symbols.txt",
+				"write-broker.elf"
 			],
 			"source": {
 				"url": "the source archive that comes with this package",

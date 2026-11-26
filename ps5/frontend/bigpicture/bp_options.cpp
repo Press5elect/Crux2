@@ -1400,6 +1400,10 @@ Page ps5Page(int layer)
 		"Draws new effects with a quickly built shader first, then switches to the optimised one. Reduces stutter the "
 			"first time an effect appears.",
 		"PS5", "FastPipelines", true, A | Option::Restart));
+	// Crux2: the write broker (ps5/broker, frontend/ps5_broker.h), read when a copy, a download or a disc image starts.
+	rows.push_back(toggle("Fast Writes to Console Storage",
+		"Large files written to the console's storage (texture packs moved or downloaded there, disc images) are written by a helper program the title starts, which the console does not slow down after the first 1.3 GB as it slows the title. If the helper fails, the title writes the rest itself, at its own speed.",
+		"PS5", "WriteBroker", false, A));
 
 	rows.push_back(heading("NATIVE CODE MODULES (EXPERIMENTAL)", A));
 	rows.push_back(toggle("Use native code modules",

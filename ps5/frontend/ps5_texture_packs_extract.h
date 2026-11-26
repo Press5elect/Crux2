@@ -15,6 +15,11 @@
 #include <string>
 #include <vector>
 
+namespace PS5Broker
+{
+class Session;
+}
+
 namespace PS5TexturePacksExtract
 {
 /// The next bytes of the archive: up to `size` into `buffer`; 0 at its end; -1 when it failed or
@@ -33,8 +38,10 @@ struct Result
 /// Unpacks everything of the archive `read` gives into `root` (the textures folder), each file
 /// where PS5TexturePacksLogic::EntryTarget puts it. A file is written beside its place and renamed
 /// when whole, so a stopped unpack leaves no half file under its name. `stop` is asked between
-/// files and between blocks.
-Result Extract(const Read& read, const std::string& root, const std::vector<std::string>& serials, const std::function<bool()>& stop);
+/// files and between blocks. broker: the files the write broker takes (ps5_broker.h: on the
+/// console's storage, with the setting on) are written through it.
+Result Extract(const Read& read, const std::string& root, const std::vector<std::string>& serials, const std::function<bool()>& stop,
+	PS5Broker::Session* broker = nullptr);
 
 /// The folders of a path, made if missing ("a/b/c" makes a, a/b and a/b/c).
 bool MakeFolders(const std::string& path);

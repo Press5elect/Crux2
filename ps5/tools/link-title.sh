@@ -340,6 +340,9 @@ cp "$ca_bundle" "$app/resources/cacert.pem"
 
 # USB drives: the helper the title sends to the payload loader (tools/build-elevator.sh).
 cp "$(bash "$ps5/tools/build-elevator.sh")" "$app/sandbox-elevator.elf"
+# Large writes to the console's storage: the write broker the title sends to the payload loader
+# (ps5/broker, tools/build-broker.sh; Settings > System > Fast writes to the console's storage).
+cp "$(bash "$ps5/tools/build-broker.sh")" "$app/write-broker.elf"
 # Achievement pop-ups: the relay sent through the payload loader when the title cannot send the
 # console's notification itself (ps5/elevation/notify-relay, tools/build-notify-relay.sh).
 cp "$(bash "$ps5/tools/build-notify-relay.sh")" "$app/notify-relay.elf"

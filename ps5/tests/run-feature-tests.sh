@@ -37,7 +37,7 @@ echo "== disc images: ISO, CHD and CSO, read back with libchdr (needs the zstd a
 bash "$here/discimage/run-discimage-test.sh" "$work/discimage"
 
 echo "== the disc drive's watcher"
-clang++ "${flags[@]}" "$here/disc/disc_test.cpp" "$ps5/frontend/ps5_disc.cpp" "$ps5/frontend/ps5_disc_image.cpp" -I "$root/vendor/pcsx2/3rdparty/lzma/include" \
+clang++ "${flags[@]}" "$here/disc/disc_test.cpp" "$ps5/frontend/ps5_disc.cpp" "$ps5/frontend/ps5_disc_image.cpp" "$ps5/frontend/ps5_broker.cpp" -I "$root/vendor/pcsx2/3rdparty/lzma/include" \
 	"$work"/discimage/obj/Lz*.o "$work"/discimage/obj/CpuArch.o "$work"/discimage/obj/Alloc.o -lz -lzstd -lpthread -o "$work/disc/disc_test"
 "$work/disc/disc_test" "$work/disc"
 

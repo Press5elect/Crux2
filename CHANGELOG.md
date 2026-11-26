@@ -8,6 +8,10 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: **Fast Writes to Console Storage** (Settings > PlayStation 5, off by default): large files
+  written to the console's storage (a texture pack moved or downloaded there, a disc image) are written
+  by a helper the title starts (write-broker.elf, from OGBox), which the console does not slow down
+  after the first 1.3 GB as it slows the title. If the helper fails, the title writes the rest itself.
 - Changed: **Disable Render Target Compression** (Settings > Picture > Graphics, ADVANCED) is on by
   default: colour render targets are made without surface compression, which is never decompressed
   when a draw reads the target it draws to. A game set to off keeps its choice.

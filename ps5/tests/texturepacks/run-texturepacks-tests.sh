@@ -45,6 +45,6 @@ for name in ["test_read_format_rar.rar", "test_read_format_rar_compress_normal.r
     (out / name).write_bytes(bytes(data))
 PY
 flags=(-g -O1 -Wall -Wextra -Werror -std=c++20 -fsanitize=address,undefined -fno-sanitize-recover=undefined -I "$front" -I "$src/libarchive")
-clang++ "${flags[@]}" "$here/texture_packs_test.cpp" "$front/ps5_texture_packs_extract.cpp" "$work/libarchive/libarchive/libarchive.a" -lz \
+clang++ "${flags[@]}" "$here/texture_packs_test.cpp" "$front/ps5_texture_packs_extract.cpp" "$front/ps5_broker.cpp" -pthread "$work/libarchive/libarchive/libarchive.a" -lz \
     -o "$work/texture_packs_test"
 "$work/texture_packs_test" "$work/archives" "$work/out"

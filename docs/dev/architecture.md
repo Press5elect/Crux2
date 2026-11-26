@@ -19,6 +19,7 @@ sandbox) and leaves the sandbox only for USB drives, through the elevation helpe
 | `ps5/pgs/`, `crux2recomp/` | paraLLEl-GS, the second GS renderer, built from Crux2 Recomp's sources (`ps5/frontend/ps5_pgs.cpp` is its door) |
 | `ps5/recomp/` | The native-code-module kit: `tools/recomp-game.py` (`recomp-game.sh`), `ps2disc.py`, `ps2unpack.py`, `build-module.py`, `runtime/` (`crux2_native_abi.h`), `patches/ps2recomp-crux2.patch`, `tests/` |
 | `ps5/elevation/` | The sandbox elevation client and helper (BlackBearReloaded's example, with this title's ID) |
+| `ps5/broker/` | The write broker payload (`write-broker.elf`, from OGBox): large writes to /data in a process the console doesn't slow down; the client is `frontend/ps5_broker.cpp` |
 | `ps5/src/` | The template's PS5 layer: klog, the splash, the exit |
 | `ps5/patches/` | `pcsx2/ps5.patch`, `mesa-27/` (and the older `mesa/`), `deps/` |
 | `ps5/package/` | What the title folder carries besides the program: `LEGAL.txt`, the folders' README texts, `resources/` (shaders, fonts, sounds, the free BIOS; game fixes go in `resources/game-fixes/`, empty so far) |
@@ -81,6 +82,6 @@ words, and the revamp's areas) are the revamp's records ([`settings-inventory.md
 
 ## The build's output
 
-`dist/PPSA99249/`: `eboot.bin`, `sce_sys/`, `resources/`, `sandbox-elevator.elf`, `symbols.txt`,
+`dist/PPSA99249/`: `eboot.bin`, `sce_sys/`, `resources/`, `sandbox-elevator.elf`, `write-broker.elf`, `symbols.txt`,
 `README.md` and `CHANGELOG.md` (copied from the repository's root), `LEGAL.txt`, `NOTICE.txt`,
 `licenses/`. The ZIP is made from this folder ([`releasing.md`](releasing.md)).

@@ -812,6 +812,13 @@ Packs**; or a game's page > Texture packs, where it opens on that game) is the t
 - **Texture settings of the game** (Triangle): the game's own Graphics > Load textures.
 - What runs (a download, a move, a delete) is under **Under way**, where Cross stops it, and on
   the bar along the bottom of the menus.
+- The console slows down what the title writes to its own storage after the first 1.3 GB or so, to
+  a few MB/s, so a large pack moved or downloaded to the console can crawl. **Fast Writes to Console
+  Storage** (Settings > PlayStation 5, off by default) has a helper program the title starts
+  (`write-broker.elf` in the title folder, sent to the payload loader as the USB drive helper is)
+  write those files instead; disc images made on the console go through it too. If the helper can't
+  be started or fails, the title writes the rest itself. USB drives are not slowed down that way and
+  never use it.
 
 The console tells a title nothing of the free space on its storage or its drives, so the manager
 cannot warn that a pack will not fit there; a pack too large stops when the place is full (a move

@@ -8,6 +8,7 @@
 // here says what it does in the boot log ("texture packs:" lines).
 
 #include "ps5_texture_pack_manager.h"
+#include "ps5_broker.h"
 
 #include "ps5_jobs.h"
 #include "ps5_priority.h"
@@ -48,6 +49,9 @@ class ConsoleFiles final : public PosixFiles
 {
 public:
 	static bool Virtual(const std::string& path) { return ps5vfs_is_virtual(path.c_str()) != 0; }
+
+	// The job's write broker, while a move runs (one job at a time).
+	std::atomic<PS5Broker::Session*> broker{nullptr};
 
 	bool List(const std::string& folder, std::vector<Entry>* out) override
 	{
@@ -90,7 +94,31 @@ public:
 		const std::function<void(uint64_t)>& moved, std::string* error) override
 	{
 		if (!Virtual(from) && !Virtual(to))
+		{
+			// Onto the console's storage, with Fast writes to the console's storage on: the write
+			// broker copies the file (ps5_broker.h); a file it fails is copied here from its start.
+			PS5Broker::Session* const session = broker.load();
+			if (session != nullptr && PS5Broker::Wanted(to))
+			{
+				const std::string part = to + PART;
+				std::string why;
+				if (session->Copy(from, part, size, stop, moved, &why))
+				{
+					if (rename(part.c_str(), to.c_str()) == 0)
+						return true;
+					why = "cannot write " + to + ": " + std::strerror(errno);
+				}
+				unlink(part.c_str());
+				if (stop && stop())
+				{
+					*error = "stopped";
+					return false;
+				}
+				if (!why.empty())
+					ps5px_log("texture packs: %s: %s; the title copies it itself", from.c_str(), why.c_str());
+			}
 			return PosixFiles::CopyFile(from, to, size, stop, moved, error);
+		}
 		// (ps5vfs_fopen reads a path that is not virtual from libc.)
 		FILE* const in = ps5vfs_fopen(from.c_str(), "rb");
 		if (in == nullptr)
@@ -522,7 +550,13 @@ bool Move(const Pack& pack, size_t place, std::function<void(bool ok, std::strin
 	ps5px_log("texture packs: moving %s from %s to %s", pack.path.c_str(), from.c_str(), to.place.target.c_str());
 	const bool started = RunDetached([pack, to, from, done] {
 		const auto began = std::chrono::steady_clock::now();
-		const Outcome o = PS5TexturePackStore::Move(s_files, pack, to.place.target, [] { return s_job_stop.load(); }, &s_progress);
+		Outcome o;
+		{
+			PS5Broker::Session broker("texture pack move");
+			s_files.broker = &broker;
+			o = PS5TexturePackStore::Move(s_files, pack, to.place.target, [] { return s_job_stop.load(); }, &s_progress);
+			s_files.broker = nullptr;
+		}
 		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
 		std::string sentence;
 		if (o.ok)

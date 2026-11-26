@@ -5,6 +5,7 @@
 
 #include "ps5_texture_packs_extract.h"
 #include "ps5_texture_packs_logic.h"
+#include "ps5_broker.h"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -12,6 +13,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -81,8 +83,10 @@ bool MakeFolders(const std::string& path)
 	return true;
 }
 
-Result Extract(const Read& read, const std::string& root, const std::vector<std::string>& serials, const std::function<bool()>& stop)
+Result Extract(const Read& read, const std::string& root, const std::vector<std::string>& serials, const std::function<bool()>& stop,
+	PS5Broker::Session* broker)
 {
+	const bool brokered = broker != nullptr && PS5Broker::Wanted(root + "/x");
 	Result result;
 	struct archive* a = archive_read_new();
 	archive_read_support_format_rar(a);
@@ -135,8 +139,15 @@ Result Extract(const Read& read, const std::string& root, const std::vector<std:
 			break;
 		}
 		const std::string partial = path + ".partial";
-		const int fd = open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-		if (fd < 0)
+		// Through the write broker when it takes the file; else (or when it can't) by the title.
+		std::unique_ptr<PS5Broker::File> through;
+		if (brokered)
+		{
+			std::string why;
+			through = broker->Create(partial, &why); // (null: it said why in the boot log)
+		}
+		const int fd = through ? -1 : open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (!through && fd < 0)
 		{
 			result.error = "a file could not be written: " + path + " (" + std::strerror(errno) + ")";
 			break;
@@ -153,7 +164,7 @@ Result Extract(const Read& read, const std::string& root, const std::vector<std:
 				failed = true;
 				break;
 			}
-			if (!WriteAll(fd, block.data(), static_cast<size_t>(n)))
+			if (through ? !through->Write(block.data(), static_cast<size_t>(n)) : !WriteAll(fd, block.data(), static_cast<size_t>(n)))
 			{
 				result.error = "a file could not be written: " + path + " (" + std::strerror(errno) + ")";
 				failed = true;
@@ -166,7 +177,20 @@ Result Extract(const Read& read, const std::string& root, const std::vector<std:
 				break;
 			}
 		}
-		close(fd);
+		if (through)
+		{
+			std::string why;
+			if (!through->Finish(&why) && !failed && !stopped)
+			{
+				result.error = "a file could not be written: " + path + " (" + why + ")";
+				failed = true;
+			}
+			through.reset();
+		}
+		else
+		{
+			close(fd);
+		}
 		if (failed || stopped)
 		{
 			unlink(partial.c_str());

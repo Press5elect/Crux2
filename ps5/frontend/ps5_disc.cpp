@@ -14,6 +14,7 @@
 
 #include "ps5_disc.h"
 #include "ps5_disc_image.h"
+#include "ps5_broker.h"
 
 #include "ps5_platform.h"
 
@@ -37,6 +38,7 @@ static int ps5_offload_end(struct ps5_offload*) { return -1; }
 #include <condition_variable>
 #include <functional>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -1128,6 +1130,16 @@ namespace PS5Disc
 			return false;
 		}
 		const std::uint64_t total = state.sectors * kSector;
+		// Onto the console's storage, with Fast writes to the console's storage on: the write broker
+		// writes the image (ps5_broker.h), and the title itself if it fails, from where it failed.
+		PS5Broker::Session broker("disc image");
+		std::unique_ptr<PS5Broker::File> through;
+		if (PS5Broker::Wanted(part))
+		{
+			std::string why;
+			through = broker.Create(part, &why);
+		}
+		if (!through)
 		{
 			// (Once: where the console's FTP server sees this folder.)
 			const std::string folder = path.substr(0, path.find_last_of('/'));
@@ -1140,6 +1152,13 @@ namespace PS5Disc
 		struct ps5_offload* stream = nullptr;
 		std::uint64_t in_file = 0;
 		const PS5DiscImage::Append append = [&](const void* data, std::size_t size) {
+			if (through)
+			{
+				if (!through->Write(data, size))
+					return false;
+				in_file += size;
+				return true;
+			}
 			if (stream == nullptr && ps5_offload_wanted())
 				stream = ps5_offload_begin(part.c_str(), in_file);
 			bool written = true;
@@ -1224,6 +1243,17 @@ namespace PS5Disc
 		{
 			*error = "The image could not be written to the end.";
 			ok = false;
+		}
+		if (through)
+		{
+			std::string why;
+			if (!through->Finish(&why) && ok)
+			{
+				ps5px_log("disc: the image could not be written to the end: %s", why.c_str());
+				*error = "The image could not be written to the end.";
+				ok = false;
+			}
+			through.reset();
 		}
 		// What is only known at the end: the CHD's header, the CSO's index.
 		for (const PS5DiscImage::Patch& patch : patches)

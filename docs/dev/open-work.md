@@ -286,6 +286,24 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   layout never runs; the cost is no fast clears and no DCC bandwidth saving. To check: the same games
   with it off and on at 6x and 8x (GPU time, `FD` in the test windows), and a picture without faults.
 
+## The write broker (2026-11-26): built, untested on a console in Crux2
+
+- `ps5/broker` (the payload, `write-broker.elf`) and the Client are taken from OGBox (db63d46), where
+  the owner's write test measured it at about 200 MiB/s past 2 GiB on /data while the title's own
+  writes fell to a few MiB/s. Crux2's Session and File (`ps5/frontend/ps5_broker.cpp`) send through it,
+  with `[PS5] WriteBroker` on (off by default, rule 7): a texture pack moved onto /data (COPY, the
+  broker reads and writes the file itself), a pack unpacked onto /data as it downloads, and a disc
+  image made on /data (WRITE, 8 MiB pieces, 4 ahead; the FTP offload is not used then). A failure lets
+  the broker end, then the title writes what it didn't confirm and the rest (the PC test kills it
+  after 1 to 40 requests: the file is whole).
+- To check on a console: a pack of several GB moved from a USB drive to the console, downloaded to
+  the console, and a disc image of a DVD, with the setting off and on; the `broker:` lines (writing
+  through the broker, the files, MiB and MiB/s at the end, or why not). Whether a file the payload
+  creates can be renamed and deleted by the title (OGBox's move needed the same) and whether two
+  brokers at once (a download and a move) both start.
+- A move whose copy the broker failed part-way counts that file's copied bytes twice in the progress
+  bar (the title copies it again from its start): cosmetic.
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,

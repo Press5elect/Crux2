@@ -46,6 +46,7 @@ Grep the boot log for the prefix of the feature in question.
 | `hdr test:` | Adjust HDR brightness (Unreleased) |
 | `intro:` | The startup video (Unreleased) |
 | `update:`, `install:` | The updater |
+| `broker:` | The write broker (Fast Writes to Console Storage, Unreleased): started or why not, why it stopped, a job's files, MiB and MiB/s |
 | `auto-save:`, `native:`, `pgo:`, `mic:` | The state saved by itself; native modules; PGO counts; microphones |
 
 ## klog

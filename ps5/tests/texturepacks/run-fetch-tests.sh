@@ -31,7 +31,7 @@ if ! pkg-config --exists libcurl libarchive 2>/dev/null; then
     exit $status
 fi
 # shellcheck disable=SC2046
-"$CXX" "${flags[@]}" "${san[@]}" "$here/fetch_test.cpp" "$front/ps5_texture_packs_extract.cpp" $(pkg-config --cflags --libs libcurl libarchive) \
+"$CXX" "${flags[@]}" "${san[@]}" "$here/fetch_test.cpp" "$front/ps5_texture_packs_extract.cpp" "$front/ps5_broker.cpp" -pthread $(pkg-config --cflags --libs libcurl libarchive) \
     -o "$work/fetch_test"
 
 # The files: 3 MB and a bit, and a pack of made-up textures zipped.

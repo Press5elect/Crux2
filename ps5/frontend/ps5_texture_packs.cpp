@@ -17,6 +17,7 @@
 
 #include "Config.h"
 #include "Host.h"
+#include "ps5_broker.h"
 #include "MTGS.h"
 
 #include "common/FileSystem.h"
@@ -291,7 +292,9 @@ bool Start(const Pack& pack, const Place& place, unsigned connections, std::func
 		PS5TexturePacksExtract::MakeFolders(place.root);
 		PS5TexturePacksExtract::Result result;
 		const PS5TexturePacksFetch::Outcome fetched = PS5TexturePacksFetch::Run(options, [&](const PS5TexturePacksFetch::Read& read) {
-			result = PS5TexturePacksExtract::Extract(read, place.root, pack.serials, [] { return s_stop.load(); });
+			// (Unpacked onto the console's storage: through the write broker with the setting on.)
+			PS5Broker::Session broker("texture pack download");
+			result = PS5TexturePacksExtract::Extract(read, place.root, pack.serials, [] { return s_stop.load(); }, &broker);
 		});
 
 		std::string sentence;
