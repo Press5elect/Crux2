@@ -1061,7 +1061,7 @@ Page graphicsPage(int layer, bool forGame)
 	rows.push_back(adv(hw(toggle("Render targets without compression (experimental)",
 		"Creates render targets without colour compression. Can be faster or slower depending on the game. "
 			"Experimental; takes effect the next time a game starts.",
-		GS, "PS5RTNoCompression", false, Option::NextStart))));
+		GS, "PS5RTNoCompression", true, Option::NextStart))));
 	rows.push_back(adv(hw(toggle("Leave out barriers with nothing to wait for",
 		"Skips GPU waits when nothing has been drawn since the last one. Turn off if effects look wrong. Takes effect "
 			"the next time a game starts.",

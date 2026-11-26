@@ -6,6 +6,12 @@ where Settings > Network > Updates > What's New reads it: keep the `## vX.Y.Z (d
 not shown). The full notes of each published release are in
 [`docs/releases/`](docs/releases/README.md).
 
+## Unreleased
+
+- Changed: **Disable Render Target Compression** (Settings > Picture > Graphics, ADVANCED) is on by
+  default: colour render targets are made without surface compression, which is never decompressed
+  when a draw reads the target it draws to. A game set to off keeps its choice.
+
 ## v1.0.24 (2026-11-24)
 
 - Added: **GS Thread Split** (Settings > Picture > Graphics, ADVANCED; on, two threads, by default): the GS

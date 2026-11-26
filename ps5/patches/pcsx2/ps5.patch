@@ -9215,7 +9215,7 @@ index 77a28df..f216cfe 100644
  
  void GSTextureReplacements::CancelPendingLoadsAndDumps()
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index f9aab2a..b174bda 100644
+index f9aab2a..d4aa5fa 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -24,10 +24,15 @@
@@ -10380,7 +10380,7 @@ index f9aab2a..b174bda 100644
 +	// game's own settings layered in (GSGameChanged -> PS5ReadGameSettings).
 +	const bool hold = Host::GetBoolSettingValue("EmuCore/GS", "PS5HoldFeedbackLayout", false);
 +	const bool skip = Host::GetBoolSettingValue("EmuCore/GS", "PS5SkipRedundantBarriers", true);
-+	const bool no_compression_asked = Host::GetBoolSettingValue("EmuCore/GS", "PS5RTNoCompression", false);
++	const bool no_compression_asked = Host::GetBoolSettingValue("EmuCore/GS", "PS5RTNoCompression", true);
 +	const bool no_compression = no_compression_asked && m_ps5_compression_control;
 +	const bool rov_keep = Host::GetBoolSettingValue("EmuCore/GS", "PS5ROVKeepPass", true);
 +
@@ -10625,7 +10625,7 @@ index f9aab2a..b174bda 100644
  
  	Draw(config);
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
-index f849fbf..efe4dde 100644
+index f849fbf..0bd97f3 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.h
 @@ -49,6 +49,8 @@ public:
@@ -10827,7 +10827,7 @@ index f849fbf..efe4dde 100644
 +	/// FeedbackBarrier (by region, inside the pass) on those of rt/ds written since their last barrier; counts
 +	/// the barriers made (Barriers) and left out (BarriersSkipped).
 +	void PS5FeedbackBarrierIfOwed(GSTextureVK* rt, GSTextureVK* ds);
-+	/// [EmuCore/GS] PS5RTNoCompression (off by default, read when the device is made and at each game start, needs the
++	/// [EmuCore/GS] PS5RTNoCompression (on by default since 2026-11-26, the owner's decision; read when the device is made and at each game start, needs the
 +	/// imageCompressionControl feature): colour render targets made without DCC (GSTextureVK::Create).
 +	bool m_ps5_rt_no_compression = false;
 +	bool m_ps5_compression_control = false; // the feature, enabled on the device

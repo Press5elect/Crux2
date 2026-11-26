@@ -279,6 +279,13 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   in the same build; retrain once the split is kept.
 - The DRAW thread's time is not in the overlay's or the test window's GS figure (only the MTGS thread's).
 
+## Render targets without compression by default (2026-11-26): built, to check on a console
+
+- `[EmuCore/GS] PS5RTNoCompression` defaults to on (the owner's decision: the games played ran better with
+  it on). Colour render targets get no DCC, so the whole-image decompress on entering the feedback-loop
+  layout never runs; the cost is no fast clears and no DCC bandwidth saving. To check: the same games
+  with it off and on at 6x and 8x (GPU time, `FD` in the test windows), and a picture without faults.
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,
