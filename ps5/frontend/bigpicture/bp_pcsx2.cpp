@@ -4260,7 +4260,7 @@ public:
 			o.label = "Boot log";
 			o.desc = "Only when something goes wrong: the session's log is kept in memory and written to crux2-boot.log after a "
 					 "crash, a game that did not start, 15 seconds without a new picture while a game runs, or Save the log. "
-					 "Always written: every line goes to the file as it is logged, as before. Takes effect the next time Crux2 starts.";
+					 "Always written: every line goes to the file as it is logged, as before.";
 			o.section = "PS5";
 			o.key = "LogMode";
 			o.names = {"Only when something goes wrong", "Always written"};
@@ -4540,7 +4540,7 @@ public:
 			{
 				bp::Option vrr = Toggle("Variable refresh (VRR)",
 					"With 120 Hz on a TV that has VRR, each frame is shown as soon as it is ready instead of at the next fixed "
-					"refresh: smoother when a game drops below full speed. Takes effect the next time Crux2 starts. Experimental.",
+					"refresh: smoother when a game drops below full speed. Experimental.",
 					"PS5", "VariableRefresh", false, A | bp::Option::Restart);
 				vrr.enabled = [](int) { return Host::GetBaseIntSettingValue("PS5", "OutputRefresh", 60) > 60; };
 				rows.push_back(std::move(vrr));
@@ -4912,6 +4912,10 @@ public:
 				"Clears newly allocated graphics memory with non-temporal writes instead of clearing and flushing it. Reduces the "
 				"time spent creating textures.",
 				"PS5", "StreamZero", true, A | bp::Option::Expert | bp::Option::Restart));
+			// Crux2: the driver's direct memory placement (ps5/patches/mesa-27 0023, RADV_PS5_TOP_DOWN; ps5_host.cpp).
+			rows.push_back(Toggle("Graphics Memory From the Top",
+				"Places the graphics driver's memory at the top of the console's memory, its small pieces apart, so they don't break up the free memory between large render targets. Prevents running out of graphics memory at high resolutions, with texture packs, and after playing several games.",
+				"PS5", "GraphicsMemoryFromTop", false, A | bp::Option::Expert | bp::Option::Restart));
 			rows.push_back(Toggle("Skip unchanged microprograms",
 				"Keeps the VU1 recompiler's programs when a game uploads microcode that equals what VU1 already holds. "
 				"A game that changes microcode while VU1 runs it may draw wrongly. Not yet tested on a console.",

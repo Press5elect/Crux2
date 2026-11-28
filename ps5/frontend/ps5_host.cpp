@@ -2426,6 +2426,16 @@ int main(int argc, char* argv[])
 			ps5px_log("RADV_PS5_STREAM_ZERO could not be set: the driver clears memory as usual");
 	}
 
+	// Where the driver takes its direct memory (Settings > PlayStation 5 > Graphics Memory From the Top; ps5/patches/
+	// mesa-27 0023): read once by the driver, so a change waits for the next start.
+	if (Host::GetBaseBoolSettingValue("PS5", "GraphicsMemoryFromTop", false))
+	{
+		if (setenv("RADV_PS5_TOP_DOWN", "1", 1) == 0)
+			ps5px_log("graphics driver: graphics memory taken from the top of the direct pool (GraphicsMemoryFromTop)");
+		else
+			ps5px_log("RADV_PS5_TOP_DOWN could not be set: the driver places memory as usual");
+	}
+
 	// How the driver waits for the GPU (PS5 Mesa with PS5CEMU-HAR's patch 0009: Settings > Interface >
 	// PlayStation 5): only when changed from the driver's own 1500 us of checking and 1000 us sleeps.
 	{

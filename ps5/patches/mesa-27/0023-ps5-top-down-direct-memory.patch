@@ -1,0 +1,175 @@
+From d6f18398e6ebcebecc41dad39c1f062520e8c0f0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 28 Nov 2026 20:41:17 +0000
+Subject: [PATCH] radv/ps5: direct memory from the top of the pool, small
+ pieces apart, on request
+
+Everything in the title takes from one direct-memory pool, first fit from its start: guest
+memory, the code area and the title heap (which, with a texture pack, takes and gives back
+segments all through a game) at the bottom, and the driver's allocations among them: render
+targets and their 512 MiB blocks beside long-lived small pieces (shaders, descriptor pools,
+upload rings). When the large ones were freed, the small pieces and the heap's segments stayed
+between them, and the free memory was broken into runs too small for a new block: a game at 8x
+ran out, and after it the largest free run was 4.3 of 10.3 GiB with the heap at 524 MiB and
+nothing pooled.
+
+With RADV_PS5_TOP_DOWN=1 (read once; off by default, which is the placement as it was)
+radv_ps5_direct_allocate takes the driver's allocations from the top of the pool: pieces under
+16 MiB from the top 1 GiB, larger ones from the bands below it, 1 GiB at a time downwards; each
+falls back to the whole pool. Used by radv_ps5_memory_alloc and the two allocations beside it.
+Each device logs "radv/ps5: graphics memory taken from the top of the direct pool, small
+pieces apart (RADV_PS5_TOP_DOWN)" when it is on.
+
+Claude-Session: https://claude.ai/code/session_01EniyCuLSq8bzaeVVgyk9gK
+---
+ src/amd/vulkan/winsys/ps5/radv_ps5_platform.c | 70 +++++++++++++++++--
+ src/amd/vulkan/winsys/ps5/radv_ps5_platform.h |  3 +
+ src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c   |  2 +
+ 3 files changed, 69 insertions(+), 6 deletions(-)
+
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
+index d3ed32130e8..2eda0c8fc52 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
+@@ -20,6 +20,7 @@ extern void ps5_title_breadcrumb(const char *text) __attribute__((weak));
+ 
+ #include "c11/threads.h"
+ #include "util/macros.h"
++#include "util/u_debug.h"
+ #include "util/os_time.h"
+ #include "util/simple_mtx.h"
+ #include "util/u_atomic.h"
+@@ -340,6 +341,60 @@ radv_ps5_memory_available_bytes(void)
+    return available;
+ }
+ 
++/* Where in the direct pool the driver's memory goes (RADV_PS5_TOP_DOWN, read once; off by default, which is
++ * the placement as it was: the first gap from the pool's start that fits). Everything in the title takes from
++ * one pool, first fit from its start: guest memory, the code area and the title heap (which, with a texture pack,
++ * takes and gives back segments all through a game) at the bottom, and the driver's allocations among them,
++ * render targets and their 512 MiB blocks beside long-lived small pieces (shaders, descriptor pools, upload
++ * rings). When the large ones were freed, the small ones and the heap's segments stayed between them: free
++ * memory broken into runs too small for a new block (a game at 8x ran out, and after it the largest free run
++ * was 4.3 of 10.3 GiB with the heap at 524 MiB and nothing pooled). With it on, the driver's allocations come
++ * from the top of the pool: small ones (under RADV_PS5_SMALL_BYTES) from the top RADV_PS5_SMALL_REGION, large
++ * ones from the bands below it, 1 GiB at a time downwards, so they interleave neither with the heap at the
++ * bottom nor with each other; each falls back to the whole pool. */
++#define RADV_PS5_SMALL_BYTES (UINT64_C(16) << 20)
++#define RADV_PS5_SMALL_REGION (UINT64_C(1) << 30)
++#define RADV_PS5_TOP_BAND (UINT64_C(1) << 30)
++
++static bool radv_ps5_top_down_on;
++static once_flag radv_ps5_top_down_once = ONCE_FLAG_INIT;
++
++static void
++radv_ps5_top_down_configure(void)
++{
++   radv_ps5_top_down_on = debug_get_bool_option("RADV_PS5_TOP_DOWN", false);
++}
++
++bool
++radv_ps5_top_down(void)
++{
++   call_once(&radv_ps5_top_down_once, radv_ps5_top_down_configure);
++   return radv_ps5_top_down_on;
++}
++
++static int32_t
++radv_ps5_direct_allocate(uint64_t bytes, uint64_t alignment, int64_t *physical)
++{
++   const int64_t pool = sceKernelGetDirectMemorySize();
++   if (radv_ps5_top_down() && pool > (int64_t)(4 * RADV_PS5_SMALL_REGION)) {
++      const int64_t small_start = pool - (int64_t)RADV_PS5_SMALL_REGION;
++      if (bytes < RADV_PS5_SMALL_BYTES) {
++         if (sceKernelAllocateDirectMemory(small_start, pool, bytes, alignment, RADV_PS5_DIRECT_TYPE, physical) == 0)
++            return 0;
++      } else {
++         for (int64_t start = small_start - (int64_t)RADV_PS5_TOP_BAND;; start -= (int64_t)RADV_PS5_TOP_BAND) {
++            if (start < 0)
++               start = 0;
++            if (sceKernelAllocateDirectMemory(start, small_start, bytes, alignment, RADV_PS5_DIRECT_TYPE, physical) == 0)
++               return 0;
++            if (start == 0)
++               break;
++         }
++      }
++   }
++   return sceKernelAllocateDirectMemory(0, pool, bytes, alignment, RADV_PS5_DIRECT_TYPE, physical);
++}
++
+ bool
+ radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32, struct radv_ps5_memory *out)
+ {
+@@ -351,8 +406,7 @@ radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32, struct
+    alignment = util_next_power_of_two64(alignment);
+ 
+    int64_t physical = -1;
+-   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, alignment,
+-                                     RADV_PS5_DIRECT_TYPE, &physical) != 0) {
++   if (radv_ps5_direct_allocate(bytes, alignment, &physical) != 0) {
+       PS5_CRUMB("memory: sceKernelAllocateDirectMemory FAILED");
+       return false;
+    }
+@@ -471,8 +525,7 @@ radv_ps5_memory_replay_window(uint64_t bytes, uint64_t alignment, uint64_t repla
+    if (replay_va % alignment || !radv_ps5_window_contains(replay_va, bytes))
+       return false;
+    int64_t physical = -1;
+-   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, alignment, RADV_PS5_DIRECT_TYPE,
+-                                     &physical) != 0)
++   if (radv_ps5_direct_allocate(bytes, alignment, &physical) != 0)
+       return false;
+    void *const hint = (void *)(uintptr_t)replay_va;
+    void *address = hint;
+@@ -514,8 +567,7 @@ radv_ps5_memory_alloc_replayable(uint64_t bytes, uint64_t alignment, bool window
+    }
+ 
+    int64_t physical = -1;
+-   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, alignment, RADV_PS5_DIRECT_TYPE,
+-                                     &physical) != 0) {
++   if (radv_ps5_direct_allocate(bytes, alignment, &physical) != 0) {
+       radv_ps5_granules_give(&radv_ps5_region, granule, granules);
+       return false;
+    }
+@@ -891,6 +943,12 @@ radv_ps5_memory_available_bytes(void)
+    return radv_ps5_memory_pool_bytes();
+ }
+ 
++bool
++radv_ps5_top_down(void)
++{
++   return false;
++}
++
+ bool
+ radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32, struct radv_ps5_memory *out)
+ {
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
+index d697859988a..5c5273e9835 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
+@@ -62,6 +62,9 @@ bool radv_ps5_window_replayable(void);
+  * without running it. */
+ bool radv_ps5_platform_runs_gpu(void);
+ 
++/* RADV_PS5_TOP_DOWN (read once): the driver's direct memory taken from the top of the pool, small pieces apart. */
++bool radv_ps5_top_down(void);
++
+ bool radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32,
+                            struct radv_ps5_memory *out);
+ void radv_ps5_memory_free(struct radv_ps5_memory *memory);
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+index 5ebec1d5cca..cec30ff6c86 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+@@ -641,6 +641,8 @@ radv_ps5_winsys_create(const struct radeon_info *info, struct radeon_winsys **wi
+    ws->queue = queue;
+    fprintf(stderr, "radv/ps5: GFX10.1 hardware workarounds %s (RADV_PS5_GFX101_WORKAROUNDS)\n",
+            info->compiler_info.has_gfx101_hazards ? "on" : "off");
++   if (radv_ps5_top_down())
++      fprintf(stderr, "radv/ps5: graphics memory taken from the top of the direct pool, small pieces apart (RADV_PS5_TOP_DOWN)\n");
+    if (radv_ps5_stream_zero()) {
+ #if defined(__AVX2__)
+       fprintf(stderr, "radv/ps5: new buffers zeroed with non-temporal stores (RADV_PS5_STREAM_ZERO)\n");
+-- 
+2.43.0
+

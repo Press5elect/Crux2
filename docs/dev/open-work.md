@@ -339,6 +339,12 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   into runs. Now logged (`graphics memory ...`: texture cache targets/sources/cached, pool, VMA blocks and
   allocations, direct memory free in all / runs / largest) at a game's start and end and, at most once a
   second, when a texture can't be made (GSDeviceVK::PS5LogMemory, ps5px_direct_memory_free in PS5Misc.cpp).
+- The fix taken (2026-11-28, the owner: no more measuring): `[PS5] GraphicsMemoryFromTop` (off by default)
+  sets `RADV_PS5_TOP_DOWN=1` for Mesa patch 0023: the driver's direct memory comes from the top of the pool
+  (pieces under 16 MiB from the top 1 GiB, larger ones from the 1 GiB bands below), apart from guest memory,
+  code and the title heap at the bottom, which with a texture pack churns all through a game. To check on the
+  console: the same game at 8x with the pack and it on: no `Memory allocation failure`, and the `memory after
+  the game` line near the start's figure.
 - Suspected, not proven: small render targets grown to the depth buffer's size ("RT and DS sizes need to
   match", GSRendererHW.cpp ~5195) make the 64-138 full-size targets.
 - Was open: why the memory is not given back after the game (a leak, or the shared 512 MiB target

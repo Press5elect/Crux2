@@ -8,6 +8,11 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: **Graphics Memory From the Top** (Settings > PlayStation 5, THE CONSOLE; off by default): the
+  graphics driver takes its memory from the top of the console's memory, its small pieces apart from its large
+  ones, instead of among the title's own: a heavy game at 8x with a texture pack ran out of graphics memory
+  with gigabytes free, broken into pieces too small for a render target, and after it gigabytes stayed
+  unusable for the next game.
 - Added: **Wait Loop Detection Across Two Blocks** (Settings > Emulation > Advanced, off by default): a game
   that waits for a value in memory with a test and a read split in two pieces of code had the processor
   spin through every pass; the time is now skipped to the next event, as wait loop detection does for the
