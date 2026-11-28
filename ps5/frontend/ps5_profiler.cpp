@@ -85,7 +85,7 @@ namespace
 	constexpr double QUIET_PERCENT = 15.0;
 	// Windows written per thread before the profiler stops: ten minutes of a busy thread.
 	constexpr unsigned MAX_WINDOWS = 60;
-	constexpr unsigned MAX_THREADS = 6; // graphics, two recorders (the GS device's and paraLLEl-GS's), paraLLEl-GS, emulation, VU
+	constexpr unsigned MAX_THREADS = 7; // graphics, the split's drawing, two recorders (the GS device's and paraLLEl-GS's), paraLLEl-GS, emulation, VU
 
 	struct ProfiledThread
 	{
@@ -672,6 +672,8 @@ extern "C" void ps5px_profile_thread_named(const char* name)
 	const char* label = nullptr;
 	if (std::strcmp(name, "GS") == 0)
 		label = "graphics";
+	else if (std::strcmp(name, "GS draw") == 0)
+		label = "drawing"; // GS Thread Split's DRAW side (GSSplit.cpp): the texture cache and the Vulkan device
 	else if (std::strcmp(name, "RADV recorder") == 0)
 		label = "recorder";
 	else if (std::strcmp(name, "paraLLEl-GS") == 0)

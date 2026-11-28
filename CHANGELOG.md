@@ -8,6 +8,7 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Fixed: a `profile` test run with GS Thread Split on samples the drawing thread too (it was left out).
 - Added: **Fast Writes to Console Storage** (Settings > PlayStation 5, off by default): large files
   written to the console's storage (a texture pack moved or downloaded there, a disc image) are written
   by a helper the title starts (write-broker.elf, from OGBox), which the console does not slow down

@@ -304,6 +304,23 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
 - A move whose copy the broker failed part-way counts that file's copied bytes twice in the progress
   bar (the title copies it again from its start): cosmetic.
 
+## The profiler and the GS split (2026-11-28): fixed
+
+- `profile` runs sample the split's DRAW thread ("GS draw") as `drawing`; before, only the thread that
+  reads the packets was sampled with the split on.
+
+## Out of graphics memory at 8x (2026-11-28): under investigation
+
+- The owner's log of SLUS-21613 at 8x (B5.6): at scene changes the texture cache made 67-138 full-size
+  5120x3584 targets in 10 s (5-10 GB; the allocations are an inlined `Target::ResizeTexture` in
+  `GSRendererHW::Draw`), and twice (191 s, 460 s) `sceKernelAllocateDirectMemory` failed even after
+  the pool was emptied and the GPU waited for: those draws went without their target. After the game the
+  largest free run of direct memory was 2.5 GB (3.9 GB in an earlier session), against about 9.3 GB at
+  its start; after other games it comes back. Not known: used or fragmented (the driver's breadcrumb
+  doesn't give the size asked for, and the boot log gives only the largest free run).
+- Still open: why the memory is not given back after the game (a leak, or the shared 512 MiB target
+  blocks fragmenting direct memory).
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,
