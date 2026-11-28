@@ -8,13 +8,22 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: **Wait Loop Detection Across Two Blocks** (Settings > Emulation > Advanced, off by default): a game
+  that waits for a value in memory with a test and a read split in two pieces of code had the processor
+  spin through every pass; the time is now skipped to the next event, as wait loop detection does for the
+  one-piece kind.
+- Fixed: memory the title's heap let go (a texture pack's decoded replacements, a closed game's caches)
+  was kept by the heap instead of going back to the memory the graphics device shares with it: after a
+  game with a texture pack, the next had gigabytes less, and a heavy game at a high resolution ran out.
+  It is given back every 10 s, when a game closes, and when the graphics device can't make a texture.
 - Changed: the VU1 recompiler's state and the objects the emulation thread checks in every event test
   are on cache lines of their own: they shared one with the counter the VU thread updates in every VU1
   block, so the emulation thread waited for that line again and again.
 - Added: **Free Unused Targets When Memory Is Short** (Settings > Picture > Graphics, ADVANCED; off by
   default): at very high resolutions a heavy game could fill the console's graphics memory, and draws then
   went without their textures. Render targets not drawn to for two frames, whose picture is kept elsewhere,
-  are freed when that happens or when targets hold more than 6 GB. The resolution stays as you chose.
+  are freed when that happens or when targets hold more than 6 GB, and then also the cached textures no
+  draw uses (texture pack replacements are loaded again when needed). The resolution stays as you chose.
 - Fixed: a `profile` test run with GS Thread Split on samples the drawing thread too (it was left out).
 - Added: **Fast Writes to Console Storage** (Settings > PlayStation 5, off by default): large files
   written to the console's storage (a texture pack moved or downloaded there, a disc image) are written

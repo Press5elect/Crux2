@@ -8705,7 +8705,7 @@ index 6adcc67..979f3e6 100644
  	std::vector<GSVertexSW> m_sw_vertex_buffer;
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index b9b6870..57768da 100644
+index b9b6870..9f99547 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 @@ -17,6 +17,8 @@
@@ -8808,7 +8808,7 @@ index b9b6870..57768da 100644
  	if (!target)
  		return;
  
-@@ -6220,9 +6285,87 @@ void GSTextureCache::IncAge()
+@@ -6220,9 +6285,123 @@ void GSTextureCache::IncAge()
  	}
  }
  
@@ -8833,6 +8833,34 @@ index b9b6870..57768da 100644
 +	if (!m_ps5_free_stale || (!short_of_memory && m_target_memory_usage <= PS5_TARGET_BUDGET))
 +		return;
 +
++	// Short of memory: the hash cache's textures no source uses (texture replacements among them, which a
++	// pack makes large) go too, as AgeHashCache lets them go after 30 frames; one asked for again is made again.
++	bool purge = false;
++	if (short_of_memory)
++	{
++		const u64 hash_before = GetTotalHashCacheMemoryUsage();
++		u32 hash_freed = 0;
++		for (auto it = m_hash_cache.begin(); it != m_hash_cache.end();)
++		{
++			if (it->second.refcount == 0)
++			{
++				it = RemoveFromHashCache(it);
++				hash_freed++;
++			}
++			else
++			{
++				++it;
++			}
++		}
++		if (hash_freed != 0)
++		{
++			purge = true;
++			ps5px_log("texture cache: %u cached textures no draw uses freed (%llu of %llu MB, replacements %llu MB left): a texture "
++					  "could not be made", hash_freed, static_cast<unsigned long long>((hash_before - GetTotalHashCacheMemoryUsage()) >> 20),
++				static_cast<unsigned long long>(hash_before >> 20), static_cast<unsigned long long>(m_hash_cache_replacement_memory_usage >> 20));
++		}
++	}
++
 +	// The targets IncAge would free at 60 frames, by the same rule (nothing is lost: another target overlaps
 +	// them, or what they hold is all to be reloaded from GS memory), once two frames have passed without a draw
 +	// to them; the oldest first. Over the budget, until it is met; short of memory, all of them. The sources
@@ -8853,7 +8881,11 @@ index b9b6870..57768da 100644
 +		}
 +	}
 +	if (stale.empty())
++	{
++		if (purge)
++			g_gs_device->PurgePool();
 +		return;
++	}
 +	std::stable_sort(stale.begin(), stale.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
 +
 +	const u64 before = m_target_memory_usage;
@@ -8879,7 +8911,11 @@ index b9b6870..57768da 100644
 +		freed++;
 +	}
 +	if (freed == 0)
++	{
++		if (purge)
++			g_gs_device->PurgePool();
 +		return;
++	}
 +
 +	// The freed targets' textures went to the device's pool: given back to the driver, not kept.
 +	g_gs_device->PurgePool();
@@ -8896,7 +8932,7 @@ index b9b6870..57768da 100644
  	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[TEX0.PSM];
  	Source* src = new Source(TEX0, TEXA);
  
-@@ -7826,14 +7969,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
+@@ -7826,14 +8005,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
  	if (m_target) // Yeah keep dreaming
  		return;
  
@@ -8932,7 +8968,7 @@ index b9b6870..57768da 100644
  	Update(rect, layer);
  
  	m_TEX0 = old_TEX0;
-@@ -8567,6 +8731,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8567,6 +8767,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  	}
  
  	m_surfaces.clear();
@@ -8942,7 +8978,7 @@ index b9b6870..57768da 100644
  
  	for (FastList<Source*>& item : m_map)
  	{
-@@ -8577,6 +8744,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8577,6 +8780,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  void GSTextureCache::SourceMap::RemoveAt(Source* s, bool delete_source)
  {
  	m_surfaces.erase(s);
@@ -8952,7 +8988,7 @@ index b9b6870..57768da 100644
  
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
-@@ -8941,6 +9111,7 @@ void GSTextureCache::Palette::InitializeTexture()
+@@ -8941,6 +9147,7 @@ void GSTextureCache::Palette::InitializeTexture()
  {
  	if (!m_tex_palette)
  	{
@@ -9349,7 +9385,7 @@ index 77a28df..f216cfe 100644
  
  void GSTextureReplacements::CancelPendingLoadsAndDumps()
 diff --git a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
-index f9aab2a..d4aa5fa 100644
+index f9aab2a..1c130aa 100644
 --- a/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 +++ b/pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp
 @@ -24,10 +24,15 @@
@@ -9610,7 +9646,26 @@ index f9aab2a..d4aa5fa 100644
  	if (vs_indexing)
  	{
  		SetVSPushConstants(m_vertex.start, m_index.start + offset);
-@@ -3066,6 +3178,13 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+@@ -3055,6 +3167,10 @@ VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
+ 		VK_FORMAT_D32_SFLOAT;
+ }
+ 
++#ifdef __PROSPERO__
++extern "C" void ps5_heap_trim(void);
++#endif
++
+ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format)
+ {
+ 	std::unique_ptr<GSTexture> tex = GSTextureVK::Create(usage, format, width, height, levels);
+@@ -3063,9 +3179,21 @@ GSTexture* GSDeviceVK::CreateSurface(GSTexture::Usage usage, int width, int heig
+ 		// We're probably out of vram, try flushing the command buffer to release pending textures.
+ 		PurgePool();
+ 		ExecuteCommandBufferAndRestartRenderPass(true, "Couldn't allocate texture.");
++#ifdef __PROSPERO__
++		// Crux2: and what the title heap let go (decoded texture replacements) goes back to the direct memory the
++		// driver allocates from (ps5platform/heap.h).
++		ps5_heap_trim();
++#endif
  		tex = GSTextureVK::Create(usage, format, width, height, levels);
  	}
  
@@ -9624,7 +9679,7 @@ index f9aab2a..d4aa5fa 100644
  	return tex.release();
  }
  
-@@ -3114,6 +3233,10 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
+@@ -3114,6 +3242,10 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
  			ca.colorAttachment = 0;
  
  			const VkClearRect cr = {{{0, 0}, {static_cast<u32>(r.width()), static_cast<u32>(r.height())}}, 0u, 1u};
@@ -9635,7 +9690,7 @@ index f9aab2a..d4aa5fa 100644
  			vkCmdClearAttachments(GetCurrentCommandBuffer(), 1, &ca, 1, &cr);
  
  			return;
-@@ -3307,6 +3430,9 @@ void GSDeviceVK::DoMultiStretchRects(
+@@ -3307,6 +3439,9 @@ void GSDeviceVK::DoMultiStretchRects(
  	SetUtilityTexture(rects[0].src, rects[0].filter == Biln ? m_linear_sampler : m_point_sampler);
  
  	SetPipeline(GetConvertPipeline(shader.SetMask(rects[0].wmask.wrgba)));
@@ -9645,7 +9700,7 @@ index f9aab2a..d4aa5fa 100644
  
  	if (ApplyUtilityState())
  		DrawIndexedPrimitive();
-@@ -3394,6 +3520,9 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
+@@ -3394,6 +3529,9 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
  void GSDeviceVK::DrawStretchRect(const GSVector4& sRect, const GSVector4& dRect, const GSVector2i& ds)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -9655,7 +9710,7 @@ index f9aab2a..d4aa5fa 100644
  
  	// ia
  	const float inv_x = 2.0f / ds.x;
-@@ -3448,6 +3577,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
+@@ -3448,6 +3586,9 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel,
  	vkCmdBlitImage(GetCurrentCommandBuffer(), sTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
  		dTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ib,
  		filter == Biln ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
@@ -9665,7 +9720,7 @@ index f9aab2a..d4aa5fa 100644
  }
  
  void GSDeviceVK::UpdateCLUTTexture(
-@@ -3830,6 +3962,10 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3830,6 +3971,10 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				cr.rect.extent.width  = size.x;
  				cr.rect.extent.height = size.y;
  				cr.layerCount = 1u;
@@ -9676,7 +9731,7 @@ index f9aab2a..d4aa5fa 100644
  				vkCmdClearAttachments(GetCurrentCommandBuffer(), num_clear_values, clear_values.data(), 1, &cr);
  			}
  		}
-@@ -3890,6 +4026,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
+@@ -3890,6 +4035,21 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo fb, const GSVector4i& scisso
  				}
  			}
  		}
@@ -9698,7 +9753,7 @@ index f9aab2a..d4aa5fa 100644
  	}
  
  	// Invalidate DS as RT if we're updating DS alone.
-@@ -4111,6 +4262,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
+@@ -4111,6 +4271,9 @@ bool GSDeviceVK::CreatePipelineLayouts()
  
  	dslb.SetPushFlag();
  	dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, NUM_UTILITY_SAMPLERS, VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -9708,7 +9763,7 @@ index f9aab2a..d4aa5fa 100644
  	if ((m_utility_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
  		return false;
  	Vulkan::SetObjectName(dev, m_utility_ds_layout, "Convert descriptor layout");
-@@ -4863,6 +5017,9 @@ void GSDeviceVK::RenderImGui()
+@@ -4863,6 +5026,9 @@ void GSDeviceVK::RenderImGui()
  
  			if (ApplyUtilityState())
  			{
@@ -9718,7 +9773,7 @@ index f9aab2a..d4aa5fa 100644
  				vkCmdDrawIndexed(GetCurrentCommandBuffer(), pcmd->ElemCount, 1, m_index.start + pcmd->IdxOffset,
  					vertex_offset + pcmd->VtxOffset, 0);
  			}
-@@ -4897,6 +5054,238 @@ void GSDeviceVK::RenderBlankFrame()
+@@ -4897,6 +5063,238 @@ void GSDeviceVK::RenderBlankFrame()
  	ActivateCommandBuffer((m_current_frame + 1) % NUM_COMMAND_BUFFERS);
  }
  
@@ -9957,7 +10012,7 @@ index f9aab2a..d4aa5fa 100644
  bool GSDeviceVK::DoCAS(
  	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
  {
-@@ -4982,6 +5371,19 @@ void GSDeviceVK::DestroyResources()
+@@ -4982,6 +5380,19 @@ void GSDeviceVK::DestroyResources()
  		if (it != VK_NULL_HANDLE)
  			vkDestroyPipeline(m_device, it, nullptr);
  	}
@@ -9977,7 +10032,7 @@ index f9aab2a..d4aa5fa 100644
  
  	if (m_imgui_pipeline != VK_NULL_HANDLE)
  		vkDestroyPipeline(m_device, m_imgui_pipeline, nullptr);
-@@ -5041,6 +5443,9 @@ void GSDeviceVK::DestroyResources()
+@@ -5041,6 +5452,9 @@ void GSDeviceVK::DestroyResources()
  			vkDestroyCommandPool(m_device, resources.command_pool, nullptr);
  	}
  
@@ -9987,7 +10042,7 @@ index f9aab2a..d4aa5fa 100644
  	if (m_timestamp_query_pool != VK_NULL_HANDLE)
  		vkDestroyQueryPool(m_device, m_timestamp_query_pool, nullptr);
  
-@@ -5155,6 +5560,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5155,6 +5569,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	AddMacro(ss, "PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
  	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
  	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
@@ -9995,7 +10050,7 @@ index f9aab2a..d4aa5fa 100644
  	ss << m_tfx_source;
  
  	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
-@@ -5165,7 +5571,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
+@@ -5165,7 +5580,47 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
  	return mod;
  }
  
@@ -10043,7 +10098,7 @@ index f9aab2a..d4aa5fa 100644
  {
  	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
  		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
-@@ -5174,39 +5620,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5174,39 +5629,18 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	}};
  
  	GSHWDrawConfig::BlendState pbs{p.bs};
@@ -10084,7 +10139,7 @@ index f9aab2a..d4aa5fa 100644
  	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
  	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
  	if (m_optional_extensions.vk_ext_line_rasterization &&
-@@ -5299,6 +5724,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
+@@ -5299,6 +5733,8 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
  	if (p.ds_as_rt)
  		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
  			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
@@ -10093,7 +10148,7 @@ index f9aab2a..d4aa5fa 100644
  
  	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
  	if (pipeline)
-@@ -5316,8 +5743,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
+@@ -5316,8 +5752,18 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p)
  	if (it != m_tfx_pipelines.end())
  		return it->second;
  
@@ -10112,7 +10167,7 @@ index f9aab2a..d4aa5fa 100644
  	return pipeline;
  }
  
-@@ -5328,6 +5765,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
+@@ -5328,6 +5774,15 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
  		return false;
  
  	SetPipeline(pipeline);
@@ -10128,7 +10183,7 @@ index f9aab2a..d4aa5fa 100644
  
  	return ApplyTFXState();
  }
-@@ -5336,6 +5782,10 @@ void GSDeviceVK::InitializeState()
+@@ -5336,6 +5791,10 @@ void GSDeviceVK::InitializeState()
  {
  	m_current_framebuffer = FramebufferInfo();
  	m_current_render_pass = VK_NULL_HANDLE;
@@ -10139,7 +10194,7 @@ index f9aab2a..d4aa5fa 100644
  
  	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
  		m_tfx_textures[i] = m_null_texture.get();
-@@ -5457,6 +5907,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
+@@ -5457,6 +5916,9 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartPresent(bool wait_for_completion,
  	rp.framebuffer = fb;
  	rp.renderArea.extent.width  = swap_chain_texture->GetWidth();
  	rp.renderArea.extent.height = swap_chain_texture->GetHeight();
@@ -10149,7 +10204,7 @@ index f9aab2a..d4aa5fa 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &rp, VK_SUBPASS_CONTENTS_INLINE);
  }
  
-@@ -5631,6 +6084,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
+@@ -5631,6 +6093,16 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
  
  			vkTex->CommitClear();
  
@@ -10166,7 +10221,7 @@ index f9aab2a..d4aa5fa 100644
  			if (vkTex->GetLayout() != layout)
  			{
  				update_layout = true;
-@@ -5669,9 +6132,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
+@@ -5669,9 +6141,18 @@ void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
  void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  {
  	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
@@ -10185,7 +10240,7 @@ index f9aab2a..d4aa5fa 100644
  		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
  		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
  	}
-@@ -5680,7 +6152,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
+@@ -5680,7 +6161,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
  		vkTex = m_null_texture.get();
  	}
  
@@ -10198,7 +10253,7 @@ index f9aab2a..d4aa5fa 100644
  		return;
  
  	m_utility_texture = vkTex;
-@@ -5728,6 +6204,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5728,6 +6213,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -10208,7 +10263,7 @@ index f9aab2a..d4aa5fa 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5736,6 +6215,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+@@ -5736,6 +6224,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
  	begin_info.renderArea.offset.y = rect.y;
  	begin_info.renderArea.extent.width  = rect.width();
  	begin_info.renderArea.extent.height = rect.height();
@@ -10218,7 +10273,7 @@ index f9aab2a..d4aa5fa 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5748,6 +6230,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5748,6 +6239,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  
  	m_current_render_pass = rp;
  	m_current_render_pass_area = rect;
@@ -10228,7 +10283,7 @@ index f9aab2a..d4aa5fa 100644
  
  	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
  	begin_info.renderPass = m_current_render_pass;
-@@ -5758,6 +6243,11 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
+@@ -5758,6 +6252,11 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = cv_count;
  	begin_info.pClearValues = cv;
@@ -10240,7 +10295,7 @@ index f9aab2a..d4aa5fa 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	m_command_buffer_render_passes++;
-@@ -5797,6 +6287,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
+@@ -5797,6 +6296,10 @@ bool GSDeviceVK::BeginPresentRenderPass(VkRenderPass rp, const GSVector4i& rect,
  	begin_info.renderArea.extent.height = rect.height();
  	begin_info.clearValueCount = 1;
  	begin_info.pClearValues = &s_present_clear_color;
@@ -10251,7 +10306,7 @@ index f9aab2a..d4aa5fa 100644
  	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
  
  	return true;
-@@ -5811,13 +6305,23 @@ void GSDeviceVK::EndRenderPass()
+@@ -5811,13 +6314,23 @@ void GSDeviceVK::EndRenderPass()
  	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
  
  	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -10275,7 +10330,7 @@ index f9aab2a..d4aa5fa 100644
  
  	m_is_presenting = false;
  }
-@@ -5842,6 +6346,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
+@@ -5842,6 +6355,10 @@ void GSDeviceVK::SetScissor(const GSVector4i& scissor)
  
  void GSDeviceVK::SetPipeline(VkPipeline pipeline)
  {
@@ -10286,7 +10341,7 @@ index f9aab2a..d4aa5fa 100644
  	if (m_current_pipeline == pipeline)
  		return;
  
-@@ -6047,6 +6555,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
+@@ -6047,6 +6564,12 @@ bool GSDeviceVK::ApplyUtilityState(bool already_execed)
  		Vulkan::DescriptorSetUpdateBuilder dsub;
  		dsub.AddCombinedImageSamplerDescriptorWrite(
  			VK_NULL_HANDLE, 0, m_utility_texture->GetView(), m_utility_sampler, m_utility_texture->GetVkLayout());
@@ -10299,7 +10354,7 @@ index f9aab2a..d4aa5fa 100644
  		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_utility_pipeline_layout, 0, false);
  	}
  
-@@ -6112,6 +6626,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
+@@ -6112,6 +6635,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
  GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
  {
  	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -10307,7 +10362,7 @@ index f9aab2a..d4aa5fa 100644
  
  	// How this is done:
  	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-@@ -6210,6 +6725,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6210,6 +6734,7 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  	}
  
  	g_perfmon.Put(GSPerfMon::Barriers, 1);
@@ -10315,7 +10370,7 @@ index f9aab2a..d4aa5fa 100644
  
  	// If the current layout is not feedback loop, just do a transition.
  	if (tex->GetLayout() != GSTextureVK::Layout::FeedbackLoop)
-@@ -6233,7 +6749,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
+@@ -6233,7 +6758,24 @@ void GSDeviceVK::ExternalFeedbackBarrier(GSTextureVK* tex)
  
  void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  {
@@ -10340,7 +10395,7 @@ index f9aab2a..d4aa5fa 100644
  	{
  		if (config.rt == config.tex)
  		{
-@@ -6474,6 +7007,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6474,6 +7016,65 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		pipe.feedback_loop_flags = flags;
  	}
  
@@ -10406,7 +10461,7 @@ index f9aab2a..d4aa5fa 100644
  	if (fb.rt && ((config.require_one_barrier && (config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopRT(config.alpha_second_pass.ps)))) && !m_features.texture_barrier)
  	{
  		// Requires a copy of the RT.
-@@ -6605,6 +7197,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6605,6 +7206,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  		rc.rect.offset = {config.drawarea.left, config.drawarea.top};
  		rc.rect.extent = {static_cast<u32>(config.drawarea.width()), static_cast<u32>(config.drawarea.height())};
  		rc.layerCount = 1;
@@ -10417,7 +10472,7 @@ index f9aab2a..d4aa5fa 100644
  		vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
  	}
  
-@@ -6627,6 +7223,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
+@@ -6627,6 +7232,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
  	if (!date_image || colclip_rt)
  		UploadHWDrawVerticesAndIndices(config);
  
@@ -10431,7 +10486,7 @@ index f9aab2a..d4aa5fa 100644
  	// now we can do the actual draw
  	if (BindDrawPipeline(pipe))
  		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? fb.rt : nullptr,
-@@ -6854,9 +7457,283 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
+@@ -6854,9 +7466,283 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds, bool by_regio
  	vkCmdPipelineBarrier2KHR(GetCurrentCommandBuffer(), &dependency);
  }
  
@@ -10715,7 +10770,7 @@ index f9aab2a..d4aa5fa 100644
  	if (!m_features.texture_barrier) [[unlikely]]
  	{
  		Draw(config);
-@@ -6867,7 +7744,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6867,7 +7753,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
  		Console.Warning("VK: Possible unnecessary barrier detected.");
  #endif
@@ -10724,7 +10779,7 @@ index f9aab2a..d4aa5fa 100644
  
  	if (full_barrier)
  	{
-@@ -6877,11 +7754,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6877,11 +7763,20 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
  
  		GL_PUSH("Split the draw");
@@ -10745,7 +10800,7 @@ index f9aab2a..d4aa5fa 100644
  
  			const u32 count = config.drawlist->at(n) * indices_per_prim;
  			Draw(config, p, count);
-@@ -6893,8 +7779,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
+@@ -6893,8 +7788,12 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
  
  	if (one_barrier)
  	{
@@ -21798,7 +21853,7 @@ index ea33fa9..ff4007d 100644
  			if (m_cfc2_pc != apc)
  				DevCon.WriteLn("CTC2 at %08X paired with CFC2 %08X", apc, m_cfc2_pc);
 diff --git a/pcsx2/x86/ix86-32/iR5900.cpp b/pcsx2/x86/ix86-32/iR5900.cpp
-index 026197c..1df715d 100644
+index 026197c..983aa85 100644
 --- a/pcsx2/x86/ix86-32/iR5900.cpp
 +++ b/pcsx2/x86/ix86-32/iR5900.cpp
 @@ -18,6 +18,9 @@
@@ -21829,7 +21884,23 @@ index 026197c..1df715d 100644
  
  #define PC_GETBLOCK(x) PC_GETBLOCK_(x, recLUT)
  
-@@ -638,10 +643,36 @@ static void recReserve()
+@@ -92,6 +97,15 @@ static BASEBLOCKEX* s_pCurBlockEx = nullptr;
+ u32 s_nEndBlock = 0; // what pc the current block ends
+ u32 s_branchTo;
+ static bool s_nBlockFF;
++#ifdef __PROSPERO__
++// Crux2 ([EmuCore/Speedhacks] PS5WaitLoopSpan, off by default; with WaitLoop): a wait loop across two blocks, a
++// conditional branch out of the loop (its own block) followed by loads that branch straight back to it, is
++// skipped to the next event like a one-block wait loop. s_ps5_spin_next: the not-taken address of the block being
++// compiled when it is such a loop's exit test (0: not one).
++static bool s_ps5_wait_loop_span = false;
++static u32 s_ps5_spin_next = 0;
++static u32 s_ps5_spin_logged = 0;
++#endif
+ 
+ // save states for branches
+ GPR_reg64 s_saveConstRegs[32];
+@@ -638,10 +652,38 @@ static void recReserve()
  alignas(16) static u16 manual_page[Ps2MemSize::TotalRam >> 12];
  alignas(16) static u8 manual_counter[Ps2MemSize::TotalRam >> 12];
  
@@ -21860,13 +21931,15 @@ index 026197c..1df715d 100644
  {
  	Console.WriteLn(Color_StrongBlack, "EE/iR5900 Recompiler Reset");
 +#ifdef __PROSPERO__
++	s_ps5_wait_loop_span = Host::GetBoolSettingValue("EmuCore/Speedhacks", "PS5WaitLoopSpan", false);
++	s_ps5_spin_logged = 0;
 +	// Memory may hold anything now (a state loaded, a reset) and no page is watched any more.
 +	PS5Native::Reset();
 +#endif
  
  	if (CHECK_EXTRAMEM != extraRam)
  	{
-@@ -655,7 +686,28 @@ static void recResetRaw()
+@@ -655,7 +697,28 @@ static void recResetRaw()
  	xSetPtr(SysMemory::GetEERec());
  	_DynGen_Dispatchers();
  	vtlb_DynGenDispatchers();
@@ -21895,7 +21968,7 @@ index 026197c..1df715d 100644
  
  	ClearRecLUT(recLutReserve_RAM.data(),
  		Ps2MemSize::ExposedRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2);
-@@ -674,7 +726,6 @@ static void recResetRaw()
+@@ -674,7 +737,6 @@ static void recResetRaw()
  	vtlb_ClearLoadStoreInfo();
  
  	g_branch = 0;
@@ -21903,7 +21976,7 @@ index 026197c..1df715d 100644
  
  	memset(manual_page, 0, sizeof(manual_page));
  	memset(manual_counter, 0, sizeof(manual_counter));
-@@ -807,6 +858,10 @@ void R5900::Dynarec::OpcodeImpl::recBREAK()
+@@ -807,6 +869,10 @@ void R5900::Dynarec::OpcodeImpl::recBREAK()
  // Size is in dwords (4 bytes)
  void recClear(u32 addr, u32 size)
  {
@@ -21914,7 +21987,7 @@ index 026197c..1df715d 100644
  	if ((addr) >= maxrecmem || !(recLUT[(addr) >> 16] + (addr & ~0xFFFFUL)))
  		return;
  	addr = HWADDR(addr);
-@@ -1317,11 +1372,6 @@ static u32 scaleblockcycles()
+@@ -1317,11 +1383,6 @@ static u32 scaleblockcycles()
  
  #if 0 // Enable this to get some runtime statistics about the scaling result in practice
  	static u32 scaled_overall = 0, unscaled_overall = 0;
@@ -21926,7 +21999,7 @@ index 026197c..1df715d 100644
  	u32 unscaled = DEFAULT_SCALED_BLOCKS();
  	if (!unscaled) unscaled = 1;
  
-@@ -1341,11 +1391,6 @@ u32 scaleblockcycles_clear()
+@@ -1341,11 +1402,6 @@ u32 scaleblockcycles_clear()
  
  #if 0 // Enable this to get some runtime statistics about the scaling result in practice
  	static u32 scaled_overall = 0, unscaled_overall = 0;
@@ -21938,7 +22011,19 @@ index 026197c..1df715d 100644
  	u32 unscaled = DEFAULT_SCALED_BLOCKS();
  	if (!unscaled) unscaled = 1;
  
-@@ -2023,6 +2068,9 @@ static void PreBlockCheck(u32 blockpc)
+@@ -1388,7 +1444,11 @@ static void iBranchTest(u32 newpc)
+ 	//    cpuRegs.cycle += blockcycles;
+ 	//    if ( cpuRegs.cycle > g_nextEventCycle ) { DoEvents(); }
+ 
++#ifdef __PROSPERO__
++	if (EmuConfig.Speedhacks.WaitLoop && ((s_nBlockFF && newpc == s_branchTo) || (s_ps5_spin_next != 0 && newpc == s_ps5_spin_next)))
++#else
+ 	if (EmuConfig.Speedhacks.WaitLoop && s_nBlockFF && newpc == s_branchTo)
++#endif
+ 	{
+ 		xMOV(rax, ptr64[&cpuRegs.nextEventCycle]);
+ 		xADD(ptr64[&cpuRegs.cycle], scaleblockcycles());
+@@ -2023,6 +2083,9 @@ static void PreBlockCheck(u32 blockpc)
  void dyna_block_discard(u32 start, u32 sz)
  {
  	eeRecPerfLog.Write(Color_StrongGray, "Clearing Manual Block @ 0x%08X  [size=%d]", start, sz * 4);
@@ -21948,7 +22033,7 @@ index 026197c..1df715d 100644
  	recClear(start, sz);
  }
  
-@@ -2031,6 +2079,9 @@ void dyna_block_discard(u32 start, u32 sz)
+@@ -2031,6 +2094,9 @@ void dyna_block_discard(u32 start, u32 sz)
  // and the block is re-assigned for write protection.
  void dyna_page_reset(u32 start, u32 sz)
  {
@@ -21958,7 +22043,7 @@ index 026197c..1df715d 100644
  	recClear(start & ~0xfffUL, 0x400);
  	manual_counter[start >> 12]++;
  	mmap_MarkCountedRamPage(start);
-@@ -2189,8 +2240,79 @@ static bool recSkipTimeoutLoop(s32 reg, bool is_timeout_loop)
+@@ -2189,8 +2255,129 @@ static bool recSkipTimeoutLoop(s32 reg, bool is_timeout_loop)
  	return true;
  }
  
@@ -22030,6 +22115,56 @@ index 026197c..1df715d 100644
 +}
 +#endif
 +
++#ifdef __PROSPERO__
++// Crux2: whether the block at pc is the exit test of a wait loop across two blocks: a conditional branch (BEQ, BNE,
++// BEQL, BNEL) out of the loop, then only loads and nops that branch straight back to pc (B pc, J pc). Every
++// iteration then reads memory and tests it, nothing else: as in the one-block case (recRecompile's s_nBlockFF), the
++// loop can't end before something else (an event: an interrupt, a DMA) changes memory, so the time it would spin is
++// skipped to the next event, on the not-taken side of the test only (the test failed: the loop goes on).
++static bool PS5IsSpinExit(u32 pc)
++{
++	const u32* const words = reinterpret_cast<const u32*>(PSM(pc));
++	if (!words)
++		return false;
++	const auto is_load = [](u32 code) {
++		const u32 op = code >> 26;
++		return (op & 070) == 040 || (op & 076) == 032 || op == 067; // LB..LWU, LDL/LDR, LD
++	};
++	const u32 test = words[0];
++	const u32 test_op = test >> 26;
++	if (test_op != 4 && test_op != 5 && test_op != 20 && test_op != 21)
++		return false;
++	// A BEQ/BNE's delay slot runs on every iteration: a load or a nop only.
++	if ((test_op == 4 || test_op == 5) && words[1] != 0 && !is_load(words[1]))
++		return false;
++	constexpr int MAX_BODY = 8;
++	for (int n = 2; n < 2 + MAX_BODY; n++)
++	{
++		const u32* const w = reinterpret_cast<const u32*>(PSM(pc + n * 4));
++		if (!w)
++			return false;
++		const u32 code = *w;
++		const u32 op = code >> 26;
++		const u32 here = pc + n * 4;
++		const bool back_b = (op == 4 && ((code >> 21) & 31) == 0 && ((code >> 16) & 31) == 0 &&
++							 here + 4 + static_cast<u32>(static_cast<s32>(static_cast<s16>(code & 0xffff)) * 4) == pc);
++		const bool back_j = (op == 2 && (((code & 0x03ffffff) << 2) | ((here + 4) & 0xf0000000)) == pc);
++		if (back_b || back_j)
++		{
++			const u32* const delay = reinterpret_cast<const u32*>(PSM(here + 4));
++			if (!delay || (*delay != 0 && !is_load(*delay)))
++				return false;
++			// The test's target is out of the loop.
++			const u32 target = pc + 4 + static_cast<u32>(static_cast<s32>(static_cast<s16>(test & 0xffff)) * 4);
++			return target < pc || target > here + 4;
++		}
++		if (code != 0 && !is_load(code))
++			return false;
++	}
++	return false;
++}
++#endif
++
  static void recRecompile(const u32 startpc)
  {
 +#ifdef __PROSPERO__
@@ -22038,7 +22173,7 @@ index 026197c..1df715d 100644
  	u32 i = 0;
  	u32 willbranch3 = 0;
  
-@@ -2316,6 +2438,13 @@ static void recRecompile(const u32 startpc)
+@@ -2316,6 +2503,13 @@ static void recRecompile(const u32 startpc)
  	const int n1 = isBreakpointNeeded(i);
  	const int n2 = isMemcheckNeeded(i);
  	const int n = std::max<int>(n1, n2);
@@ -22052,6 +22187,26 @@ index 026197c..1df715d 100644
  	if (n != 0)
  	{
  		s_nEndBlock = i + n * 4;
+@@ -2551,6 +2745,19 @@ StartRecomp:
+ 		is_timeout_loop = false;
+ 	}
+ 
++#ifdef __PROSPERO__
++	s_ps5_spin_next = 0;
++	if (s_ps5_wait_loop_span && EmuConfig.Speedhacks.WaitLoop && !s_nBlockFF && s_nEndBlock == startpc + 8 && PS5IsSpinExit(startpc))
++	{
++		s_ps5_spin_next = startpc + 8;
++		if (s_ps5_spin_logged < 8)
++		{
++			s_ps5_spin_logged++;
++			Console.WriteLn("EE: a wait loop across two blocks at %08x: skipped to the next event (PS5WaitLoopSpan)", startpc);
++		}
++	}
++#endif
++
+ 	// rec info //
+ 	bool has_cop2_instructions = false;
+ 	{
 diff --git a/pcsx2/x86/microVU.cpp b/pcsx2/x86/microVU.cpp
 index 0f628f7..7d92fcd 100644
 --- a/pcsx2/x86/microVU.cpp

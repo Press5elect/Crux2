@@ -97,6 +97,9 @@
 #include "fmt/format.h"
 
 #include <chrono>
+#ifdef __PROSPERO__
+#include <ps5platform/heap.h>
+#endif
 #include <cstdlib>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -5015,6 +5018,9 @@ public:
 	// written when the menus close
 
 	static double NowSeconds() { return Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue()); }
+#ifdef __PROSPERO__
+	double m_heap_trimmed = 0.0;
+#endif
 
 	// Once a frame (frame()).
 	void SharesAndWritesFrame()
@@ -5022,6 +5028,16 @@ public:
 		const VMState vm = VMManager::GetState();
 		// The boot log's watch: 15 s without a frame while a game runs writes a log kept in memory.
 		ps5px_log_frame(vm == VMState::Running ? 1 : 0);
+		// Every 10 s, what the title heap let go goes back to the direct memory it shares with the graphics
+		// device (ps5platform/heap.h asks for this: a free gives back only past 32 MiB at an arena's top).
+		// Without it, a game's freed decoded texture replacements stayed the heap's, and the device ran out.
+#ifdef __PROSPERO__
+		if (const double now = NowSeconds(); now - m_heap_trimmed >= 10.0)
+		{
+			m_heap_trimmed = now;
+			ps5_heap_trim();
+		}
+#endif
 		// The settings: kept while the settings or the quick menu are open, written as they close.
 		const bool menus = bp::menusOpen();
 		if (menus != m_menus_open)

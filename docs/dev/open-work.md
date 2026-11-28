@@ -325,7 +325,17 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   `GSDevice::FetchSurface`), or until the targets are under 6 GiB. The renderer's last channel-shuffle
   target is kept. Boot log: `texture cache: N targets ... freed`. To check on the console: the same game at
   8x with it on: no `Memory allocation failure` lines, and the picture of scene changes unchanged.
-- Still open: why the memory is not given back after the game (a leak, or the shared 512 MiB target
+- B5.8's log (the same game at 8x with a texture pack, the setting on): no target was freed: the bursts are
+  64-138 young targets (`ResizeTexture` growing them to 5120x3584), under the 6 GiB budget. What filled
+  memory beside them: the texture pack's replacements (decoded copies in the title heap, up to 2 GiB, and
+  their GPU textures in the hash cache, which has no memory limit), and the title heap never giving back
+  what it freed: Crux2 did not call `ps5_heap_trim()` (ps5platform/heap.h asks a title to, every ~10 s).
+  Now: every 10 s (bp_pcsx2.cpp), before the `memory after the game` line (which now gives the heap's
+  mapped / in use / peak MiB), and in `GSDeviceVK::CreateSurface` before its retry. With the setting on, a
+  failed allocation also frees the hash cache's unreferenced entries (replacements among them).
+- Suspected, not proven: small render targets grown to the depth buffer's size ("RT and DS sizes need to
+  match", GSRendererHW.cpp ~5195) make the 64-138 full-size targets.
+- Was open: why the memory is not given back after the game (a leak, or the shared 512 MiB target
   blocks fragmenting direct memory).
 
 ## VU objects on cache lines of their own (2026-11-28): built, to measure on a console
@@ -337,6 +347,19 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   `0x823b600`). Now `alignas(__cachelinesize)` (microVU.h, microVU.cpp): the line is no longer shared.
   To measure on the console: an EE-heavy game with MTVU on, `profile all`, the emulation thread's share
   of `BaseVUmicroCPU::ExecuteBlock` and its speed, against B5.7.
+
+## Wait loops across two blocks (2026-11-28): built, untested on a console
+
+- The owner's `profile all` run of SLUS-21613 (B5.8): in the busy windows, 6.7% of the emulation thread's
+  samples were two guest blocks, 003710F4 (`beql v0,v1,out` / `lw v0,0x24(s0)`) and 003710FC (`lw
+  v0,0x2c(s0)`, `b 003710F4`): a spin on a word in memory. WaitLoop only fast-forwards a block that
+  branches to its own start (`s_branchTo == startpc`); this loop is two blocks.
+- `[EmuCore/Speedhacks] PS5WaitLoopSpan` (off by default, needs WaitLoop): `PS5IsSpinExit` (iR5900.cpp)
+  recognises a block that is only a BEQ/BNE/BEQL/BNEL out of the loop, followed by at most 8 loads/nops
+  and a B/J back to it (BEQ/BNE: its delay slot a load or a nop too); that block's not-taken side then
+  takes iBranchTest's wait-loop path (cycles to the next event). The first 8 found are logged to emulog
+  (`EE: a wait loop across two blocks at ...`). To check on the console: the same game with it on, the
+  emulation thread's share of those blocks and its EE %, and that it plays the same.
 
 ## Known problems
 

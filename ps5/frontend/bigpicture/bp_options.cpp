@@ -795,7 +795,7 @@ Page graphicsPage(int layer, bool forGame)
 		GS, "PS5AutoQuality", true)));
 	// Crux2: GSTextureCache::PS5FreeStaleTargets.
 	rows.push_back(hwAny(toggle("Free Unused Targets When Memory Is Short",
-		"At very high resolutions a heavy game can fill the console's graphics memory, and draws then go without their textures. Frees render targets that haven't been drawn to for two frames and whose picture is kept elsewhere, as is done after 60 frames anyway, when that happens or when targets hold more than 6 GB. The resolution stays as you chose.",
+		"At very high resolutions, or with a texture pack, a heavy game can fill the console's graphics memory, and draws then go without their textures. Frees render targets that haven't been drawn to for two frames and whose picture is kept elsewhere, as is done after 60 frames anyway, when that happens or when targets hold more than 6 GB; when it happens, also the cached textures no draw uses (replacements are loaded again when needed). The resolution stays as you chose.",
 		GS, "PS5FreeStaleTargets", false, ADV)));
 
 	// ---- Display
@@ -1273,6 +1273,10 @@ Page advancedPage(int layer)
 	rows.push_back(toggle("Enable cache (slow)", "Enables emulation of the EE's hardware cache. Interpreter only, provided for diagnostics.", REC, "EnableEECache", false, f));
 	rows.push_back(toggle("INTC spin detection", "Huge speedup for some games, with almost no compatibility side effects.", SPEED, "IntcStat", true, f));
 	rows.push_back(toggle("Wait loop detection", "Moderate speedup for some games, with no known side effects.", SPEED, "WaitLoop", true, f));
+	// Crux2: iR5900.cpp PS5IsSpinExit (with WaitLoop).
+	rows.push_back(when(toggle("Wait Loop Detection Across Two Blocks",
+		"Also skips wait loops the game splits in two: a test of a value in memory, then a read of it that jumps back to the test. Time spent spinning goes to the next event at once, as wait loop detection does for the one-block kind. Not yet tested on a console: a game that hangs or misbehaves with it on needs it off.",
+		SPEED, "PS5WaitLoopSpan", false, f | Option::NextStart), SPEED, "WaitLoop", true));
 	rows.push_back(toggle("Enable fast memory access", "Uses backpatching to avoid register flushing on every memory access.", REC, "EnableFastmem", true, f));
 	rows.push_back(toggle("Pause on TLB miss", "Pauses the virtual machine when a TLB miss occurs, instead of ignoring it and continuing.", REC, "PauseOnTLBMiss", false, f));
 	rows.push_back(toggle("IOP Stores Inline", "The IOP recompiler writes stores to IOP memory itself instead of calling the memory handlers. "

@@ -70,6 +70,7 @@
 #include "common/FileSystem.h"
 #include "common/HostSys.h"
 #include "common/PS5Counters.h"
+#include <ps5platform/heap.h>
 #include <ps5platform/kernel.h>
 #include "common/Path.h"
 #include "common/ProgressCallback.h"
@@ -1446,12 +1447,19 @@ namespace
 	/// after another should find the same each time (a game that keeps something takes it from the next).
 	void LogMemory(const char* when)
 	{
+		// What the title heap let go goes back to the pool first (ps5platform/heap.h: a free gives back only
+		// past 32 MiB at an arena's top): a game's decoded texture replacements, its caches.
+		ps5_heap_trim();
 		size_t flexible = 0;
 		sceKernelAvailableFlexibleMemorySize(&flexible);
+		struct ps5_heap_stats heap = {};
+		ps5_heap_stats(&heap);
 		ps5px_log("memory %s: %llu MiB of direct memory in its largest free run, %zu MiB of flexible memory free; the graphics "
-				  "device's texture pool %llu MiB",
+				  "device's texture pool %llu MiB; the title heap %llu MiB mapped (%llu MiB in use, %llu MiB at most)",
 			when, static_cast<unsigned long long>(GetAvailablePhysicalMemory() >> 20), flexible >> 20,
-			static_cast<unsigned long long>(g_gs_device ? (g_gs_device->GetPoolMemoryUsage() >> 20) : 0));
+			static_cast<unsigned long long>(g_gs_device ? (g_gs_device->GetPoolMemoryUsage() >> 20) : 0),
+			static_cast<unsigned long long>(heap.mapped_bytes >> 20), static_cast<unsigned long long>(heap.in_use_bytes >> 20),
+			static_cast<unsigned long long>(heap.peak_bytes >> 20));
 	}
 } // namespace
 
