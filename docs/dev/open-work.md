@@ -345,6 +345,11 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   code and the title heap at the bottom, which with a texture pack churns all through a game. To check on the
   console: the same game at 8x with the pack and it on: no `Memory allocation failure`, and the `memory after
   the game` line near the start's figure.
+- B5.11's log settled it: at the failure 460 MB of the pool was free, VMA held 5.1 GB (targets 3.3 GB),
+  the heap under 1 GB: ~5 GB were held by none of them. The driver's PS5 winsys keeps a destroyed buffer's
+  memory (a zombie) until the GPU has run what was submitted before it, and reaped zombies only when a later
+  buffer was destroyed: never on allocation or its failure. Mesa patch 0024 reaps before every allocation
+  and, on a failure with zombies left, waits for the GPU (up to 2 s), frees them and retries. Always on.
 - Suspected, not proven: small render targets grown to the depth buffer's size ("RT and DS sizes need to
   match", GSRendererHW.cpp ~5195) make the 64-138 full-size targets.
 - Was open: why the memory is not given back after the game (a leak, or the shared 512 MiB target

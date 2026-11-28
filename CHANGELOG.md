@@ -8,6 +8,10 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Fixed: graphics memory the driver had let go was held until another buffer happened to be freed: a heavy
+  game at 8x that frees and remakes large render targets ran out of graphics memory (draws went without their
+  textures) with gigabytes held this way, and they came back only after the game. Memory the GPU is done with
+  is now freed before more is taken, and, when an allocation fails, waited for and freed first.
 - Added: **Graphics Memory From the Top** (Settings > PlayStation 5, THE CONSOLE; off by default): the
   graphics driver takes its memory from the top of the console's memory, its small pieces apart from its large
   ones, instead of among the title's own: a heavy game at 8x with a texture pack ran out of graphics memory

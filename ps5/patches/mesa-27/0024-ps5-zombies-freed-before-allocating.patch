@@ -1,0 +1,81 @@
+From 15df8f1988adcf1cba2715dc784234c5640462ee Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 28 Nov 2026 21:19:05 +0000
+Subject: [PATCH] radv/ps5: destroyed buffers freed before an allocation, and
+ waited for when it fails
+
+A destroyed buffer's memory is kept (a zombie) until the GPU has run every submission made before
+the destroy, and zombies were freed only when a later buffer was destroyed: never when memory was
+taken, nor when taking it failed. A game at 8x freeing and remaking render targets of 72-93 MB in
+bursts left gigabytes of them held: the title's allocator had let them go (its figures did not
+count them), the emulator emptied its texture pool and waited for the GPU, and the next allocation
+still failed with 460 MB of the pool free; the memory came back only after the game, when other
+buffers happened to be destroyed.
+
+radv_ps5_buffer_create now frees what the GPU is done with before allocating
+(radv_ps5_zombies_reap), and when the allocation fails with zombies left, waits for the GPU to run
+the submissions they wait for (up to 2 s), frees them (radv_ps5_zombies_drain) and tries once more.
+
+Claude-Session: https://claude.ai/code/session_01EniyCuLSq8bzaeVVgyk9gK
+---
+ src/amd/vulkan/winsys/ps5/radv_ps5_bo.c | 37 +++++++++++++++++++++++--
+ 1 file changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_bo.c b/src/amd/vulkan/winsys/ps5/radv_ps5_bo.c
+index 6c66298d9b2..205fe8143d5 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_bo.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_bo.c
+@@ -60,6 +60,32 @@ radv_ps5_zombies_reap(struct radv_ps5_winsys *ws)
+    simple_mtx_unlock(&radv_ps5_zombie_lock);
+ }
+ 
++/* An allocation failed: the destroyed buffers still kept for the GPU are waited for (the GPU runs every
++ * submission made before their destroy) and freed, so that the allocation can be tried again. Before this,
++ * zombies were freed only when a later buffer was destroyed: a burst of large textures freed and remade
++ * (render targets at 8x, 72-93 MB each) left gigabytes of them held while new ones could not be made, and
++ * the memory came back only after the game, when other buffers happened to be destroyed. True when
++ * something was freed. */
++static bool
++radv_ps5_zombies_drain(struct radv_ps5_winsys *ws)
++{
++   uint64_t newest = 0;
++   simple_mtx_lock(&radv_ps5_zombie_lock);
++   const unsigned count = util_dynarray_num_elements(&radv_ps5_zombies, struct radv_ps5_zombie);
++   for (unsigned i = 0; i < count; i++)
++      newest = MAX2(newest, util_dynarray_element(&radv_ps5_zombies, struct radv_ps5_zombie, i)->seq);
++   simple_mtx_unlock(&radv_ps5_zombie_lock);
++   if (count == 0)
++      return false;
++   if (ws->queue)
++      radv_ps5_queue_wait_seq(ws->queue, newest, os_time_get_absolute_timeout(UINT64_C(2000000000)));
++   radv_ps5_zombies_reap(ws);
++   simple_mtx_lock(&radv_ps5_zombie_lock);
++   const unsigned left = util_dynarray_num_elements(&radv_ps5_zombies, struct radv_ps5_zombie);
++   simple_mtx_unlock(&radv_ps5_zombie_lock);
++   return left < count;
++}
++
+ /* A buffer is one direct-memory allocation, mapped for the CPU and the GPU at
+  * the same address for as long as it lives, so it is always resident, its GPU
+  * address is its CPU address, and mapping it is a view of it (PS5_Vulkan B3). A
+@@ -130,8 +156,15 @@ radv_ps5_buffer_create(struct radeon_winsys *rws, uint64_t size, unsigned alignm
+    struct radv_ps5_bo *const bo = calloc(1, sizeof(*bo));
+    if (!bo)
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+-   if (replayable ? !radv_ps5_memory_alloc_replayable(size, alignment, window32, replay_address, &bo->memory)
+-                  : !radv_ps5_memory_alloc(size, alignment, window32, &bo->memory)) {
++   /* What the GPU is done with is freed before more is taken, and, short of memory, what it is still
++    * using is waited for and freed before giving up (radv_ps5_zombies_drain). */
++   radv_ps5_zombies_reap(ws);
++   bool allocated = replayable ? radv_ps5_memory_alloc_replayable(size, alignment, window32, replay_address, &bo->memory)
++                               : radv_ps5_memory_alloc(size, alignment, window32, &bo->memory);
++   if (!allocated && radv_ps5_zombies_drain(ws))
++      allocated = replayable ? radv_ps5_memory_alloc_replayable(size, alignment, window32, replay_address, &bo->memory)
++                             : radv_ps5_memory_alloc(size, alignment, window32, &bo->memory);
++   if (!allocated) {
+       free(bo);
+       return replay_address ? VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS : VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+-- 
+2.43.0
+
