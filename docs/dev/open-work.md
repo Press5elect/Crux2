@@ -328,6 +328,16 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
 - Still open: why the memory is not given back after the game (a leak, or the shared 512 MiB target
   blocks fragmenting direct memory).
 
+## VU objects on cache lines of their own (2026-11-28): built, to measure on a console
+
+- `perf` on a PC build at the pin (the Quake II homebrew's save state, MTVU on): 3-9% of the EE thread's
+  work in `BaseVUmicroCPU::ExecuteBlock`, all on the load of `CpuMicroVU1->m_Idx`. `CpuMicroVU0/1` sat on
+  the same 64-byte line as the end of `microVU1` (`cycles`, `totalCycles`, `p`, `q`), which the VU1 code
+  on the MTVU thread updates in every block; the PS5 build had the same layout (`0x823b620`/`630`, line
+  `0x823b600`). Now `alignas(__cachelinesize)` (microVU.h, microVU.cpp): the line is no longer shared.
+  To measure on the console: an EE-heavy game with MTVU on, `profile all`, the emulation thread's share
+  of `BaseVUmicroCPU::ExecuteBlock` and its speed, against B5.7.
+
 ## Known problems
 
 - PCSX2 `f17c4c8` shows **Depth Feedback Mode** (`EmuCore/GS` `DepthFeedbackMode`: None, Auto, Depth,

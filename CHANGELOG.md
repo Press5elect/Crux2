@@ -8,6 +8,9 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Changed: the VU1 recompiler's state and the objects the emulation thread checks in every event test
+  are on cache lines of their own: they shared one with the counter the VU thread updates in every VU1
+  block, so the emulation thread waited for that line again and again.
 - Added: **Free Unused Targets When Memory Is Short** (Settings > Picture > Graphics, ADVANCED; off by
   default): at very high resolutions a heavy game could fill the console's graphics memory, and draws then
   went without their textures. Render targets not drawn to for two frames, whose picture is kept elsewhere,

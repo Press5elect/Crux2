@@ -22053,7 +22053,7 @@ index 026197c..1df715d 100644
  	{
  		s_nEndBlock = i + n * 4;
 diff --git a/pcsx2/x86/microVU.cpp b/pcsx2/x86/microVU.cpp
-index 0f628f7..c801f81 100644
+index 0f628f7..7d92fcd 100644
 --- a/pcsx2/x86/microVU.cpp
 +++ b/pcsx2/x86/microVU.cpp
 @@ -3,9 +3,14 @@
@@ -22217,7 +22217,22 @@ index 0f628f7..c801f81 100644
  		list->push_front(mVU.prog.cur);
  		//mVUprintUniqueRatio(mVU);
  		return entryPoint;
-@@ -331,7 +418,7 @@ void recMicroVU1::Shutdown()
+@@ -302,8 +389,14 @@ _mVUt __fi void* mVUsearchProg(u32 startPC, uptr pState)
+ // recMicroVU0 / recMicroVU1
+ //------------------------------------------------------------------
+ 
++#ifdef __PROSPERO__
++// Crux2: apart from microVU1's fields the VU thread writes (microVU.h).
++alignas(__cachelinesize) recMicroVU0 CpuMicroVU0;
++alignas(__cachelinesize) recMicroVU1 CpuMicroVU1;
++#else
+ recMicroVU0 CpuMicroVU0;
+ recMicroVU1 CpuMicroVU1;
++#endif
+ 
+ recMicroVU0::recMicroVU0() { m_Idx = 0; IsInterpreter = false; }
+ recMicroVU1::recMicroVU1() { m_Idx = 1; IsInterpreter = false; }
+@@ -331,7 +424,7 @@ void recMicroVU1::Shutdown()
  
  void recMicroVU0::Reset()
  {
@@ -22226,7 +22241,7 @@ index 0f628f7..c801f81 100644
  }
  
  void recMicroVU0::Step()
-@@ -342,7 +429,7 @@ void recMicroVU1::Reset()
+@@ -342,7 +435,7 @@ void recMicroVU1::Reset()
  {
  	vu1Thread.WaitVU();
  	vu1Thread.Get_MTVUChanges();
@@ -22235,7 +22250,7 @@ index 0f628f7..c801f81 100644
  }
  
  void recMicroVU0::SetStartPC(u32 startPC)
-@@ -418,68 +505,3 @@ bool SaveStateBase::vuJITFreeze()
+@@ -418,68 +511,3 @@ bool SaveStateBase::vuJITFreeze()
  	Freeze(microVU1.prog.lpState);
  	return IsOkay();
  }
@@ -22305,7 +22320,7 @@ index 0f628f7..c801f81 100644
 -
 -#endif
 diff --git a/pcsx2/x86/microVU.h b/pcsx2/x86/microVU.h
-index 0950a0d..249cee6 100644
+index 0950a0d..4ec7abe 100644
 --- a/pcsx2/x86/microVU.h
 +++ b/pcsx2/x86/microVU.h
 @@ -20,6 +20,9 @@
@@ -22404,7 +22419,7 @@ index 0950a0d..249cee6 100644
  	microBlockManager()
  	{
  		qListI = fListI = 0;
-@@ -249,28 +311,6 @@ public:
+@@ -249,41 +311,28 @@ public:
  		}
  		return nullptr;
  	}
@@ -22433,7 +22448,18 @@ index 0950a0d..249cee6 100644
  };
  
  // microVU rec structs
-@@ -279,11 +319,10 @@ alignas(16) microVU microVU1;
++#ifdef __PROSPERO__
++// Crux2: each on cache lines of its own. The VU1 code running on the VU thread (MTVU) updates microVU1's last
++// fields (cycles) in every block, and CpuMicroVU0/CpuMicroVU1 (microVU.cpp), which the EE thread reads twice in
++// every event test (BaseVUmicroCPU::ExecuteBlock), were laid out on that same line: a miss on the EE thread for
++// each read (perf on a PC at the pin: 3-9% of the EE thread's work on the load of CpuMicroVU1's m_Idx; the PS5
++// build had the same layout). Only where the data sits changes.
++alignas(__cachelinesize) microVU microVU0;
++alignas(__cachelinesize) microVU microVU1;
++#else
+ alignas(16) microVU microVU0;
+ alignas(16) microVU microVU1;
++#endif
  
  // Debug Helper
  int mVUdebugNow = 0;
@@ -22446,7 +22472,7 @@ index 0950a0d..249cee6 100644
  extern void* mVUblockFetch(microVU& mVU, u32 startPC, uptr pState);
  _mVUt extern void* mVUcompileJIT(u32 startPC, uptr ptr);
  
-@@ -299,7 +338,6 @@ extern void mVUdeleteProg(microVU& mVU, microProgram*& prog);
+@@ -299,7 +348,6 @@ extern void mVUdeleteProg(microVU& mVU, microProgram*& prog);
  _mVUt extern void* mVUsearchProg(u32 startPC, uptr pState);
  extern void* mVUexecuteVU0(u32 startPC, u32 cycles);
  extern void* mVUexecuteVU1(u32 startPC, u32 cycles);
