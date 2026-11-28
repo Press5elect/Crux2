@@ -318,6 +318,13 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   largest free run of direct memory was 2.5 GB (3.9 GB in an earlier session), against about 9.3 GB at
   its start; after other games it comes back. Not known: used or fragmented (the driver's breadcrumb
   doesn't give the size asked for, and the boot log gives only the largest free run).
+- `[EmuCore/GS] PS5FreeStaleTargets` (off by default; the resolution is not touched): after
+  `IncAge`, targets with age 2 or more that the 60-frame rule would free without loss (another target
+  overlaps them, or their whole valid area is dirty) are freed, oldest first, their sources first, and the
+  pool emptied: all of them after a failed allocation (`PS5NoteTextureMemoryShort`, from
+  `GSDevice::FetchSurface`), or until the targets are under 6 GiB. The renderer's last channel-shuffle
+  target is kept. Boot log: `texture cache: N targets ... freed`. To check on the console: the same game at
+  8x with it on: no `Memory allocation failure` lines, and the picture of scene changes unchanged.
 - Still open: why the memory is not given back after the game (a leak, or the shared 512 MiB target
   blocks fragmenting direct memory).
 

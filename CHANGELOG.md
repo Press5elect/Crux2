@@ -8,6 +8,10 @@ not shown). The full notes of each published release are in
 
 ## Unreleased
 
+- Added: **Free Unused Targets When Memory Is Short** (Settings > Picture > Graphics, ADVANCED; off by
+  default): at very high resolutions a heavy game could fill the console's graphics memory, and draws then
+  went without their textures. Render targets not drawn to for two frames, whose picture is kept elsewhere,
+  are freed when that happens or when targets hold more than 6 GB. The resolution stays as you chose.
 - Fixed: a `profile` test run with GS Thread Split on samples the drawing thread too (it was left out).
 - Added: **Fast Writes to Console Storage** (Settings > PlayStation 5, off by default): large files
   written to the console's storage (a texture pack moved or downloaded there, a disc image) are written

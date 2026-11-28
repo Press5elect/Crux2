@@ -793,6 +793,10 @@ Page graphicsPage(int layer, bool forGame)
 		"Lowers the internal resolution when the game can't hold full speed, and raises it again when there's room. "
 			"Doesn't help when the CPU is the bottleneck.",
 		GS, "PS5AutoQuality", true)));
+	// Crux2: GSTextureCache::PS5FreeStaleTargets.
+	rows.push_back(hwAny(toggle("Free Unused Targets When Memory Is Short",
+		"At very high resolutions a heavy game can fill the console's graphics memory, and draws then go without their textures. Frees render targets that haven't been drawn to for two frames and whose picture is kept elsewhere, as is done after 60 frames anyway, when that happens or when targets hold more than 6 GB. The resolution stays as you chose.",
+		GS, "PS5FreeStaleTargets", false, ADV)));
 
 	// ---- Display
 	rows.push_back(heading("DISPLAY"));

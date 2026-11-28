@@ -535,7 +535,10 @@ and gateway cannot be set (the Sockets adapter answers its DHCP itself).
 - **Graphics:** the Vulkan renderer at 6x the PlayStation 2's resolution by default, with
   Upscaling and sharpening at FSR 1 from 4x: while FSR is chosen, the game is drawn at 4x and FSR
   enlarges it to the output, so the 6x takes effect when FSR is switched off. Automatic quality
-  lowers the resolution by itself where the graphics chip falls short. The software renderer and
+  lowers the resolution by itself where the graphics chip falls short. At 8x a heavy game can fill
+  the console's graphics memory (the boot log says `Memory allocation failure`, and some effects
+  go missing): **Free Unused Targets When Memory Is Short** (Graphics, ADVANCED) frees what the
+  game no longer draws to, keeping your resolution. The software renderer and
   **paraLLEl-GS** (the whole GS drawn on the graphics chip in compute shaders, super-sampled 1 to
   16 times a pixel) are the other choices of Settings > Picture > Graphics > **Graphics API**.
 - **Memory cards are held in memory.** A game reads and writes a copy of the card, and what

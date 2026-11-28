@@ -6748,7 +6748,7 @@ index 70f171d..85b0312 100644
  #endif
  };
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
-index b3c8d65..4d6585f 100644
+index b3c8d65..e9a20e9 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
 @@ -22,6 +22,18 @@
@@ -6791,7 +6791,18 @@ index b3c8d65..4d6585f 100644
  	const GSVector2i size(std::clamp(width, 1, static_cast<int>(g_gs_device->GetMaxTextureSize())),
  		std::clamp(height, 1, static_cast<int>(g_gs_device->GetMaxTextureSize())));
  	FastList<GSTexture*>& pool = m_pool[!GSTexture::IsTexture(usage)];
-@@ -842,33 +859,39 @@ void GSDevice::PurgePool()
+@@ -734,6 +751,10 @@ GSTexture* GSDevice::FetchSurface(GSTexture::Usage usage, int width, int height,
+ 				if (!t)
+ 				{
+ 					ERROR_LOG("GS: Memory allocation failure for {}x{} texture after purging pool.", size.x, size.y);
++#ifdef __PROSPERO__
++					// Crux2 ([EmuCore/GS] PS5FreeStaleTargets): the texture cache frees what it can at the next frame.
++					PS5NoteTextureMemoryShort();
++#endif
+ 					return nullptr;
+ 				}
+ 			}
+@@ -842,33 +863,39 @@ void GSDevice::PurgePool()
  	m_pool_memory_usage = 0;
  }
  
@@ -6837,7 +6848,7 @@ index b3c8d65..4d6585f 100644
  	return FetchSurface(GSTexture::ShaderWriteTarget, size.x, size.y, 1, format, clear, prefer_reuse);
  }
  
-@@ -877,40 +900,47 @@ GSTexture::Usage GSDevice::GetDepthStencilUsage() const
+@@ -877,40 +904,47 @@ GSTexture::Usage GSDevice::GetDepthStencilUsage() const
  	return m_features.depth_feedback ? GSTexture::FeedbackDepth : GSTexture::DepthStencil;
  }
  
@@ -6892,7 +6903,7 @@ index b3c8d65..4d6585f 100644
  	return FetchSurface(tex->GetUsage(), w, h, 1, tex->GetFormat(), clear, prefer_reuse);
  }
  
-@@ -1012,6 +1042,11 @@ void GSDevice::ClearCurrent()
+@@ -1012,6 +1046,11 @@ void GSDevice::ClearCurrent()
  	delete m_target_tmp;
  	delete m_cas;
  	delete m_blur;
@@ -6904,7 +6915,7 @@ index b3c8d65..4d6585f 100644
  
  	m_merge = nullptr;
  	m_weavebob = nullptr;
-@@ -1022,6 +1057,15 @@ void GSDevice::ClearCurrent()
+@@ -1022,6 +1061,15 @@ void GSDevice::ClearCurrent()
  	m_blur = nullptr;
  }
  
@@ -6920,7 +6931,7 @@ index b3c8d65..4d6585f 100644
  void GSDevice::Merge(GSTexture* sTex[3], GSVector4* sRect, GSVector4* dRect, const GSVector2i& fs, const GSRegPMODE& PMODE, const GSRegEXTBUF& EXTBUF, u32 c)
  {
  	if (ResizeRenderTarget(&m_merge, fs.x, fs.y, false, false))
-@@ -1431,6 +1475,540 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
+@@ -1431,6 +1479,540 @@ bool GSDevice::GaussianBlur(GSTexture*& tex, GSVector4& src_uv, const GSVector4&
  	return true;
  }
  
@@ -7462,7 +7473,7 @@ index b3c8d65..4d6585f 100644
  {
  	return enable && (((colormask.key & 7u) && (src_factor != GSDevice::CONST_ONE || dst_factor != GSDevice::CONST_ZERO)) ||
 diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
-index 6f9c805..aa0b906 100644
+index 6f9c805..616ddab 100644
 --- a/pcsx2/GS/Renderers/Common/GSDevice.h
 +++ b/pcsx2/GS/Renderers/Common/GSDevice.h
 @@ -1477,6 +1477,14 @@ protected:
@@ -7661,6 +7672,15 @@ index 6f9c805..aa0b906 100644
  	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
  
  	void AgePool();
+@@ -1764,3 +1925,8 @@ template <>
+ struct std::hash<GSHWDrawConfig::PSSelector> : public GSHWDrawConfig::PSSelectorHash {};
+ 
+ extern std::unique_ptr<GSDevice> g_gs_device;
++
++#ifdef __PROSPERO__
++/// Crux2: a texture could not be made even after the pool was emptied (GSTextureCache::PS5NoteOutOfMemory).
++void PS5NoteTextureMemoryShort();
++#endif
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 index 35ab6fc..e1f63f9 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
@@ -8362,7 +8382,7 @@ index 1351587..e28aa80 100644
  {
  	GSRenderer::UpdateRenderFixes();
 diff --git a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
-index 6161dc8..05eacaf 100644
+index 6161dc8..d7a38cb 100644
 --- a/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSRendererHW.cpp
 @@ -11,6 +11,9 @@
@@ -8385,7 +8405,7 @@ index 6161dc8..05eacaf 100644
  
  	pxAssert(!g_texture_cache);
  	g_texture_cache = std::make_unique<GSTextureCache>();
-@@ -43,17 +49,50 @@ void GSRendererHW::SetTCOffset()
+@@ -43,17 +49,54 @@ void GSRendererHW::SetTCOffset()
  
  GSRendererHW::~GSRendererHW()
  {
@@ -8425,6 +8445,10 @@ index 6161dc8..05eacaf 100644
 +	m_ps5_reuse_copies = reuse;
 +	ps5px_log("graphics (this game): copies of a target a draw reads %s",
 +		m_ps5_reuse_copies ? "reused while neither it nor its source is written" : "made for every draw (PS5ReuseRTCopies off)");
++	g_texture_cache->m_ps5_free_stale = Host::GetBoolSettingValue("EmuCore/GS", "PS5FreeStaleTargets", false);
++	if (g_texture_cache->m_ps5_free_stale)
++		ps5px_log("graphics (this game): targets not drawn to for two frames freed while graphics memory is short (over %llu MB, or a "
++			"texture could not be made)", static_cast<unsigned long long>(GSTextureCache::PS5_TARGET_BUDGET >> 20));
 +}
 +#endif
 +
@@ -8436,7 +8460,7 @@ index 6161dc8..05eacaf 100644
  	g_texture_cache->RemoveAll(sources, targets, hash_cache);
  }
  
-@@ -84,6 +123,9 @@ void GSRendererHW::Reset(bool hardware_reset)
+@@ -84,6 +127,9 @@ void GSRendererHW::Reset(bool hardware_reset)
  		g_texture_cache->ReadbackAll();
  
  	g_texture_cache->RemoveAll(true, true, true);
@@ -8446,7 +8470,7 @@ index 6161dc8..05eacaf 100644
  
  	GSRenderer::Reset(hardware_reset);
  }
-@@ -97,6 +139,11 @@ void GSRendererHW::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
+@@ -97,6 +143,11 @@ void GSRendererHW::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
  
  void GSRendererHW::VSync(u32 field, bool registers_written, bool idle_frame)
  {
@@ -8458,7 +8482,17 @@ index 6161dc8..05eacaf 100644
  	if (GSConfig.LoadTextureReplacements)
  		GSTextureReplacements::ProcessAsyncLoadedTextures();
  
-@@ -7750,6 +7797,24 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
+@@ -121,6 +172,9 @@ void GSRendererHW::VSync(u32 field, bool registers_written, bool idle_frame)
+ 		}
+ 
+ 		g_texture_cache->IncAge();
++#ifdef __PROSPERO__
++		g_texture_cache->PS5FreeStaleTargets(m_last_rt);
++#endif
+ 	}
+ 	else
+ 	{
+@@ -7750,6 +7804,24 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
  	}
  }
  
@@ -8483,7 +8517,7 @@ index 6161dc8..05eacaf 100644
  void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
  {
  	const GSDevice::FeatureSupport& features = g_gs_device->Features();
-@@ -7806,7 +7871,16 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+@@ -7806,7 +7878,16 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
  
  	// Get the number of barriers that would be used with the current config.
  	u32 barriers = 1; 
@@ -8500,7 +8534,7 @@ index 6161dc8..05eacaf 100644
  	{
  		if (m_drawlist.size() > 0)
  		{
-@@ -7826,6 +7900,22 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
+@@ -7826,6 +7907,22 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
  	// Heuristic: only activate ROV if we save at least one draw call by doing so.
  	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
  
@@ -8523,7 +8557,7 @@ index 6161dc8..05eacaf 100644
  	if (!color_is_rov && !depth_is_rov && !activate)
  	{
  		// Not enough barriers or no feedback to activate, and ROV is not already active.
-@@ -8804,6 +8894,38 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8804,6 +8901,38 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  
  	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
  		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
@@ -8562,7 +8596,7 @@ index 6161dc8..05eacaf 100644
  	const bool clear = src_target->m_texture->IsRenderTarget();
  	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
  	if (!src_copy) [[unlikely]]
-@@ -8814,6 +8936,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8814,6 +8943,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  		return;
  	}
  
@@ -8571,7 +8605,7 @@ index 6161dc8..05eacaf 100644
  	if (m_downscale_source)
  	{
  		// Can't use box filtering on depth (yet), or fractional scales.
-@@ -8855,6 +8979,19 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
+@@ -8855,6 +8986,19 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
  
  		g_gs_device->StretchRectAuto(src_target->m_texture, src_rect, src_copy.get(), dst_rect, Nearest);
  	}
@@ -8591,7 +8625,7 @@ index 6161dc8..05eacaf 100644
  	m_conf.tex = src_copy.get();
  }
  
-@@ -11273,6 +11410,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
+@@ -11273,6 +11417,7 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
  			const GSVector4i copy_rect = config.drawarea.rintersect(src->GetRect());
  			g_gs_device->CopyRect(src, copy, copy_rect - copy_rect.xyxy(), copy_rect.x, copy_rect.y);
  			config.tex = copy;
@@ -8671,18 +8705,19 @@ index 6adcc67..979f3e6 100644
  	std::vector<GSVertexSW> m_sw_vertex_buffer;
  	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-index b9b6870..d362baa 100644
+index b9b6870..57768da 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.cpp
-@@ -17,6 +17,7 @@
+@@ -17,6 +17,8 @@
  
  #include "fmt/format.h"
  
++#include <atomic>
 +#include <bitset>
  #include <cinttypes>
  #include <math.h>
  
-@@ -4828,6 +4829,55 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
+@@ -4828,6 +4830,55 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
  
  // Goal: invalidate data sent to the GPU when the source (GS memory) is modified
  // Called each time you want to write to the GS memory
@@ -8738,7 +8773,7 @@ index b9b6870..d362baa 100644
  void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target)
  {
  	const u32 bp = off.bp();
-@@ -4848,6 +4898,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4848,6 +4899,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  		for (int pgs = 0; pgs < pages; pgs++)
  		{
  			auto& list = m_src.m_map[((bp >> 5) + pgs) & 0x1ff];
@@ -8750,7 +8785,7 @@ index b9b6870..d362baa 100644
  			for (auto i = list.begin(); i != list.end();)
  			{
  				Source* s = *i;
-@@ -4888,6 +4943,10 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4888,6 +4944,10 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  
  	off.loopPages(rect, [this, &rect, bp, bw, psm, &found](u32 page) {
  		auto& list = m_src.m_map[page];
@@ -8761,7 +8796,7 @@ index b9b6870..d362baa 100644
  		for (auto i = list.begin(); i != list.end();)
  		{
  			Source* s = *i;
-@@ -4948,6 +5007,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
+@@ -4948,6 +5008,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
  		}
  	});
  
@@ -8773,7 +8808,87 @@ index b9b6870..d362baa 100644
  	if (!target)
  		return;
  
-@@ -6223,6 +6287,7 @@ void GSTextureCache::IncAge()
+@@ -6220,9 +6285,87 @@ void GSTextureCache::IncAge()
+ 	}
+ }
+ 
++#ifdef __PROSPERO__
++extern "C" void ps5px_log(const char* format, ...);
++
++static std::atomic<bool> s_ps5_out_of_memory{false};
++
++void GSTextureCache::PS5NoteOutOfMemory()
++{
++	s_ps5_out_of_memory.store(true, std::memory_order_release);
++}
++
++void PS5NoteTextureMemoryShort()
++{
++	GSTextureCache::PS5NoteOutOfMemory();
++}
++
++void GSTextureCache::PS5FreeStaleTargets(const Target* keep)
++{
++	const bool short_of_memory = s_ps5_out_of_memory.exchange(false, std::memory_order_acq_rel);
++	if (!m_ps5_free_stale || (!short_of_memory && m_target_memory_usage <= PS5_TARGET_BUDGET))
++		return;
++
++	// The targets IncAge would free at 60 frames, by the same rule (nothing is lost: another target overlaps
++	// them, or what they hold is all to be reloaded from GS memory), once two frames have passed without a draw
++	// to them; the oldest first. Over the budget, until it is met; short of memory, all of them. The sources
++	// made from them go first (a target is never freed under a source). Needs proper testing on the console.
++	static constexpr int min_age = 2;
++	std::vector<std::pair<int, Target*>> stale;
++	for (int type = 0; type < 2; type++)
++	{
++		for (Target* t : m_dst[type])
++		{
++			if (t->m_age < min_age || t == keep)
++				continue;
++			if (FindOverlappingTarget(t) != nullptr ||
++				t->m_dirty.GetTotalRect(t->m_TEX0, GSVector2i(t->m_valid.width(), t->m_valid.height())).rintersect(t->m_valid).eq(t->m_valid))
++			{
++				stale.emplace_back(t->m_age, t);
++			}
++		}
++	}
++	if (stale.empty())
++		return;
++	std::stable_sort(stale.begin(), stale.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
++
++	const u64 before = m_target_memory_usage;
++	u32 freed = 0;
++	for (const auto& [age, t] : stale)
++	{
++		if (!short_of_memory && m_target_memory_usage <= PS5_TARGET_BUDGET)
++			break;
++		InvalidateSourcesFromTarget(t);
++		for (int type = 0; type < 2; type++)
++		{
++			auto& list = m_dst[type];
++			for (auto i = list.begin(); i != list.end(); ++i)
++			{
++				if (*i == t)
++				{
++					list.erase(i);
++					break;
++				}
++			}
++		}
++		delete t;
++		freed++;
++	}
++	if (freed == 0)
++		return;
++
++	// The freed targets' textures went to the device's pool: given back to the driver, not kept.
++	g_gs_device->PurgePool();
++	ps5px_log("texture cache: %u targets not drawn to for %d frames freed (%llu of %llu MB): %s", freed, min_age,
++		static_cast<unsigned long long>((before - m_target_memory_usage) >> 20), static_cast<unsigned long long>(before >> 20),
++		short_of_memory ? "a texture could not be made" : "over the targets' budget");
++}
++#endif
++
  //Fixme: Several issues in here. Not handling depth stencil, pitch conversion doesnt work.
  GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA, const GIFRegCLAMP& CLAMP, Target* dst, int x_offset, int y_offset, const GSVector2i* lod, const GSVector4i* src_range, GSTexture* gpu_clut, SourceRegion region, bool force_temp)
  {
@@ -8781,7 +8896,7 @@ index b9b6870..d362baa 100644
  	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[TEX0.PSM];
  	Source* src = new Source(TEX0, TEXA);
  
-@@ -7826,14 +7891,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
+@@ -7826,14 +7969,35 @@ void GSTextureCache::Source::UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4
  	if (m_target) // Yeah keep dreaming
  		return;
  
@@ -8817,7 +8932,7 @@ index b9b6870..d362baa 100644
  	Update(rect, layer);
  
  	m_TEX0 = old_TEX0;
-@@ -8567,6 +8653,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8567,6 +8731,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  	}
  
  	m_surfaces.clear();
@@ -8827,7 +8942,7 @@ index b9b6870..d362baa 100644
  
  	for (FastList<Source*>& item : m_map)
  	{
-@@ -8577,6 +8666,9 @@ void GSTextureCache::SourceMap::RemoveAll()
+@@ -8577,6 +8744,9 @@ void GSTextureCache::SourceMap::RemoveAll()
  void GSTextureCache::SourceMap::RemoveAt(Source* s, bool delete_source)
  {
  	m_surfaces.erase(s);
@@ -8837,7 +8952,7 @@ index b9b6870..d362baa 100644
  
  	GL_CACHE("TC: Remove Src Texture: 0x%x TBW %u PSM %s",
  		s->m_TEX0.TBP0, s->m_TEX0.TBW, GSUtil::GetPSMName(s->m_TEX0.PSM));
-@@ -8941,6 +9033,7 @@ void GSTextureCache::Palette::InitializeTexture()
+@@ -8941,6 +9111,7 @@ void GSTextureCache::Palette::InitializeTexture()
  {
  	if (!m_tex_palette)
  	{
@@ -8846,7 +8961,7 @@ index b9b6870..d362baa 100644
  		// would be enough to store the CLUT data) because the coordinates that the shader uses for
  		// sampling such texture are always normalized by 255.
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureCache.h b/pcsx2/GS/Renderers/HW/GSTextureCache.h
-index d28b642..45bb09d 100644
+index d28b642..53b88b8 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureCache.h
 +++ b/pcsx2/GS/Renderers/HW/GSTextureCache.h
 @@ -7,6 +7,7 @@
@@ -8893,6 +9008,25 @@ index d28b642..45bb09d 100644
  
  	struct TargetHeightElem
  	{
+@@ -594,6 +611,18 @@ public:
+ 
+ 	void IncAge();
+ 
++#ifdef __PROSPERO__
++	/// Crux2 ([EmuCore/GS] PS5FreeStaleTargets): after the next IncAge (GSRendererHW::VSync), targets not drawn to for two frames
++	/// that the 60-frame rule would free without losing anything (another target overlaps them, or all
++	/// they hold is to be reloaded from GS memory) are freed now, while memory is short: after a texture
++	/// could not be made (any thread), or while the targets hold more than PS5_TARGET_BUDGET.
++	static void PS5NoteOutOfMemory();
++	bool m_ps5_free_stale = false;
++	static constexpr u64 PS5_TARGET_BUDGET = 6ull << 30;
++	/// keep: a target the renderer still holds (its last channel shuffle target).
++	void PS5FreeStaleTargets(const Target* keep);
++#endif
++
+ 	static const char* to_string(int type)
+ 	{
+ 		return (type == DepthStencil) ? "Depth" : "Color";
 diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
 index 77a28df..f216cfe 100644
 --- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
