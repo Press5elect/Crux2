@@ -47,6 +47,7 @@
 #include "MTVU.h"
 #include "GS/Renderers/Common/GSDevice.h"
 #include "GS/Renderers/HW/GSRendererHW.h"
+#include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "GameList.h"
 #include "Host.h"
 #include "Host/AudioStream.h"
@@ -1460,6 +1461,9 @@ namespace
 			static_cast<unsigned long long>(g_gs_device ? (g_gs_device->GetPoolMemoryUsage() >> 20) : 0),
 			static_cast<unsigned long long>(heap.mapped_bytes >> 20), static_cast<unsigned long long>(heap.in_use_bytes >> 20),
 			static_cast<unsigned long long>(heap.peak_bytes >> 20));
+		// And the graphics side's share (GSDeviceVK::PS5LogMemory; on the GS thread, as this is called).
+		if (g_gs_device && g_gs_device->GetRenderAPI() == RenderAPI::Vulkan)
+			static_cast<GSDeviceVK*>(g_gs_device.get())->PS5LogMemory(when);
 	}
 } // namespace
 

@@ -333,6 +333,12 @@ session's `crux2-gpu-bottleneck-investigation-2026-11-22.md`.
   Now: every 10 s (bp_pcsx2.cpp), before the `memory after the game` line (which now gives the heap's
   mapped / in use / peak MiB), and in `GSDeviceVK::CreateSurface` before its retry. With the setting on, a
   failed allocation also frees the hash cache's unreferenced entries (replacements among them).
+- B5.9's log (same game, same settings): the hash cache held 7 MB (replacements 0 MB) when memory ran out,
+  the heap 524 MiB after the game, yet the largest free run after it was 4288 MiB (10315 at its start).
+  So neither the pack's GPU textures nor the heap: the allocator keeping blocks, or direct memory broken
+  into runs. Now logged (`graphics memory ...`: texture cache targets/sources/cached, pool, VMA blocks and
+  allocations, direct memory free in all / runs / largest) at a game's start and end and, at most once a
+  second, when a texture can't be made (GSDeviceVK::PS5LogMemory, ps5px_direct_memory_free in PS5Misc.cpp).
 - Suspected, not proven: small render targets grown to the depth buffer's size ("RT and DS sizes need to
   match", GSRendererHW.cpp ~5195) make the 64-138 full-size targets.
 - Was open: why the memory is not given back after the game (a leak, or the shared 512 MiB target

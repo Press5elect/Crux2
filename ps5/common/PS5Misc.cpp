@@ -12,6 +12,7 @@
 #include "PS5Timing.h"
 
 #include <algorithm>
+#include <iterator>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -47,6 +48,44 @@ u64 GetAvailablePhysicalMemory()
 	if (sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), PS5_KERNEL_DIRECT_ALIGNMENT, &start, &available) != 0)
 		return 0;
 	return available;
+}
+
+// Crux2: all the free runs of the direct pool (the largest run of a range, then the ranges on either side of it):
+// how much is free in all, the largest, and in how many runs. A pool with much free but no large run is broken
+// up; one with little free is used.
+extern "C" void ps5px_direct_memory_free(u64* total, u64* largest, u32* runs)
+{
+	*total = 0;
+	*largest = 0;
+	*runs = 0;
+	const int64_t pool = sceKernelGetDirectMemorySize();
+	if (pool <= 0)
+		return;
+	struct Range
+	{
+		int64_t start, end;
+	};
+	Range stack[256];
+	int depth = 0;
+	stack[depth++] = {0, pool};
+	while (depth > 0 && *runs < 4096)
+	{
+		const Range r = stack[--depth];
+		if (r.end - r.start < static_cast<int64_t>(PS5_KERNEL_DIRECT_ALIGNMENT))
+			continue;
+		int64_t start = 0;
+		size_t size = 0;
+		if (sceKernelAvailableDirectMemorySize(r.start, r.end, PS5_KERNEL_DIRECT_ALIGNMENT, &start, &size) != 0 || size == 0)
+			continue;
+		*total += size;
+		*largest = std::max<u64>(*largest, size);
+		(*runs)++;
+		if (depth + 2 <= static_cast<int>(std::size(stack)))
+		{
+			stack[depth++] = {r.start, start};
+			stack[depth++] = {start + static_cast<int64_t>(size), r.end};
+		}
+	}
 }
 
 u64 GetTickFrequency()
